@@ -60,9 +60,10 @@ export async function GET() {
     db.task.count({ where: { status: 'RUNNING' } }),
   ])
 
-  const [tasksTotal, tasksEvolution, tasksHuman] = await Promise.all([
+  const [tasksTotal, tasksEvolution, tasksLearning, tasksHuman] = await Promise.all([
     db.task.count(),
     db.task.count({ where: { source: 'evolution' } }),
+    db.task.count({ where: { source: 'learning' } }), // Task 28: לולאת-הלמידה — מוצא-עצמי שני
     db.task.count({ where: { source: null } }),
   ])
 
@@ -86,7 +87,12 @@ export async function GET() {
       },
     },
     queue: { queued: queueQueued, running: queueRunning },
-    tasks: { total: tasksTotal, fromEvolution: tasksEvolution, fromHuman: tasksHuman },
+    tasks: {
+      total: tasksTotal,
+      fromEvolution: tasksEvolution,
+      fromLearning: tasksLearning,
+      fromHuman: tasksHuman,
+    },
     workers,
   })
 }

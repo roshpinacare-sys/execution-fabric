@@ -42,6 +42,7 @@ import {
   ExternalLink,
   Sparkles,
   BarChart3,
+  GraduationCap,
 } from 'lucide-react'
 
 // ===== טיפוסים =====
@@ -130,6 +131,8 @@ interface EvolutionRecentDto {
   errorClass: string | null
   durationMs: number | null
   createdAt: string
+  source?: string | null
+  repo?: string | null
 }
 
 interface EvolutionDto {
@@ -153,7 +156,7 @@ interface MetricsDto {
     ladder: { firstTry: number; activations: number; activationRatePct: number }
   }
   queue: { queued: number; running: number }
-  tasks: { total: number; fromEvolution: number; fromHuman: number }
+  tasks: { total: number; fromEvolution: number; fromLearning: number; fromHuman: number }
   workers: { name: string; shots: number; avgMs: number }[]
 }
 
@@ -743,38 +746,54 @@ export default function Home() {
   }, [])
 
   // מחזור-הצעה ידני אחד (Task 26) — ירי-LLM אמיתי; 429 = תקציב-שעתי מוצה (כנות)
-  const triggerEvolution = useCallback(async () => {
-    setEvolving(true)
-    try {
-      const res = await fetch('/api/evolution', { method: 'POST' })
-      const j = await res.json()
-      if (res.status === 201 && j.ok) {
-        toast({
-          title: `הרשת הציעה לעצמה משימה (${j.proposal?.kind ?? '?'})`,
-          description: `${j.proposal?.title ?? ''} — שוגרה לתור, העובד-החי יקלוט אותה מיידית`,
+  // Task 28: mode — 'auto' (למידה-ראשונה-אם-יש-ממצא-HIGH, אחרת הצעה) או 'learn' (למידה בלבד)
+  const triggerEvolution = useCallback(
+    async (mode: 'auto' | 'learn' = 'auto') => {
+      setEvolving(true)
+      try {
+        const res = await fetch('/api/evolution', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode }),
         })
-      } else if (res.status === 429) {
-        toast({
-          title: 'תקציב-ההתפתחות השעתי מוצה',
-          description: String(j.error ?? ''),
-          variant: 'destructive',
-        })
-      } else {
-        toast({
-          title: 'מחזור-ההצעה נכשל בכנות',
-          description: `${j.errorClass ?? res.status}: ${j.error ?? ''}`.slice(0, 200),
-          variant: 'destructive',
-        })
+        const j = await res.json()
+        if (res.status === 201 && j.ok) {
+          const isLearn = j.mode === 'learn'
+          toast({
+            title: isLearn
+              ? 'לולאת-הלמידה הציעה משימת-המשך לממצא-HIGH'
+              : 'הרשת הציעה לעצמה משימה',
+            description: `${j.proposal?.kind ?? '?'} — ${j.proposal?.title ?? ''} — שוגרה לתור, העובד-החי יקלוט אותה מיידית`,
+          })
+        } else if (res.status === 429) {
+          toast({
+            title: 'תקציב-ההתפתחות השעתי מוצה',
+            description: String(j.error ?? ''),
+            variant: 'destructive',
+          })
+        } else if (res.status === 404 && j.errorClass === 'nothing-to-learn') {
+          toast({
+            title: 'אין מה ללמוד — כנות',
+            description: 'אין ממצאי-HIGH לא-מטופלים בביקורות האחרונות (48 שעות).',
+          })
+        } else {
+          toast({
+            title: 'מחזור-ההצעה נכשל בכנות',
+            description: `${j.errorClass ?? res.status}: ${j.error ?? ''}`.slice(0, 200),
+            variant: 'destructive',
+          })
+        }
+      } catch {
+        toast({ title: 'שגיאת-רשת במחזור-ההצעה', variant: 'destructive' })
+      } finally {
+        setEvolving(false)
+        loadEvolution()
+        loadTasks()
+        loadMetrics()
       }
-    } catch {
-      toast({ title: 'שגיאת-רשת במחזור-ההצעה', variant: 'destructive' })
-    } finally {
-      setEvolving(false)
-      loadEvolution()
-      loadTasks()
-      loadMetrics()
-    }
-  }, [toast, loadEvolution, loadTasks, loadMetrics])
+    },
+    [toast, loadEvolution, loadTasks, loadMetrics]
+  )
 
   useEffect(() => {
     loadTasks()
@@ -1292,7 +1311,7 @@ export default function Home() {
                         ['GET', '/api/batches/<id>', 'סקר-אצווה: משימות, ספירות, קבלה'],
                         ['GET', '/api/tasks/<id>', 'סקר-משימה בודדת'],
                         ['POST', '/api/tasks', 'שגירת משימה בודדת'],
-                        ['POST', '/api/evolution', 'מחזור-הצעה עצמי: הרשת מציעה לעצמה משימה (תקציב 3/שעה)'],
+                        ['POST', '/api/evolution', 'מחזור-עצמי (auto): למידה-מממצא-HIGH-פתוח או הצעה-עצמית · גוף-רשותי {"mode":"propose"|"learn"} · תקציב 6/שעה'],
                         ['GET', '/api/evolution', 'היסטוריית-ההצעות-העצמיות + תקציב'],
                         ['GET', '/api/metrics', 'מדדי-הרשת: אימות-שרשרת + פילוחי-יעילות'],
                         ['GET', '/api/ledger', 'שרשרת-האמת + אימות חי'],
@@ -1357,7 +1376,7 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                 התפתחות-עצמית
               </CardTitle>
               <CardDescription>
-                עורק-ג בלב: כל 20 דק' הרשת קוראת את מצב-האמת שלה (מטא-דאטה בלבד), מציעה משימה אחת קונקרטית בירי-LLM אמיתי ומשגרת אותה לתור — העובד-החי קולט ומבצע כרגיל. תקציב-כן: 3 הצעות/שעה.
+                עורק-ג בלב: כל 10 דק' הרשת קוראת את מצב-האמת שלה (מטא-דאטה בלבד) ומחליטה בעצמה — ממצא-HIGH לא-מטופל מביקורת-עצמית → לולאת-למידה (משימת-המשך קונקרטית); אחרת → הצעה-עצמית (יעד-ריפו רשותי עם אימות-חי). ירי-LLM אמיתי בכל מחזור. תקציב-כן: 6 בשעה.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -1381,7 +1400,7 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                   size="sm"
                   variant="outline"
                   className="ms-auto gap-1.5"
-                  onClick={triggerEvolution}
+                  onClick={() => triggerEvolution('auto')}
                   disabled={evolving}
                 >
                   {evolving ? (
@@ -1389,7 +1408,17 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                   ) : (
                     <Sparkles className="h-3.5 w-3.5" />
                   )}
-                  {evolving ? 'מציע…' : 'הצע עכשיו — מחזור אחד'}
+                  {evolving ? 'מציע…' : 'מחזור אחד (auto)'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  onClick={() => triggerEvolution('learn')}
+                  disabled={evolving}
+                >
+                  {evolving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <GraduationCap className="h-3.5 w-3.5" />}
+                  למידה מביקורת
                 </Button>
               </div>
               {!evolution && <Skeleton className="h-16 w-full" />}
@@ -1403,6 +1432,16 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                   {evolution.recent.map((r) => (
                     <div key={r.id} className="rounded-md border p-2 flex flex-wrap items-center gap-2">
                       <KindBadge kind={r.kind} />
+                      {r.source === 'learning' && (
+                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800">
+                          למידה
+                        </Badge>
+                      )}
+                      {r.repo && (
+                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 font-mono" dir="ltr">
+                          {r.repo}
+                        </Badge>
+                      )}
                       <span className="text-xs font-medium flex-1 min-w-40">{r.title}</span>
                       <StatusBadge status={r.status} />
                       {r.worker && (
@@ -1474,7 +1513,7 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                       <p className="text-[10px] text-muted-foreground">מוצא-משימות</p>
                       <p className="text-sm font-bold font-mono" dir="ltr">
                         <span className="text-emerald-600 dark:text-emerald-400">
-                          {metrics.tasks.fromEvolution}
+                          {metrics.tasks.fromEvolution + metrics.tasks.fromLearning}
                         </span>
                         <span className="text-[10px] text-muted-foreground">עצמי</span> · {metrics.tasks.fromHuman}
                       </p>

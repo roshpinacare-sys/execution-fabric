@@ -177,6 +177,28 @@ export class FabricClient {
   }
 
   /**
+   * לופ-ההתפתחות/הלמידה של הרשת (Task 28) — גם הארכיטקטורה והריבונות יכולות להפעיל אותו:
+   *  - 'auto' (ברירת-מחדל): הרשת מחליטה — ממצא-HIGH לא-מטופל → מחזור-למידה; אחרת → הצעה-עצמית.
+   *  - 'propose': הצעה-עצמית בלבד.
+   *  - 'learn': למידה בלבד — אין ממצא-HIGH פתוח = 404 {errorClass:'nothing-to-learn'} (כנות).
+   * כל מחזור = ירי-LLM אמיתי; תקציב-שעתי 6 (429 = מוצה). המשימה שנשגרת מבוצעת-ונחתמת בשרשרת.
+   */
+  async evolution(
+    mode: 'auto' | 'propose' | 'learn' = 'auto'
+  ): Promise<{ ok: true; mode: string; taskId: string; proposal: Record<string, unknown> }> {
+    return this.call('/api/evolution', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    })
+  }
+
+  /** היסטוריית-המחזורים-העצמיים + תקציב + ממצאי-HIGH פתוחים */
+  async evolutionStatus(): Promise<Record<string, unknown>> {
+    return this.call('/api/evolution')
+  }
+
+  /**
    * סקר-אצווה עד-סוף-חיים (כל-המשימות DONE/FAILED) — timeout כן שמעיד-אמת.
    * אין-הימור: אם-לא-הסתיים-בזמן — FabricTimeoutError, לעולם לא שקר-של-הצלחה.
    */
