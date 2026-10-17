@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// שינוי-כיוון (worklog Task 12): רשת-ביצוע חיה.
+// Task = משימת-פיתוח עם חוזה-תוצאה. LedgerEntry = רשומת-שרשרת אמת על כל מצב-סופי.
+
+model Task {
+  id         String   @id @default(cuid())
+  title      String
+  kind       String // CODE | AUDIT | PLAN
+  prompt     String
+  repo       String?  // יעד-ריפו אמיתי בארגון (worklog Task 19) — אימות-חי בשיגור, הקשר-חי בהרצה
+  status     String   @default("QUEUED") // QUEUED | RUNNING | DONE | FAILED
+  worker     String? // שם המועמד הנבחר או "exhausted"
+  output     String? // תוצר אמיתי (JSON) — נכתב רק אחרי ולידציה
+  error      String? // סיבת כשל כנה
+  errorClass String? // rate-limit | timeout | empty-output | duplicate | invalid | provider | network | unknown
+  attempts   Int      @default(0)
+  durationMs Int?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // צי-ביקורת מקבילי (worklog Task 15)
+  parentId String? // משימת-שורש של צי — לעדשות
+  lens     String? // עדשת-ביקורת (CORRECTNESS/SECURITY/PERFORMANCE/STYLE) — לעובדים
+  role     String? // null = משימה רגילה | "fleet-root" = משימת-שורש (מחזיקה את הסינתזה) | "worker" = עדשה
+
+  // אצווה מקבילית (worklog Task 24): כל-המשימות שנשלחו בשיגור-אצווה אחד חולקות batchId
+  batchId String?
+  @@index([batchId])
+
+  parent   Task?         @relation("FleetChildren", fields: [parentId], references: [id])
+  children Task[]        @relation("FleetChildren")
+  ledger   LedgerEntry[]
+
+  handoffs Handoff[]
+
+  @@index([parentId])
+}
+
+// שער-העברת-תוצרים לגיט (worklog Task 20): הרשת מבצעת, הגיט מקבל-תוצרים פסיבי.
+// כל-העברה דורשת אישור-מפורש פר-העברה (PROPOSED→APPROVED בכפתור-בעלים),
+// סריקת-סודות לפני-הצעה, ו-read-back (משיכת-התוכן חזרה + השוואת sha256) אחרי-PUT.
+model Handoff {
+  id           String   @id @default(cuid())
+  taskId       String // משימת-המקור — הארטיפקט = Task.output (או שדה-נבחר מתוכו)
+  repo         String // ריפו-יעד בארגון
+  path         String // נתיב-קובץ-יעד בריפו
+  branch       String? // ענף-יעד (רשותי — ברירת-מחדל: ענף-ראשי)
+  message      String // הודעת-קומיט — ייחוס כן
+  field        String? // שדה-אופציונלי מהתוצר (למשל "code") — אחרת מועבר התוצר כולו
+  status       String   @default("PROPOSED") // PROPOSED | APPROVED | DONE | FAILED
+  artifactHash String? // sha256 של הארטיפקט שישוגר — נאכף בביצוע (artifact-changed כן)
+  artifactSize Int?
+  commitSha    String? // הקומיט האמיתי בגיט אחרי-הצלחה
+  verified     Boolean? // read-back: התוכן שנשלף חזרה זהה בשרשרת? 
+  error        String?
+  errorClass   String?
+  attempts     Int      @default(0)
+  durationMs   Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  task Task @relation(fields: [taskId], references: [id])
+
+  @@index([taskId])
+}
+
+// מטא-דאטה בלבד — תוכן-פלט אף-פעם לא נשמר כאן, רק hash שלו (חוק fcc-llm-chain)
+model LedgerEntry {
+  id         Int      @id @default(autoincrement()) // seq של השרשרת
+  taskId     String?
+  kind       String // CODE | AUDIT | PLAN | DRILL | FLEET
+  status     String // DONE | FAILED
+  worker     String
+  attempts   Int      @default(0)
+  durationMs Int      @default(0)
+  errorClass String?
+  outputHash String // sha256(output) מקוצץ 32 — או sha256 של "" עבור כשל
+  prev       String // GENESIS | hash קודם
+  hash       String // sha256(JSON.stringify({...rec, prev})).slice(0,32)
+  // מקשר-ניווט בלבד (Task 24): מחוץ-ל-hash הקנוני — ה-hash הקנוני נשאר יציב לכל-השרשרת.
+  // קבלת-האצווה עצמה מכוסה-השלמות דרך outputHash (sha256 של סיכום-האצווה הקנוני).
+  batchId    String?
+  createdAt  DateTime @default(now())
+
+  task Task? @relation(fields: [taskId], references: [id])
+}
