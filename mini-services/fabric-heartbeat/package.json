@@ -1,0 +1,10 @@
+{
+  "name": "fabric-heartbeat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "רשת-הביצוע — עורק-החיים: לולאת-tick (ביצוע בלי דפדפן) + פעימת-גיט (הקיום-נשמר בגיט לפי RUNBOOK)",
+  "scripts": {
+    "dev": "bun --watch index.ts"
+  },
+  "type": "module"
+}
