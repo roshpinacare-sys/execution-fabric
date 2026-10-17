@@ -1353,6 +1353,160 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
           <Card>
             <CardHeader className="pb-4">
               <CardTitle className="text-base flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                התפתחות-עצמית
+              </CardTitle>
+              <CardDescription>
+                עורק-ג בלב: כל 20 דק' הרשת קוראת את מצב-האמת שלה (מטא-דאטה בלבד), מציעה משימה אחת קונקרטית בירי-LLM אמיתי ומשגרת אותה לתור — העובד-החי קולט ומבצע כרגיל. תקציב-כן: 3 הצעות/שעה.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="font-mono text-[10px]">
+                  תקציב: {evolution ? `${evolution.budget.used}/${evolution.budget.cap} בשעה` : '…'}
+                </Badge>
+                {evolution && (
+                  <Badge variant="outline" className="font-mono text-[10px]">
+                    {evolution.counts.total} הצעות ·{' '}
+                    <span className="text-emerald-600 dark:text-emerald-400">{evolution.counts.done}✓</span>
+                    {evolution.counts.failed > 0 && (
+                      <span className="text-rose-600 dark:text-rose-400"> · {evolution.counts.failed}✗</span>
+                    )}
+                    {evolution.counts.queued > 0 && (
+                      <span className="text-amber-600 dark:text-amber-400"> · {evolution.counts.queued}…</span>
+                    )}
+                  </Badge>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="ms-auto gap-1.5"
+                  onClick={triggerEvolution}
+                  disabled={evolving}
+                >
+                  {evolving ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                  {evolving ? 'מציע…' : 'הצע עכשיו — מחזור אחד'}
+                </Button>
+              </div>
+              {!evolution && <Skeleton className="h-16 w-full" />}
+              {evolution && evolution.recent.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  עדיין אין הצעות-עצמיות — פעימת-הלב הראשונה תגיע ~2 דק' אחרי-הזנקתו ואז כל 20 דק', או לחץ "הצע עכשיו".
+                </p>
+              )}
+              {evolution && evolution.recent.length > 0 && (
+                <div className="max-h-44 space-y-1.5 overflow-y-auto pe-1">
+                  {evolution.recent.map((r) => (
+                    <div key={r.id} className="rounded-md border p-2 flex flex-wrap items-center gap-2">
+                      <KindBadge kind={r.kind} />
+                      <span className="text-xs font-medium flex-1 min-w-40">{r.title}</span>
+                      <StatusBadge status={r.status} />
+                      {r.worker && (
+                        <span className="text-[10px] font-mono text-muted-foreground" dir="ltr">
+                          {r.worker}
+                        </span>
+                      )}
+                      {r.durationMs != null && r.status === 'DONE' && (
+                        <span className="text-[10px] font-mono text-muted-foreground" dir="ltr">
+                          {fmtMs(r.durationMs)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-base flex items-center gap-2">
+                <BarChart3 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                מדדי-הרשת — הרשת מדווחת על עצמה
+              </CardTitle>
+              <CardDescription>
+                כל מספר נגזר מהדאטה בזמן-בקשה (GET /api/metrics) — אימות-שרשרת fail-closed + פילוחי-יעילות אמת. אפס-השערות.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {!metrics && <Skeleton className="h-24 w-full" />}
+              {metrics && (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="rounded-md border p-2.5">
+                      <p className="text-[10px] text-muted-foreground">שרשרת</p>
+                      <p
+                        className={`text-sm font-bold font-mono ${
+                          metrics.ledger.verify.ok
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-rose-600 dark:text-rose-400'
+                        }`}
+                        dir="ltr"
+                      >
+                        {metrics.ledger.verify.ok
+                          ? `${metrics.ledger.verify.verified}/${metrics.ledger.total}`
+                          : `BROKEN@${metrics.ledger.verify.brokenAt}`}
+                      </p>
+                    </div>
+                    <div className="rounded-md border p-2.5">
+                      <p className="text-[10px] text-muted-foreground">ירי-ראשון-מצליח</p>
+                      <p className="text-sm font-bold font-mono" dir="ltr">
+                        <span className="text-emerald-600 dark:text-emerald-400">
+                          {metrics.ledger.ladder.firstTry}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {' '}
+                          · {metrics.ledger.ladder.activationRatePct}% סולם
+                        </span>
+                      </p>
+                    </div>
+                    <div className="rounded-md border p-2.5">
+                      <p className="text-[10px] text-muted-foreground">תור חי</p>
+                      <p className="text-sm font-bold font-mono" dir="ltr">
+                        {metrics.queue.queued}Q · {metrics.queue.running}R
+                      </p>
+                    </div>
+                    <div className="rounded-md border p-2.5">
+                      <p className="text-[10px] text-muted-foreground">מוצא-משימות</p>
+                      <p className="text-sm font-bold font-mono" dir="ltr">
+                        <span className="text-emerald-600 dark:text-emerald-400">
+                          {metrics.tasks.fromEvolution}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">עצמי</span> · {metrics.tasks.fromHuman}
+                      </p>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1.5">
+                      עובדים (יריות-שנות · ממוצע-ירי)
+                    </p>
+                    <div className="max-h-36 space-y-1 overflow-y-auto pe-1">
+                      {metrics.workers.map((w) => (
+                        <div key={w.name} className="flex items-center gap-2 text-[11px] font-mono" dir="ltr">
+                          <span className="w-44 truncate">{w.name}</span>
+                          <span className="text-muted-foreground">{w.shots} shots</span>
+                          <span className="ms-auto text-muted-foreground">{fmtMs(w.avgMs)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {Object.keys(metrics.ledger.errorClasses).length > 0 && (
+                    <p className="text-[10px] text-amber-600 dark:text-amber-400 font-mono break-all" dir="ltr">
+                      errorClasses: {JSON.stringify(metrics.ledger.errorClasses)}
+                    </p>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-base flex items-center gap-2">
                 <Users className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 צי-ביקורת מקבילי
               </CardTitle>

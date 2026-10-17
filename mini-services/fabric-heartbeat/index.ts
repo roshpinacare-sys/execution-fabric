@@ -9,6 +9,8 @@
 //   עורק-ג (Task 26): פעימת-התפתחות כל 20 דק' → POST /api/evolution — הרשת מציעה
 //            לעצמה משימה אחת קונקרטית (ירי-LLM אמיתי) ומשגרת אותה לתור —
 //            עורק-א קולט ומבצע כרגיל. תקציב-שעתי נאכף שרת-צד (429 = דילוג-כן).
+//   עורק-0 (Task 26): שומר-האפליקציה — בדיקת-בריאות כל 15 שניות; 3 כשלים-רצופים
+//            = הזנקת-האפליקציה מחדש מבן-עץ-הלב (העץ-המתמיד). הרשת מרפאת-את-עצמה.
 //
 // דיסציפלינה: אף סוד לא נוגע/נדפס כאן (ה-credential-helper קורא את קובץ-הסמכות
 // בזמן-ריצה); אין-force-push; כשל-סריקת-דליפות = אין-push (כנות); כל-כשל נרשם-וממשיך.
@@ -25,6 +27,8 @@ const GIT_PULSE_MS = 15 * 60_000
 const GIT_PULSE_FIRST_MS = 90_000
 const EVOLUTION_PULSE_MS = 20 * 60_000
 const EVOLUTION_PULSE_FIRST_MS = 120_000
+const APP_GUARD_MS = 15_000
+const APP_GUARD_FAILS_TO_RESTART = 3
 
 interface State {
   startedAt: string
@@ -42,6 +46,9 @@ interface State {
   evolutionQueued: number
   lastEvolutionAt: string | null
   lastEvolutionResult: string | null
+  appRestarts: number
+  lastAppGuardAt: string | null
+  lastAppGuardResult: string | null
 }
 
 const state: State = {
@@ -60,6 +67,9 @@ const state: State = {
   evolutionQueued: 0,
   lastEvolutionAt: null,
   lastEvolutionResult: null,
+  appRestarts: 0,
+  lastAppGuardAt: null,
+  lastAppGuardResult: null,
 }
 
 let lastTickAttemptMs = Date.now()
@@ -183,6 +193,53 @@ function gitPulse(): void {
   log(`פעימת-גיט: נדחף ✓ ${nFiles} קבצים (סה"כ דחיפות-אוטומטיות: ${state.gitPushes})`)
 }
 
+// ===== עורק-0: שומר-האפליקציה (Task 26) — הרשת מרפאת-את-עצמה =====
+let appGuardFails = 0
+let appGuardBusy = false
+
+async function appGuard(): Promise<void> {
+  if (appGuardBusy) return
+  appGuardBusy = true
+  state.lastAppGuardAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/health`, { signal: AbortSignal.timeout(5_000) })
+    if (res.ok) {
+      appGuardFails = 0
+      state.lastAppGuardResult = 'ok'
+      appGuardBusy = false
+      return
+    }
+    appGuardFails++
+  } catch {
+    appGuardFails++
+  }
+
+  if (appGuardFails >= APP_GUARD_FAILS_TO_RESTART) {
+    state.lastAppGuardResult = 'restarting app...'
+    log('שומר-האפליקציה: האפליקציה לא עונה — מזניק מחדש מבן-עץ-הלב')
+    try {
+      // ספון-בן-של-הלב: הלב חי-תחת-העץ-המתמיד של הפלטפורמה — ולכן הבן שורד גם-הוא.
+      // אם מופע-זומבי מחזיק את-הפורט — הספון ייפול EADDRINUSE בכנות והסבב-הבא ינסה שוב.
+      Bun.spawn(['bun', 'run', 'dev'], {
+        cwd: PROJECT_DIR,
+        stdin: 'ignore',
+        stdout: 'ignore',
+        stderr: 'ignore',
+      })
+      state.appRestarts++
+      state.lastAppGuardResult = `respawned (#${state.appRestarts}) — ממתין לבריאות`
+      log(`שומר-האפליקציה: הוזנק מופע-חדש (#${state.appRestarts})`)
+    } catch (e) {
+      state.lastAppGuardResult = `spawn failed: ${e instanceof Error ? e.message : String(e)}`
+      log(`שומר-האפליקציה: כשל-הזנקה כן — ${state.lastAppGuardResult}`)
+    }
+    appGuardFails = 0
+  } else {
+    state.lastAppGuardResult = `down (${appGuardFails}/${APP_GUARD_FAILS_TO_RESTART})`
+  }
+  appGuardBusy = false
+}
+
 // ===== עורק-ג: פעימת-התפתחות (Task 26) — הרשת מציעה לעצמה עבודה =====
 async function evolutionPulse(): Promise<void> {
   state.evolutionPulses++
@@ -246,5 +303,7 @@ setTimeout(() => gitPulse(), GIT_PULSE_FIRST_MS)
 setInterval(() => gitPulse(), GIT_PULSE_MS)
 setTimeout(() => void evolutionPulse(), EVOLUTION_PULSE_FIRST_MS)
 setInterval(() => void evolutionPulse(), EVOLUTION_PULSE_MS)
+setInterval(() => void appGuard(), APP_GUARD_MS)
 
 void tick() // פעימה-ראשונה מיידית
+void appGuard() // בדיקת-בריאות ראשונה מיידית
