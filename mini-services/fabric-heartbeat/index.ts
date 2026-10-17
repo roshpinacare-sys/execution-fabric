@@ -11,12 +11,17 @@
 //            עורק-א קולט ומבצע כרגיל. תקציב-שעתי נאכף שרת-צד (429 = דילוג-כן).
 //   עורק-0 (Task 26): שומר-האפליקציה — בדיקת-בריאות כל 15 שניות; 3 כשלים-רצופים
 //            = הזנקת-האפליקציה מחדש מבן-עץ-הלב (העץ-המתמיד). הרשת מרפאת-את-עצמה.
+//   עורק-ב שדרוג (Task 27): קונפליקט-db ב-pull-rebase — פתרון-עצמי מוכח-שרשרת:
+//            אם-db/custom.db בלבד-בקונפליקט והשרשרת-המקומית על-קבוצה של הרחוקה
+//            (ראש-הרחוק ∈ שרשרת-מקומית && ספירה-מקומית ≥ רחוקה) → קח-מקומי והמשך.
+//            אחרת — abort כנה. אף-פתרון-אוטומטי על קבצי-קוד — רק על ה-db עם-הוכחת-הכלה.
 //
 // דיסציפלינה: אף סוד לא נוגע/נדפס כאן (ה-credential-helper קורא את קובץ-הסמכות
 // בזמן-ריצה); אין-force-push; כשל-סריקת-דליפות = אין-push (כנות); כל-כשל נרשם-וממשיך.
 
-import { existsSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { Database } from 'bun:sqlite'
 
 const APP_URL = process.env.FABRIC_APP_URL ?? 'http://127.0.0.1:3000'
 const PORT = Number(process.env.FABRIC_HEARTBEAT_PORT ?? 3031)
@@ -40,6 +45,7 @@ interface State {
   lastTickError: string | null
   gitPulses: number
   gitPushes: number
+  dbConflictsResolved: number
   lastGitPulseAt: string | null
   lastGitPulseResult: string | null
   evolutionPulses: number
@@ -61,6 +67,7 @@ const state: State = {
   lastTickError: null,
   gitPulses: 0,
   gitPushes: 0,
+  dbConflictsResolved: 0,
   lastGitPulseAt: null,
   lastGitPulseResult: null,
   evolutionPulses: 0,
@@ -117,6 +124,51 @@ function git(args: string[]): { ok: boolean; out: string } {
   return { ok: p.exitCode === 0, out: `${p.stdout ?? ''}${p.exitCode === 0 ? '' : '\n' + (p.stderr ?? '')}` }
 }
 
+// ===== פתרון-קונפליקט-db עצמי (Task 27) — הוכחת-הכלה מהשרשרת, אפס-שערות =====
+
+// נתיבים-בקונפליקט (unmerged) בזמן-rebase. רשימה-ריקה = אין-קונפליקט-מסומן או-כשל-סטטוס.
+function unmergedPaths(): string[] {
+  const st = git(['status', '--porcelain'])
+  if (!st.ok) return ['__status_failed__']
+  return st.out
+    .split('\n')
+    .filter(Boolean)
+    .filter((l) => /^(UU|AA|DD|AU|UA|DU|UD)/.test(l))
+    .map((l) => l.slice(3).trim())
+}
+
+// האם-השרשרת-המקומית על-קבוצה של הרחוקה? ראש-origin/main חייב-להיות-בשרשרת-המקומית
+// (בדיוק-פעם-אחת) וספירה-מקומית ≥ רחוקה. כל-חריגה = false — abort כנה, אף-הימור.
+function ledgerSupersetOK(): boolean {
+  try {
+    const show = Bun.spawnSync(['git', 'show', 'origin/main:db/custom.db'], {
+      cwd: PROJECT_DIR,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    if (show.exitCode !== 0 || !show.stdout || show.stdout.length === 0) return false
+    const tmp = `${PROJECT_DIR}/.git/fabric-remote-db.tmp`
+    writeFileSync(tmp, show.stdout)
+    const local = new Database(`${PROJECT_DIR}/db/custom.db`, { readonly: true })
+    const remote = new Database(tmp, { readonly: true })
+    const rHead = remote.query('SELECT hash FROM LedgerEntry ORDER BY id DESC LIMIT 1').get() as
+      | { hash: string }
+      | null
+    const rCount = (remote.query('SELECT COUNT(*) AS c FROM LedgerEntry').get() as { c: number }).c
+    const lCount = (local.query('SELECT COUNT(*) AS c FROM LedgerEntry').get() as { c: number }).c
+    const headInLocal = rHead
+      ? (local
+          .query('SELECT COUNT(*) AS c FROM LedgerEntry WHERE hash = ?')
+          .get(rHead.hash) as { c: number }).c
+      : 0
+    local.close()
+    remote.close()
+    return !!rHead && headInLocal === 1 && lCount >= rCount
+  } catch {
+    return false
+  }
+}
+
 // ===== עורק-ב: פעימת-גיט (RUNBOOK: pull → עבודה → סריקה → commit → rebase → push) =====
 function gitPulse(): void {
   state.gitPulses++
@@ -168,13 +220,36 @@ function gitPulse(): void {
     }
   }
 
-  // pull-rebase אחרי-commit (העץ נקי עתה); קונפליקט = abort + כנות, הפעימה-הבאה תנסה
-  const pull = git(['pull', '--rebase', 'origin', 'main'])
+  // pull-rebase אחרי-commit (העץ נקי עתה); קונפליקט-db = פתרון-עצמי מוכח-שרשרת (Task 27)
+  let pull = git(['pull', '--rebase', 'origin', 'main'])
   if (!pull.ok) {
-    git(['rebase', '--abort'])
-    state.lastGitPulseResult = 'pull-rebase failed (conflict?) — abort + כנות, ינסה-שוב'
-    log('פעימת-גיט: pull-rebase נכשל — abort. הקומיט-המקומי נשמר, אין-push')
-    return
+    let rounds = 0
+    for (let i = 0; i < 5 && !pull.ok; i++) {
+      const unmerged = unmergedPaths()
+      if (unmerged.length === 0) break // אין-קונפליקט-מסומן — לא-ניחש
+      if (!unmerged.every((p) => p === 'db/custom.db')) break // קוד/worklog בקונפליקט — abort כנה
+      if (!ledgerSupersetOK()) break // הרחוק-מחזיק-מה-שאין-במקומי — אף-הימור, abort כנה
+      git(['checkout', '--theirs', 'db/custom.db'])
+      git(['add', 'db/custom.db'])
+      pull = git(['-c', 'core.editor=true', 'rebase', '--continue'])
+      if (!pull.ok && unmergedPaths().length === 0) {
+        // קומיט-שהתרוקן (נספג-כבר-ברחוק) — דילוג-כנה
+        pull = git(['rebase', '--skip'])
+      }
+      rounds++
+    }
+    if (!pull.ok) {
+      git(['rebase', '--abort'])
+      state.lastGitPulseResult = `pull-rebase conflict — auto-resolve ${rounds > 0 ? `(${rounds} db rounds, הוכח-שרשרת)` : 'לא-רלוונטי'} → abort כנה, ינסה-שוב`
+      log('פעימת-גיט: pull-rebase נכשל — abort כנה. הקומיט-המקומי נשמר, אין-push')
+      return
+    }
+    if (rounds > 0) {
+      state.dbConflictsResolved += rounds
+      log(
+        `פעימת-גיט: קונפליקט-db נפתר עצמית (${rounds} מחזורים) — שרשרת-מקומית הוכחה-על-קבוצה (סה"כ: ${state.dbConflictsResolved})`
+      )
+    }
   }
 
   if (!dirty) {
