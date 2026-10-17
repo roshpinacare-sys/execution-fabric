@@ -26,8 +26,28 @@
 | `GET /api/ledger` | השרשרת המלאה + אימות |
 | `GET /api/health` | דופק: `{ok,db,time}` |
 | `GET /api/drill` | בדיקת-חיות-סולם (ירי-אמת קטן) |
+| `GET /api/metrics` | מדדי-הרשת מהדאטה בלבד: אימות-שרשרת + פילוחי-יעילות |
+| `GET /api/providers` | מצב-סולם-הספקים (מטא-דאטה בלבד — אפס-סודות) |
+| `GET/POST /api/evolution` | לופ-ההתפתחות-העצמית: הרשת מציעה לעצמה משימות (תקציב-שעתי 3) |
 
 סוגי-משימה (`kind`): `CODE` / `AUDIT` / `PLAN` — כל אחד עם חוזה-JSON מאומת (zod).
+
+### לקוח-ייחוס לצרכנים (`integration/fabric-client.ts`)
+
+לקוח-אפס-תלות (fetch בלבד — bun/node/דפדפן) עם-טיפוסים מלאים, timeout-כן, ו-`waitForBatch`:
+
+```ts
+import { FabricClient, parseOutput } from './integration/fabric-client'
+const fabric = new FabricClient('http://127.0.0.1:3000')
+await fabric.health()
+const { batchId } = await fabric.dispatchBatch({ title: 'כותרת', kind: 'PLAN', prompt: '...', count: 3 })
+const done = await fabric.waitForBatch(batchId)          // סקר-עד-סוף-חיים (timeout = שקר-אסור)
+const out = parseOutput<{ steps: { title: string; detail: string }[] }>(done.tasks[0])
+const chain = await fabric.ledger()                       // { entries, verify: { ok, head, verified } }
+```
+
+חוזה-הפלט: `output` ב-`/api/tasks/:id` הוא **מחרוזת-JSON** לפי-חוזה-ה-kind —
+למשל PLAN: `{"steps":[{"title":string,"detail":string}]}` (3-12 שלבים).
 
 ## הרצה מאפס (סנדבוקס-חדש — 3 צעדים)
 
@@ -38,8 +58,10 @@ bun install && bun run db:push
 .zscripts/dev.sh    # Next + mini-services (fabric-heartbeat: לולאת-tick + פעימת-גיט)
 ```
 
-`fabric-heartbeat` מריץ שני עורקים: **tick כל 5 שניות** (קליטת-משימות-QUEUED בלי דפדפן) +
-**פעימת-גיט כל 15 דק'** (אם-יש-שינויים: leak-scan → commit → rebase → push — הקיום-נשמר-בגיט).
+`fabric-heartbeat` מריץ ארבעה עורקים: **tick כל 5 שניות** (קליטת-משימות-QUEUED בלי דפדפן) +
+**פעימת-גיט כל 15 דק'** (אם-יש-שינויים: leak-scan → commit → rebase → push — הקיום-נשמר-בגיט;
+קונפליקט-db נפתר-עצמית עם-הוכחת-הכלה מהשרשרת — Task 27) + **פעימת-התפתחות כל 20 דק'**
+(הרשת מציעה לעצמה עבודה — ירי-אמת, תקציב-כן) + **שומר-אפליקציה** (3 כשלים = הזנקה-עצמית).
 
 ## אחריות-טריטוריה
 

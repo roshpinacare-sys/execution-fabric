@@ -1299,7 +1299,7 @@ export default function Home() {
                         ['POST', '/api/drill', 'בדיקת-חיות מסילות-מוח'],
                       ] as const
                     ).map(([m, p, d]) => (
-                      <tr key={p} className="border-b last:border-b-0">
+                      <tr key={`${m} ${p}`} className="border-b last:border-b-0">
                         <td className={`px-2 py-1.5 font-bold ${m === 'GET' ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
                           {m}
                         </td>
