@@ -113,6 +113,7 @@ function gitPulse(): void {
     return
   }
   const dirty = status.out.trim().length > 0
+  const nFiles = status.out.trim().split('\n').length
 
   // אם-יש-שינויים: הצבה → חסם-הדליפות → commit מקומי (RUNBOOK: scan → commit → rebase → push)
   if (dirty) {
@@ -137,7 +138,6 @@ function gitPulse(): void {
       return
     }
 
-    const nFiles = status.out.trim().split('\n').length
     const commit = git(['commit', '-m', `fabric-heartbeat: auto-pulse — ${nFiles} changed files`])
     if (!commit.ok) {
       state.lastGitPulseResult = 'commit failed — כנות'
