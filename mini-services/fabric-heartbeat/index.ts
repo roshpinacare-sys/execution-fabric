@@ -1,11 +1,14 @@
-// fabric-heartbeat — עורק-החיים של רשת-הביצוע (Task 25)
+// fabric-heartbeat — עורק-החיים של רשת-הביצוע (Task 25 + Task 26)
 //
-// שני עורקים, שניהם עצמאיים-לגמרי בדפדפן:
+// שלושה עורקים, שלושתם עצמאיים-לגמרי בדפדפן:
 //   עורק-א: לולאת-tick כל 5 שניות → POST /api/worker/tick — הרשת קולטת-ומבצעת
 //            משימות-QUEUED לבד (claim אטומי הוא קו-ההגנה מול עובד-הדפדפן).
 //   עורק-ב: פעימת-גיט כל 15 דק' (וגם 90 שניות אחרי-הזנקה) — לפי RUNBOOK ריפו-האם:
 //            pull-rebase → אם-יש-שינויים → leak-scan (חסם-כנה) → commit → push.
 //            "הגיט-הוא-הקיום; הסנדבוקס-הוא-רק-זוג-ידיים."
+//   עורק-ג (Task 26): פעימת-התפתחות כל 20 דק' → POST /api/evolution — הרשת מציעה
+//            לעצמה משימה אחת קונקרטית (ירי-LLM אמיתי) ומשגרת אותה לתור —
+//            עורק-א קולט ומבצע כרגיל. תקציב-שעתי נאכף שרת-צד (429 = דילוג-כן).
 //
 // דיסציפלינה: אף סוד לא נוגע/נדפס כאן (ה-credential-helper קורא את קובץ-הסמכות
 // בזמן-ריצה); אין-force-push; כשל-סריקת-דליפות = אין-push (כנות); כל-כשל נרשם-וממשיך.
@@ -20,6 +23,8 @@ const PROJECT_DIR = process.env.FABRIC_PROJECT_DIR ?? path.resolve(import.meta.d
 const TICK_MS = 5_000
 const GIT_PULSE_MS = 15 * 60_000
 const GIT_PULSE_FIRST_MS = 90_000
+const EVOLUTION_PULSE_MS = 20 * 60_000
+const EVOLUTION_PULSE_FIRST_MS = 120_000
 
 interface State {
   startedAt: string
@@ -33,6 +38,10 @@ interface State {
   gitPushes: number
   lastGitPulseAt: string | null
   lastGitPulseResult: string | null
+  evolutionPulses: number
+  evolutionQueued: number
+  lastEvolutionAt: string | null
+  lastEvolutionResult: string | null
 }
 
 const state: State = {
@@ -47,6 +56,10 @@ const state: State = {
   gitPushes: 0,
   lastGitPulseAt: null,
   lastGitPulseResult: null,
+  evolutionPulses: 0,
+  evolutionQueued: 0,
+  lastEvolutionAt: null,
+  lastEvolutionResult: null,
 }
 
 let lastTickAttemptMs = Date.now()
@@ -170,6 +183,34 @@ function gitPulse(): void {
   log(`פעימת-גיט: נדחף ✓ ${nFiles} קבצים (סה"כ דחיפות-אוטומטיות: ${state.gitPushes})`)
 }
 
+// ===== עורק-ג: פעימת-התפתחות (Task 26) — הרשת מציעה לעצמה עבודה =====
+async function evolutionPulse(): Promise<void> {
+  state.evolutionPulses++
+  state.lastEvolutionAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/evolution`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(180_000), // הצעה = ירי-LLM אמיתי — נותנים-רשת
+    })
+    if (res.status === 201) {
+      const d = (await res.json()) as { taskId?: string; proposal?: { title?: string; kind?: string } }
+      state.evolutionQueued++
+      state.lastEvolutionResult = `queued: ${d.proposal?.kind ?? '?'} — ${d.proposal?.title ?? d.taskId ?? ''}`
+      log(`פעימת-התפתחות: הצעה-עצמית שוגרה לתור ✓ ${state.lastEvolutionResult}`)
+    } else if (res.status === 429) {
+      state.lastEvolutionResult = 'skipped: תקציב-שעתי מוצה (כנות)'
+      log('פעימת-התפתחות: תקציב-מוצה — דילוג-כן, הפעימה-הבאה תנסה')
+    } else {
+      const body = (await res.json().catch(() => ({}))) as { errorClass?: string; error?: string }
+      state.lastEvolutionResult = `failed: ${body.errorClass ?? `HTTP ${res.status}`}`
+      log(`פעימת-התפתחות: כשל-כן — ${state.lastEvolutionResult}`)
+    }
+  } catch (e) {
+    state.lastEvolutionResult = e instanceof Error ? e.message : String(e)
+    log(`פעימת-התפתחות: כשל-רשת — ${state.lastEvolutionResult}`)
+  }
+}
+
 // ===== שרת-דופק (תצפית) =====
 Bun.serve({
   port: PORT,
@@ -196,10 +237,14 @@ setInterval(() => {
   }
 }, 60_000)
 
-log(`fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', דופק על :${PORT}`)
+log(
+  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', דופק על :${PORT}`
+)
 
 setInterval(() => void tick(), TICK_MS)
 setTimeout(() => gitPulse(), GIT_PULSE_FIRST_MS)
 setInterval(() => gitPulse(), GIT_PULSE_MS)
+setTimeout(() => void evolutionPulse(), EVOLUTION_PULSE_FIRST_MS)
+setInterval(() => void evolutionPulse(), EVOLUTION_PULSE_MS)
 
 void tick() // פעימה-ראשונה מיידית

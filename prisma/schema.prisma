@@ -35,6 +35,10 @@ model Task {
   batchId String?
   @@index([batchId])
 
+  // מקור-המשימה (worklog Task 26): null = שיגור-אנושי | "evolution" = הצעה-עצמית של הרשת.
+  // מקשר-מוצא בלבד — מחוץ-ל-hash הקנוני של השרשרת (כמו batchId בלדג'ר).
+  source String?
+
   parent   Task?         @relation("FleetChildren", fields: [parentId], references: [id])
   children Task[]        @relation("FleetChildren")
   ledger   LedgerEntry[]

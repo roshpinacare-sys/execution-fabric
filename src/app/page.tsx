@@ -40,6 +40,8 @@ import {
   GitBranch,
   Upload,
   ExternalLink,
+  Sparkles,
+  BarChart3,
 } from 'lucide-react'
 
 // ===== טיפוסים =====
@@ -116,6 +118,43 @@ interface DrillRailResult {
   ok: boolean
   ms: number
   errorClass: string | null
+}
+
+// התפתחות-עצמית (Task 26)
+interface EvolutionRecentDto {
+  id: string
+  title: string
+  kind: TaskKind
+  status: TaskStatus
+  worker: string | null
+  errorClass: string | null
+  durationMs: number | null
+  createdAt: string
+}
+
+interface EvolutionDto {
+  ok: boolean
+  budget: { used: number; cap: number }
+  counts: { total: number; done: number; failed: number; queued: number }
+  recent: EvolutionRecentDto[]
+}
+
+interface MetricsDto {
+  ok: boolean
+  generatedAt: string
+  ledger: {
+    total: number
+    done: number
+    failed: number
+    verify: { ok: boolean; head: string; brokenAt: number | null; verified: number }
+    byKind: Record<string, number>
+    avgByKind: { kind: string; done: number; avgMs: number | null }[]
+    errorClasses: Record<string, number>
+    ladder: { firstTry: number; activations: number; activationRatePct: number }
+  }
+  queue: { queued: number; running: number }
+  tasks: { total: number; fromEvolution: number; fromHuman: number }
+  workers: { name: string; shots: number; avgMs: number }[]
 }
 
 interface HandoffDto {
@@ -580,6 +619,11 @@ export default function Home() {
   const [drilling, setDrilling] = useState(false)
   const [batches, setBatches] = useState<BatchDto[] | null>(null)
 
+  // התפתחות-עצמית + מדדי-הרשת (Task 26)
+  const [evolution, setEvolution] = useState<EvolutionDto | null>(null)
+  const [metrics, setMetrics] = useState<MetricsDto | null>(null)
+  const [evolving, setEvolving] = useState(false)
+
   // עובד-רקע (Task 23): ריצה-אוטומטית של משימות-QUEUED ברירת-מחדל דלוקה
   const [autoRun, setAutoRun] = useState(true)
   const [workerLoopAlive, setWorkerLoopAlive] = useState(false)
@@ -678,6 +722,60 @@ export default function Home() {
     }
   }, [])
 
+  const loadEvolution = useCallback(async () => {
+    try {
+      const res = await fetch('/api/evolution')
+      const j = await res.json()
+      if (j.ok) setEvolution(j)
+    } catch {
+      /* polling — שקט */
+    }
+  }, [])
+
+  const loadMetrics = useCallback(async () => {
+    try {
+      const res = await fetch('/api/metrics')
+      const j = await res.json()
+      if (j.ok) setMetrics(j)
+    } catch {
+      /* polling — שקט */
+    }
+  }, [])
+
+  // מחזור-הצעה ידני אחד (Task 26) — ירי-LLM אמיתי; 429 = תקציב-שעתי מוצה (כנות)
+  const triggerEvolution = useCallback(async () => {
+    setEvolving(true)
+    try {
+      const res = await fetch('/api/evolution', { method: 'POST' })
+      const j = await res.json()
+      if (res.status === 201 && j.ok) {
+        toast({
+          title: `הרשת הציעה לעצמה משימה (${j.proposal?.kind ?? '?'})`,
+          description: `${j.proposal?.title ?? ''} — שוגרה לתור, העובד-החי יקלוט אותה מיידית`,
+        })
+      } else if (res.status === 429) {
+        toast({
+          title: 'תקציב-ההתפתחות השעתי מוצה',
+          description: String(j.error ?? ''),
+          variant: 'destructive',
+        })
+      } else {
+        toast({
+          title: 'מחזור-ההצעה נכשל בכנות',
+          description: `${j.errorClass ?? res.status}: ${j.error ?? ''}`.slice(0, 200),
+          variant: 'destructive',
+        })
+      }
+    } catch {
+      toast({ title: 'שגיאת-רשת במחזור-ההצעה', variant: 'destructive' })
+    } finally {
+      setEvolving(false)
+      loadEvolution()
+      loadTasks()
+      loadMetrics()
+    }
+  }, [toast, loadEvolution, loadTasks, loadMetrics])
+
   useEffect(() => {
     loadTasks()
     loadLedger()
@@ -686,21 +784,25 @@ export default function Home() {
     loadKnownRepos()
     loadHandoffs()
     loadBatches()
+    loadEvolution()
+    loadMetrics()
     const iv = setInterval(() => {
       loadTasks()
       loadLedger()
       loadHandoffs()
       loadBatches()
+      loadEvolution()
     }, 4000)
     const ivh = setInterval(() => {
       loadHealth()
       loadRails()
+      loadMetrics()
     }, 15000)
     return () => {
       clearInterval(iv)
       clearInterval(ivh)
     }
-  }, [loadTasks, loadLedger, loadHealth, loadRails, loadKnownRepos, loadHandoffs, loadBatches])
+  }, [loadTasks, loadLedger, loadHealth, loadRails, loadKnownRepos, loadHandoffs, loadBatches, loadEvolution, loadMetrics])
 
   // לולאת-עובד-הרקע (Task 23): tick חי — משימת-QUEUED ותיקה אחת בכל-סבב, עד-סיומה.
   // אין-תור → המתנה-שקטה. משימות-FAILED לא נתפסות-שוב אוטומטית — ניסיון-חוזר הוא החלטה-אנושית.
@@ -1190,6 +1292,9 @@ export default function Home() {
                         ['GET', '/api/batches/<id>', 'סקר-אצווה: משימות, ספירות, קבלה'],
                         ['GET', '/api/tasks/<id>', 'סקר-משימה בודדת'],
                         ['POST', '/api/tasks', 'שגירת משימה בודדת'],
+                        ['POST', '/api/evolution', 'מחזור-הצעה עצמי: הרשת מציעה לעצמה משימה (תקציב 3/שעה)'],
+                        ['GET', '/api/evolution', 'היסטוריית-ההצעות-העצמיות + תקציב'],
+                        ['GET', '/api/metrics', 'מדדי-הרשת: אימות-שרשרת + פילוחי-יעילות'],
                         ['GET', '/api/ledger', 'שרשרת-האמת + אימות חי'],
                         ['POST', '/api/drill', 'בדיקת-חיות מסילות-מוח'],
                       ] as const
