@@ -383,6 +383,7 @@ export async function buildCensus(): Promise<Census> {
     { label: 'תפעול (DRILL/BATCH/FLEET)', kind: 'ops', value: opsCount, unit: 'רשומות-שרשרת', hint: 'בדיקות-חיות וציי-ביקורת' },
     { label: 'אספקה-לגיט (HANDOFF)', kind: 'delivery', value: deliveryCount, unit: 'רשומות-שרשרת', hint: 'פריסות-מאושרות-בעלים' },
     { label: 'מוצא-עצמי (evolution+learning)', kind: 'self-origin', value: selfOrigin, unit: 'משימות', hint: 'הרשת-מציעה-לעצמה-עבודה' },
+    { label: 'חדשנות-מוכחת (INNOVATION)', kind: 'self-origin', value: byKind.INNOVATION ?? 0, unit: 'רשומות-שרשרת', hint: 'מחזורי-מיטוב-עצמי עם מדידה והוכחת-שקילות חתומות (Task 60)' },
     { label: 'זיכרון-פתוח (ממצאי-HIGH)', kind: 'memory', value: highOpen?.length ?? 0, unit: 'ממצאים', hint: 'לולאת-הלמידה בעיכול' },
     { label: 'מסילות-גישה', kind: 'access', value: 1 + (railsReport().nvidia.present ? 1 : 0), unit: 'מסילות-פעילות', hint: 'zai תמיד; nvidia אם-מוגדר' },
   ]

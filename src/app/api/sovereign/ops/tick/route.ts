@@ -4,6 +4,7 @@ import { appendLedger, sha256Short } from '@/lib/ledger'
 import { extractArtifact } from '@/lib/handoff'
 import { reviewArtifact } from '@/lib/review-policy'
 import { evolutionBudgetUsed, EVOLUTION_BUDGET_PER_HOUR } from '@/lib/evolution'
+import { memoizedVerdict } from '@/lib/innovation'
 
 // טיק-ריבונות (Task 43 + Task 45): POST /api/sovereign/ops/tick
 // סריקה → פסק-דין (חוק review-policy) → פעולה אמיתית דרך השער הקיים
@@ -30,6 +31,7 @@ interface TickOutcome {
   status?: string
   commitSha?: string | null
   verified?: boolean | null
+  cached?: boolean // Task 60: פסק-דין מוניז (זהה לטיק הקודם) — הבעלים רואה מה חדש מול ידוע
 }
 
 export async function POST(req: NextRequest) {
@@ -49,7 +51,11 @@ export async function POST(req: NextRequest) {
   for (const h of proposed) {
     const task = await db.task.findUnique({ where: { id: h.taskId } })
     const code = extractArtifact(task?.output ?? '', h.field)
-    const v = reviewArtifact(code, h.artifactHash)
+    // Task 60 (מסילת-החדשנות): reviewArtifact דטרמיניסטי — מוניז לפי (handoffId+artifactHash)
+    // חוסך חישוב-חוזר על אותם-מועמדים ומפריד "חידוש" מ"ידוע" בדוח.
+    const v = memoizedVerdict(`${h.id}:${h.artifactHash ?? 'no-hash'}`, () =>
+      reviewArtifact(code, h.artifactHash)
+    )
 
     if (!v.deliverable) {
       outcomes.push({
@@ -58,6 +64,7 @@ export async function POST(req: NextRequest) {
         reasons: v.reasons,
         approved: false,
         executed: false,
+        cached: v.cached,
       })
       continue
     }
@@ -111,6 +118,10 @@ export async function POST(req: NextRequest) {
   const delivered = outcomes.filter((o) => o.executed).length
   const suspended = outcomes.filter((o) => o.verdict === 'SUSPENDED').length
   const skipped = outcomes.filter((o) => o.verdict === 'SKIP').length
+  const novelty = {
+    newVerdicts: outcomes.filter((o) => o.cached === false).length,
+    cachedVerdicts: outcomes.filter((o) => o.cached === true).length,
+  }
 
   const report = {
     at: new Date().toISOString(),
@@ -118,6 +129,7 @@ export async function POST(req: NextRequest) {
     delivered,
     suspended,
     skipped,
+    novelty, // Task 60: פסקי-דין חדשים מול מוניזים — הבזבוז-מדוד ונראה-לעין
     durationMs: Date.now() - t0,
     deliveryCap: MAX_DELIVERIES_PER_TICK,
     llmBudgetRemaining, // מידע-בלבד — לא מגביל מסירות (Task 45)
