@@ -647,3 +647,23 @@ Work Log:
 
 Stage Summary:
 - פרוטוקול-ההחייאה מוכח-חוזר: גיט-ראשון → השוואת-ליניאז' → דחיפה → סריקת-הצעות-שנולדו → הכרעה-אוטונומית → אימות-מלא. הרשת-שורדת-אתחולים-בלי-אובדן-ובלי-התערבות.
+
+---
+Task ID: 42
+Agent: Z.ai Code (main orchestrator)
+Task: תחייה שלישית אחרי אתחול-סנדבוקס ("מעולה תמשיך בצע וודא שלא נמחק לי הסנדבוקס אני רואה שהוא עלה מחדש")
+
+Work Log:
+- בדיקת-חיים: כל קבצי-מפתח שרדו (db/custom.db, worklog, heartbeat, page.tsx, MobileNav, sovereign/site) — האתחול לא מחה דבר
+- תהליכים שוחזרו-אוטומטית ע"י הסנדבוקס: next dev -p 3000 + fabric-heartbeat (bun --watch index.ts)
+- census: chain 194/194 verified (גדל 182→194 בזמן-השבתה — הלב המשיך לפעום), tasks 116 (113 DONE/3 FAILED/0 stuck), budget 10/12
+- git: מוזג/דחף 3766b3e (db + הצעת-אתר חדשה "מדדי בריאות רשת" מ-07:28) — 0/0 מסונכרן
+- סריקת-ביטחון על 3 PROPOSED: (1) cmvdi8a5o IDS חדש — hash-תואם + סריקה CLEAN + סקירת-קוד מלאה (middleware-IDS טהור, בלי shell/eval/exfiltration) → אושר ובוצע; (2) cmvdadfb (nughje2c) — execSync+curl+interpolation שוב → מושהה שוב; (3) cmvd9wil (gm9vx0id) — execSync+child_process+wget → מושהה שוב
+- ההעברה cmvdi8a5o → DONE: commitSha a4a7116 ב-saos-dex, read-back verified:true, attempts:1, 2.1s — 32 DONE סה"כ
+- ולידציה: drill אמיתי zai 286ms + nvidia 824ms; lint נקי; chain verified
+
+Stage Summary:
+- אתחול-סנדבוקס שלישי: אפס-אובדן, התאוששות-עצמית מלאה, הלב פעם בהשבתה והמשיך לבנות (12 רשומות-שרשרת חדשות)
+- build-loop הוכיח עצמו שוב: הצעה חדשה הוגשה (07:28) + handoff חדש נוצר (07:29) + נבדק/אושר/נמסר (07:40) — 11 דקות מלידה עד דחיפה ל-git אחר
+- סה"כ: 32 handoffs DONE / 34, 194 רשומות-שרשרת, 116 משימות
+- 2 מושהים נשארים מושהים (דפוסי-injection/imports-מתים) — הסף לא יורד גם כשהבעלים ישן
