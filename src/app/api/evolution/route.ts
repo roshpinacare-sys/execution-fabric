@@ -65,7 +65,10 @@ export async function POST(req: Request) {
         { status: 404 }
       )
     }
-    r = await proposeLearningTask(highs[0])
+    // Task 29 — סבב-ממצאים: highs[0] דטרמיניסטי גרם להיתקעות (אותו-ממצא → אותן-כותרות →
+    // דחיות-כפילות חוזרות). סבב-לפי-התקציב-שנוצל: כל-פעימה מקדמת-ממצא-אחר — עיכול-לרוחב,
+    // כל-הממצאים נחשפים ללולאה, ואף-ממצא לא נזנח (הסבב חוזר-מעגלית).
+    r = await proposeLearningTask(highs[used % highs.length])
   } else {
     r = await proposeAndQueueEvolutionTask()
   }

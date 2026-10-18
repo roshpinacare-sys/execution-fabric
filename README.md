@@ -28,7 +28,9 @@
 | `GET /api/drill` | בדיקת-חיות-סולם (ירי-אמת קטן) |
 | `GET /api/metrics` | מדדי-הרשת מהדאטה בלבד: אימות-שרשרת + פילוחי-יעילות |
 | `GET /api/providers` | מצב-סולם-הספקים (מטא-דאטה בלבד — אפס-סודות) |
-| `GET/POST /api/evolution` | לופ-ההתפתחות-העצמית + לולאת-הלמידה (Task 28): POST עם גוף-רשותי `{"mode":"auto"\|"propose"\|"learn"}` — auto = ממצא-HIGH לא-מטופל מביקורת-עצמית → למידה, אחרת הצעה-עצמית (יעד-ריפו רשותי עם אימות-חי); learn בלי-ממצאים = 404 כן. תקציב-שעתי 6 משותף |
+| `GET/POST /api/evolution` | לופ-ההתפתחות-העצמית + לולאת-הלמידה (Task 28): POST עם גוף-רשותי `{"mode":"auto"\|"propose"\|"learn"}` — auto = ממצא-HIGH לא-מטופל מביקורת-עצמית → למידה, אחרת הצעה-עצמית (יעד-ריפו רשותי עם אימות-חי); learn בלי-ממצאים = 404 כן. תקציב-שעתי 12 משותף (Task 29) |
+| `GET/POST /api/handoffs` | שער-ההעברה — פריסה-מאושרת-לגיט (Task 20 + 29): POST `{taskId,repo,path,message,branch?,field?}` → PROPOSED; **אישור-בעלים מחייב** (approve → execute → putContents + read-back אומת). תוצר-CODE של למידה/התפתחות-עם-יעד-ריפו נכנס אוטומטית (`auto:true` — קובץ-חדש-בלבד תחת `fabric/<taskId>/`) |
+| `GET /api/handoffs/:id` | סקר-העברה בודדת: מצב/commitSha/אימות (מטא-דאטה בלבד) |
 
 סוגי-משימה (`kind`): `CODE` / `AUDIT` / `PLAN` — כל אחד עם חוזה-JSON מאומת (zod).
 
@@ -44,6 +46,12 @@ const { batchId } = await fabric.dispatchBatch({ title: 'כותרת', kind: 'PLA
 const done = await fabric.waitForBatch(batchId)          // סקר-עד-סוף-חיים (timeout = שקר-אסור)
 const out = parseOutput<{ steps: { title: string; detail: string }[] }>(done.tasks[0])
 const chain = await fabric.ledger()                       // { entries, verify: { ok, head, verified } }
+// פריסה-מאושרת-לגיט (Task 29): הצעה לשער-ההעברה — אישור-הבעלים נשאר בידיים שלו
+const h = await fabric.proposeHandoff({
+  taskId: done.tasks[0].id, repo: 'sovereign-beacon',
+  path: 'fabric/module.ts', message: 'fabric: הצעת-מודול', field: 'code',
+})
+await fabric.handoffStatus(String(h.handoff.id))          // סקר-מצב (PROPOSED → APPROVED → DONE)
 ```
 
 חוזה-הפלט: `output` ב-`/api/tasks/:id` הוא **מחרוזת-JSON** לפי-חוזה-ה-kind —
