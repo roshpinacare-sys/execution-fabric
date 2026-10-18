@@ -19,7 +19,7 @@
 // דיסציפלינה: אף סוד לא נוגע/נדפס כאן (ה-credential-helper קורא את קובץ-הסמכות
 // בזמן-ריצה); אין-force-push; כשל-סריקת-דליפות = אין-push (כנות); כל-כשל נרשם-וממשיך.
 
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, writeFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { Database } from 'bun:sqlite'
 
@@ -55,6 +55,8 @@ interface State {
   appRestarts: number
   lastAppGuardAt: string | null
   lastAppGuardResult: string | null
+  dbFileReplaced: number
+  lastReconnectResult: string | null
 }
 
 const state: State = {
@@ -77,6 +79,8 @@ const state: State = {
   appRestarts: 0,
   lastAppGuardAt: null,
   lastAppGuardResult: null,
+  dbFileReplaced: 0,
+  lastReconnectResult: null,
 }
 
 let lastTickAttemptMs = Date.now()
@@ -170,6 +174,40 @@ function ledgerSupersetOK(): boolean {
 }
 
 // ===== עורק-ב: פעימת-גיט (RUNBOOK: pull → עבודה → סריקה → commit → rebase → push) =====
+// Task 28 (ריפוי-עצמי שכבת-האחסון): pull-rebase-שמביא-שינויים מחליף-את-קובץ-ה-db
+// (inode-חדש-תחת-האפליקציה) — בריכת-Prisma נשארת-על-הישן-וקוראת-מצב-מיושן-בשקט.
+// אחרי-כל-פעימה: השוואת-inode; החלפה-שזוהתה → חיבור-מחדש-מיידי-של-האפליקציה-לקובץ-האמת.
+function dbFileIno(): number | null {
+  try {
+    return statSync(`${PROJECT_DIR}/db/custom.db`).ino
+  } catch {
+    return null
+  }
+}
+
+async function gitPulseChecked(): Promise<void> {
+  const inoBefore = dbFileIno()
+  gitPulse()
+  const inoAfter = dbFileIno()
+  if (inoBefore !== null && inoAfter !== null && inoBefore !== inoAfter) {
+    state.dbFileReplaced++
+    log(`פעימת-גיט: קובץ-ה-db הוחלף (inode ${inoBefore}→${inoAfter}) — מחבר-מחדש-את-האפליקציה`)
+    try {
+      const res = await fetch(`${APP_URL}/api/admin/db-reconnect`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(15_000),
+      })
+      const d = (await res.json().catch(() => ({}))) as { ok?: boolean; ledgerCount?: number }
+      state.lastReconnectResult =
+        res.ok && d.ok ? `reconnected (ledger: ${d.ledgerCount ?? '?'})` : `failed: HTTP ${res.status}`
+      log(`חיבור-מחדש: ${state.lastReconnectResult}`)
+    } catch (e) {
+      state.lastReconnectResult = `error: ${e instanceof Error ? e.message : String(e)}`
+      log(`חיבור-מחדש: כשל-כן — ${state.lastReconnectResult}`)
+    }
+  }
+}
+
 function gitPulse(): void {
   state.gitPulses++
   state.lastGitPulseAt = new Date().toISOString()
@@ -374,8 +412,8 @@ log(
 )
 
 setInterval(() => void tick(), TICK_MS)
-setTimeout(() => gitPulse(), GIT_PULSE_FIRST_MS)
-setInterval(() => gitPulse(), GIT_PULSE_MS)
+setTimeout(() => void gitPulseChecked(), GIT_PULSE_FIRST_MS)
+setInterval(() => void gitPulseChecked(), GIT_PULSE_MS)
 setTimeout(() => void evolutionPulse(), EVOLUTION_PULSE_FIRST_MS)
 setInterval(() => void evolutionPulse(), EVOLUTION_PULSE_MS)
 setInterval(() => void appGuard(), APP_GUARD_MS)

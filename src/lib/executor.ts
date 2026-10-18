@@ -82,52 +82,74 @@ export async function executeTaskOnce(id: string): Promise<ExecuteResult> {
     context ? { context } : undefined
   )
 
+  // הקשחה (Task 28): פעימת-הגיט-האוטונומית נוגעת בקובץ-ה-db (commit/push/pull-rebase) —
+  // כתיבת-תוצאה יכולה-ליפול בחלון-חולף (readonly-רגעי / P2025 עקב-החלפת-inode תחת-הבריכה).
+  // הירי-כבר-שולם — בזבוז-שלו-על-כשל-כתיבה הוא טיפשות-תפעולית. ניסיון-חוזר אחד אחרי-2s.
+  // כשל-שני = זריקה-כנה → המשימה נשארת RUNNING-תקועה → ה-tick (Task 28) יתבוע-מחדש-תוך-10-דק'.
+  const writeResult = async (fn: () => Promise<void>): Promise<void> => {
+    try {
+      await fn()
+    } catch {
+      await new Promise((r) => setTimeout(r, 2_000))
+      await fn()
+    }
+  }
+
   if (result.ok) {
-    await db.task.update({
-      where: { id },
-      data: {
+    await writeResult(() =>
+      db.task.update({
+        where: { id },
+        data: {
+          status: 'DONE',
+          worker: result.worker,
+          output: JSON.stringify(result.output),
+          attempts: result.attempts,
+          durationMs: result.durationMs,
+          error: null,
+          errorClass: null,
+        },
+      })
+    )
+    // ה-append נבדל-מה-update — כשל-באחד-לא-מכפיל-את-השני (אין-רשומות-שרשרת-כפולות)
+    await writeResult(() =>
+      appendLedger({
+        taskId: id,
+        kind: task.kind,
         status: 'DONE',
         worker: result.worker,
-        output: JSON.stringify(result.output),
         attempts: result.attempts,
         durationMs: result.durationMs,
-        error: null,
         errorClass: null,
-      },
-    })
-    await appendLedger({
-      taskId: id,
-      kind: task.kind,
-      status: 'DONE',
-      worker: result.worker,
-      attempts: result.attempts,
-      durationMs: result.durationMs,
-      errorClass: null,
-      outputHash: result.outputHash,
-    })
+        outputHash: result.outputHash,
+      })
+    )
     return { claimed: true, executed: true, status: 'DONE' }
   }
 
-  await db.task.update({
-    where: { id },
-    data: {
+  await writeResult(() =>
+    db.task.update({
+      where: { id },
+      data: {
+        status: 'FAILED',
+        worker: 'exhausted',
+        error: result.error,
+        errorClass: result.errorClass,
+        attempts: result.attempts,
+        durationMs: result.durationMs,
+      },
+    })
+  )
+  await writeResult(() =>
+    appendLedger({
+      taskId: id,
+      kind: task.kind,
       status: 'FAILED',
       worker: 'exhausted',
-      error: result.error,
-      errorClass: result.errorClass,
       attempts: result.attempts,
       durationMs: result.durationMs,
-    },
-  })
-  await appendLedger({
-    taskId: id,
-    kind: task.kind,
-    status: 'FAILED',
-    worker: 'exhausted',
-    attempts: result.attempts,
-    durationMs: result.durationMs,
-    errorClass: result.errorClass,
-    outputHash: sha256Short(''),
-  })
+      errorClass: result.errorClass,
+      outputHash: sha256Short(''),
+    })
+  )
   return { claimed: true, executed: false, status: 'FAILED', errorClass: result.errorClass, error: result.error }
 }
