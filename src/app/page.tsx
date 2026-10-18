@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
+import { MobileNav } from '@/components/MobileNav'
 import {
   Network,
   Bot,
@@ -1606,10 +1607,10 @@ export default function Home() {
       </header>
 
       {/* תוכן */}
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 grid grid-cols-1 lg:grid-cols-5 gap-6">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 pb-24 lg:pb-6 grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* עמודת-צד: שיגור + שרשרת */}
         <div className="lg:col-span-2 space-y-6">
-          <Card>
+          <Card id="sec-dispatch" className="scroll-mt-20">
             <CardHeader className="pb-4">
               <CardTitle className="text-base flex items-center gap-2">
                 <Send className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
@@ -1882,7 +1883,7 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card id="sec-metrics" className="scroll-mt-20">
             <CardHeader className="pb-4">
               <CardTitle className="text-base flex items-center gap-2">
                 <BarChart3 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
@@ -2325,7 +2326,7 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card id="sec-chain" className="scroll-mt-20">
             <CardHeader className="pb-4">
               <CardTitle className="text-base flex items-center gap-2">
                 {ledger?.verify.ok === false ? (
@@ -2387,7 +2388,7 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
           </Card>
 
           {/* פקח-הריבונות (Task 30 — tobi/disktree): אינטליגנציה-קודם, אפס-מחיקה */}
-          <Card>
+          <Card id="sec-map" className="scroll-mt-20">
             <CardHeader className="pb-4">
               <CardTitle className="text-base flex items-center gap-2">
                 <Boxes className="h-4 w-4 text-violet-600 dark:text-violet-400" />
@@ -2508,15 +2509,26 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                     ) : (
                       <div className="max-h-56 space-y-1.5 overflow-y-auto">
                         {census.worthALook.map((f) => (
-                          <div key={f.id} className="rounded-md border p-2 text-xs" title={f.pointer ?? ''}>
-                            <div className="flex items-start justify-between gap-2">
-                              <span className="font-medium leading-snug">{f.title}</span>
-                              <Badge variant="outline" className={`shrink-0 text-[9px] ${SEVERITY_STYLES[f.severity] ?? SEVERITY_STYLES.info}`}>
-                                {f.severity === 'attention' ? 'דורש-הבטה' : f.severity === 'watch' ? 'שווה-עין' : 'מידע'}
-                              </Badge>
-                            </div>
-                            <p className="mt-0.5 text-[11px] text-muted-foreground">{f.detail}</p>
-                          </div>
+                          <details
+                            key={f.id}
+                            className="group rounded-md border p-2 text-xs open:bg-muted/30"
+                            title={f.pointer ?? ''}
+                          >
+                            <summary className="cursor-pointer list-none select-none">
+                              <div className="flex items-start justify-between gap-2">
+                                <span className="font-medium leading-snug">{f.title}</span>
+                                <Badge variant="outline" className={`shrink-0 text-[9px] ${SEVERITY_STYLES[f.severity] ?? SEVERITY_STYLES.info}`}>
+                                  {f.severity === 'attention' ? 'דורש-הבטה' : f.severity === 'watch' ? 'שווה-עין' : 'מידע'}
+                                </Badge>
+                              </div>
+                              <p className="mt-0.5 text-[11px] text-muted-foreground">{f.detail}</p>
+                              {f.pointer ? (
+                                <span className="mt-1 block text-[10px] text-muted-foreground/0 transition-colors group-open:text-emerald-600 dark:group-open:text-emerald-400" dir="ltr">
+                                  → {f.pointer}
+                                </span>
+                              ) : null}
+                            </summary>
+                          </details>
                         ))}
                       </div>
                     )}
@@ -2656,7 +2668,7 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
           </Card>
 
           {/* בית-התוכן (Task 39): התוכן שנולד בעורק-הבנייה — מוצג כמוצר באתר עצמו + הקראת-עברית (ירי-TTS אמיתי) */}
-          <Card>
+          <Card id="sec-content" className="scroll-mt-20">
             <CardHeader className="pb-4">
               <CardTitle className="text-base flex items-center gap-2">
                 <BookOpenText className="h-4 w-4 text-teal-600 dark:text-teal-400" />
@@ -2924,7 +2936,7 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
 
         {/* לוח-המשימות */}
         <div className="lg:col-span-3">
-          <Card className="h-full">
+          <Card id="sec-board" className="h-full scroll-mt-20">
             <CardHeader className="pb-4">
               <CardTitle className="text-base">לוח-הביצוע</CardTitle>
               <CardDescription>כל הרצה היא עבודה אמיתית של הרשת — או תוצר מאומת, או כשל כן.</CardDescription>
@@ -2968,12 +2980,15 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
       </main>
 
       {/* פוטר דביק */}
-      <footer className="mt-auto border-t bg-card pb-[env(safe-area-inset-bottom)]">
+      <footer className="mt-auto border-t bg-card pb-[calc(env(safe-area-inset-bottom)+56px)] lg:pb-[env(safe-area-inset-bottom)]">
         <div className="mx-auto max-w-6xl px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
           <span>רשת הביצוע — סולם-מועמדים כן (fcc-llm-chain) + שרשרת-אמת sha256 + אצוות מקביליות + שער-העברה עם read-back</span>
           <span dir="ltr">honest exhaustion · ok:false · אפס סימולציה</span>
         </div>
       </footer>
+
+      {/* ניווט-נייד תחתון (Task 40 — יישום הצעה id=9): מתחת-lg בלבד, הרחבה-אדיטיבית */}
+      <MobileNav />
     </div>
   )
 }
