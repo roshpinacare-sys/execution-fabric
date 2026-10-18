@@ -67,6 +67,7 @@ export async function GET() {
           'משטח-התפעול של האוטונומיה — כל-סוכן (ארכיטקטורה/הנדסה/ריבונות) מוזמן לקרוא ולפעול',
         snapshot: 'GET /api/sovereign/ops',
         autonomyTick: 'POST /api/sovereign/ops/tick',
+        selftest: 'POST /api/sovereign/ops/selftest',
         handoffApprove: 'POST /api/handoffs/{id}/approve',
         handoffExecute: 'POST /api/handoffs/{id}/execute',
         improvementApply: 'POST /api/sovereign/improvements/{id}/apply',

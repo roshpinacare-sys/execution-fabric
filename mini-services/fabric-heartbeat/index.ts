@@ -12,6 +12,9 @@
 //   עורק-ד (Task 32): פעימת-בנייה כל 10 דק' → POST /api/sovereign/build — הרשת לא רק בודקת:
 //            היא **בונה** את המוצר עצמו (תוכן/נתונים/הצעות — ארטיפקטים ב-sovereign/site/,
 //            נדחפים-לגיט ע"י עורק-ב). תקציב 6/שעה נאכף שרת-צד.
+//   עורק-ו (Task 44): פעימת-ריבונות כל 10 דק' → POST /api/sovereign/ops/tick — הלב לא רק מייצר:
+//            הוא **מסיים** — סריקה → פסק-דין (חוק review-policy) → מסירה אמיתית → חתימת-שרשרת.
+//            האוטונומיה מרוקנת את המלאי של עצמה (עד 22 פריטים תלויים יצאו מהתור לבד, לפי תקציב).
 //   עורק-0 (Task 26): שומר-האפליקציה — בדיקת-בריאות כל 15 שניות; 3 כשלים-רצופים
 //            = הזנקת-האפליקציה מחדש מבן-עץ-הלב (העץ-המתמיד). הרשת מרפאת-את-עצמה.
 //   עורק-ב שדרוג (Task 27): קונפליקט-db ב-pull-rebase — פתרון-עצמי מוכח-שרשרת:
@@ -37,6 +40,8 @@ const EVOLUTION_PULSE_MS = 5 * 60_000 // Task 29: 10→5 דק' — "טפל בפ�
 const EVOLUTION_PULSE_FIRST_MS = 120_000
 const BUILD_PULSE_MS = 10 * 60_000 // Task 32: עורק-הבנייה — 6 פעימות/שעה = התקציב השעתי בדיוק
 const BUILD_PULSE_FIRST_MS = 4 * 60_000
+const OPS_PULSE_MS = 10 * 60_000 // Task 44: עורק-הריבונות — הלב מריץ את הטיק העצמי ומרוקן מלאי
+const OPS_PULSE_FIRST_MS = 90_000
 const NARRATE_TIMEOUT_MS = 120_000 // Task 39: ירי-TTS אמיתי — מהיר, אך-נותנים-רשת
 const APP_GUARD_MS = 15_000
 const APP_GUARD_FAILS_TO_RESTART = 3
@@ -62,6 +67,10 @@ interface State {
   buildApplied: number
   lastBuildAt: string | null
   lastBuildResult: string | null
+  opsPulses: number
+  opsDelivered: number
+  lastOpsAt: string | null
+  lastOpsResult: string | null
   narrations: number
   narrationFails: number
   lastNarrationAt: string | null
@@ -94,6 +103,10 @@ const state: State = {
   buildApplied: 0,
   lastBuildAt: null,
   lastBuildResult: null,
+  opsPulses: 0,
+  opsDelivered: 0,
+  lastOpsAt: null,
+  lastOpsResult: null,
   narrations: 0,
   narrationFails: 0,
   lastNarrationAt: null,
@@ -464,6 +477,40 @@ async function narratePulse(improvementId: number): Promise<void> {
   }
 }
 
+// ===== עורק-ו: פעימת-ריבונות (Task 44) — הלב משתמש בכלי-האוטונומיה שלו עצמו =====
+// כל-10 דק': POST /api/sovereign/ops/tick — החוק (review-policy) קובע מי-עובר,
+// השער-הקיים מבצע (אפס-קיצורי-דרך), השרשרת חותמת. ההיפוך-ההיסטורי: עד-עכשיו
+// הלב ייצר עבודה והבעלים/המואצל סיים אותה — מעכשיו הלב גם מסיים אותה לבד.
+async function opsPulse(): Promise<void> {
+  state.opsPulses++
+  state.lastOpsAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/sovereign/ops/tick`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(300_000), // מסירה = PUT אמיתי לגיטאחר — נותנים-רשת
+    })
+    if (res.status === 200) {
+      const d = (await res.json()) as {
+        tick?: { scanned?: number; delivered?: number; suspended?: number; skipped?: number }
+      }
+      const t = d.tick ?? {}
+      if ((t.delivered ?? 0) > 0) {
+        state.opsDelivered += t.delivered ?? 0
+        log(
+          `פעימת-ריבונות: נמסרו ${t.delivered} ✓ (סה"כ נמסרו-עצמאית: ${state.opsDelivered}) — הושהו ${t.suspended ?? 0}, דולגו ${t.skipped ?? 0}`
+        )
+      }
+      state.lastOpsResult = `scanned ${t.scanned ?? 0} · delivered ${t.delivered ?? 0} · suspended ${t.suspended ?? 0} · skipped ${t.skipped ?? 0}`
+    } else {
+      state.lastOpsResult = `failed: HTTP ${res.status}`
+      log(`פעימת-ריבונות: כשל-כן — ${state.lastOpsResult}`)
+    }
+  } catch (e) {
+    state.lastOpsResult = e instanceof Error ? e.message : String(e)
+    log(`פעימת-ריבונות: כשל-רשת — ${state.lastOpsResult}`)
+  }
+}
+
 // ===== שרת-דופק (תצפית) =====
 Bun.serve({
   port: PORT,
@@ -491,7 +538,7 @@ setInterval(() => {
 }, 60_000)
 
 log(
-  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', דופק על :${PORT}`
+  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', דופק על :${PORT}`
 )
 
 setInterval(() => void tick(), TICK_MS)
@@ -501,6 +548,8 @@ setTimeout(() => void evolutionPulse(), EVOLUTION_PULSE_FIRST_MS)
 setInterval(() => void evolutionPulse(), EVOLUTION_PULSE_MS)
 setTimeout(() => void buildPulse(), BUILD_PULSE_FIRST_MS)
 setInterval(() => void buildPulse(), BUILD_PULSE_MS)
+setTimeout(() => void opsPulse(), OPS_PULSE_FIRST_MS)
+setInterval(() => void opsPulse(), OPS_PULSE_MS)
 setInterval(() => void appGuard(), APP_GUARD_MS)
 
 void tick() // פעימה-ראשונה מיידית

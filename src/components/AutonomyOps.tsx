@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Bot, Loader2, Play, Radar, ShieldAlert, ShieldCheck } from 'lucide-react'
+import { Bot, Loader2, Play, Radar, ShieldAlert, ShieldCheck, Stethoscope } from 'lucide-react'
 
 // לוח-תפעול-האוטונומיה (Task 43): הדף הוא משטח-תפעול, לא תצוגה.
 // כל-סוכן — וגם הבעלים — רואה כאן את אותן-החלטות ויכול להריץ את אותו-טיק:
@@ -61,8 +61,10 @@ function fmtAge(ms: number): string {
 export function AutonomyOps() {
   const [ops, setOps] = useState<OpsData | null>(null)
   const [ticking, setTicking] = useState(false)
+  const [selftesting, setSelftesting] = useState(false)
   const [tickResult, setTickResult] = useState<TickResult | null>(null)
   const [tickError, setTickError] = useState<string | null>(null)
+  const [selftestResult, setSelftestResult] = useState<string | null>(null)
 
   const loadOps = useCallback(async () => {
     try {
@@ -93,6 +95,28 @@ export function AutonomyOps() {
       setTickError('הטיק נכשל — ראה dev.log')
     } finally {
       setTicking(false)
+    }
+  }, [loadOps])
+
+  const runSelftest = useCallback(async () => {
+    setSelftesting(true)
+    setSelftestResult(null)
+    try {
+      const res = await fetch('/api/sovereign/ops/selftest', { method: 'POST' })
+      const j = (await res.json()) as {
+        ok: boolean
+        selftest?: { allOk: boolean; passed: number; tools: number; durationMs: number }
+      }
+      setSelftestResult(
+        j.ok && j.selftest
+          ? `${j.selftest.allOk ? '✓ כל-הכלים חיים' : '⚠ כשלים זוהו'} — ${j.selftest.passed}/${j.selftest.tools} עברו · ${j.selftest.durationMs}ms`
+          : 'selftest נכשל — ראה dev.log'
+      )
+      await loadOps()
+    } catch {
+      setSelftestResult('selftest נכשל — ראה dev.log')
+    } finally {
+      setSelftesting(false)
     }
   }, [loadOps])
 
@@ -199,6 +223,16 @@ export function AutonomyOps() {
               </div>
             )}
 
+            {/* selftest — בדיקת-סרט-כלים חיה */}
+            {selftestResult && (
+              <div className="rounded-md border border-cyan-500/30 bg-cyan-500/5 p-3 text-sm">
+                <div className="flex items-center gap-2 font-medium">
+                  <Stethoscope className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
+                  בדיקת-סרט-כלים: {selftestResult}
+                </div>
+              </div>
+            )}
+
             {/* היסטוריית-טיקים (שרשרת) */}
             {ops.ops.ticks.length > 0 && (
               <div className="space-y-1">
@@ -221,10 +255,22 @@ export function AutonomyOps() {
               <p dir="ltr" className="font-mono text-[10px] text-muted-foreground">
                 {ops.ops.reviewLaw}
               </p>
-              <Button onClick={runTick} disabled={ticking} size="sm" className="gap-1.5">
-                {ticking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-                הרץ טיק-ריבונות
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={runSelftest}
+                  disabled={selftesting}
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                >
+                  {selftesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Stethoscope className="h-3.5 w-3.5" />}
+                  בדיקת-סרט-כלים
+                </Button>
+                <Button onClick={runTick} disabled={ticking} size="sm" className="gap-1.5">
+                  {ticking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                  הרץ טיק-ריבונות
+                </Button>
+              </div>
             </div>
           </>
         )}
