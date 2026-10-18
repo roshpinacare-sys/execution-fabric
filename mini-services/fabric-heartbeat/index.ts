@@ -15,6 +15,9 @@
 //   עורק-ו (Task 44): פעימת-ריבונות כל 10 דק' → POST /api/sovereign/ops/tick — הלב לא רק מייצר:
 //            הוא **מסיים** — סריקה → פסק-דין (חוק review-policy) → מסירה אמיתית → חתימת-שרשרת.
 //            האוטונומיה מרוקנת את המלאי של עצמה (עד 22 פריטים תלויים יצאו מהתור לבד, לפי תקציב).
+//   עורק-ז (Task 45): פעימת-אמת-עצמית כל 30 דק' → POST /api/sovereign/ops/selftest — הלב לא רק
+//            משתמש בכלים: הוא **מוכיח** ברציפות שהוא יודע להשתמש בהם (8 כלים, קריאות-אמת),
+//            ומדווח כנות — כשל-כלי נראה מיידית, לא מתגלה רק כשמנסים להשתמש בו.
 //   עורק-0 (Task 26): שומר-האפליקציה — בדיקת-בריאות כל 15 שניות; 3 כשלים-רצופים
 //            = הזנקת-האפליקציה מחדש מבן-עץ-הלב (העץ-המתמיד). הרשת מרפאת-את-עצמה.
 //   עורק-ב שדרוג (Task 27): קונפליקט-db ב-pull-rebase — פתרון-עצמי מוכח-שרשרת:
@@ -42,6 +45,8 @@ const BUILD_PULSE_MS = 10 * 60_000 // Task 32: עורק-הבנייה — 6 פע�
 const BUILD_PULSE_FIRST_MS = 4 * 60_000
 const OPS_PULSE_MS = 10 * 60_000 // Task 44: עורק-הריבונות — הלב מריץ את הטיק העצמי ומרוקן מלאי
 const OPS_PULSE_FIRST_MS = 90_000
+const SELFTEST_PULSE_MS = 30 * 60_000 // Task 45: עורק-ז — הלב מוכיח את סרט-הכלים שלו ברציפות
+const SELFTEST_PULSE_FIRST_MS = 3 * 60_000
 const NARRATE_TIMEOUT_MS = 120_000 // Task 39: ירי-TTS אמיתי — מהיר, אך-נותנים-רשת
 const APP_GUARD_MS = 15_000
 const APP_GUARD_FAILS_TO_RESTART = 3
@@ -71,6 +76,11 @@ interface State {
   opsDelivered: number
   lastOpsAt: string | null
   lastOpsResult: string | null
+  selftestPulses: number
+  selftestPasses: number
+  selftestFails: number
+  lastSelftestAt: string | null
+  lastSelftestResult: string | null
   narrations: number
   narrationFails: number
   lastNarrationAt: string | null
@@ -107,6 +117,11 @@ const state: State = {
   opsDelivered: 0,
   lastOpsAt: null,
   lastOpsResult: null,
+  selftestPulses: 0,
+  selftestPasses: 0,
+  selftestFails: 0,
+  lastSelftestAt: null,
+  lastSelftestResult: null,
   narrations: 0,
   narrationFails: 0,
   lastNarrationAt: null,
@@ -511,6 +526,47 @@ async function opsPulse(): Promise<void> {
   }
 }
 
+// ===== עורק-ז: פעימת-אמת-עצמית (Task 45) — "האוטונומיה יודעת להשתמש בכלים" כהוכחה-רציפה =====
+// כל-30 דק': POST /api/sovereign/ops/selftest — הלב מריץ את כל-הכלים שלו בקריאות-אמת
+// (health/census/ops/improvements/db-reconnect/worker-tick/autonomy-tick/drill)
+// ומדווח בכנות. כשל-כלי לא מוסתר — הוא בדיוק-מה שהפעימה נועדה לגלות מוקדם.
+async function selftestPulse(): Promise<void> {
+  state.selftestPulses++
+  state.lastSelftestAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/sovereign/ops/selftest`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(120_000), // selftest כולל drill — נותנים-רשת
+    })
+    if (res.status === 200) {
+      const d = (await res.json()) as {
+        selftest?: { allOk?: boolean; tools?: number; passed?: number; failures?: { tool: string; detail: string }[] }
+      }
+      const s = d.selftest ?? {}
+      const passed = s.passed ?? 0
+      const tools = s.tools ?? 0
+      if (s.allOk) {
+        state.selftestPasses++
+        state.lastSelftestResult = `${passed}/${tools} tools live — all ok`
+        log(`פעימת-אמת-עצמית: כל-הכלים חיים ✓ ${passed}/${tools} (סה"כ עברו: ${state.selftestPasses})`)
+      } else {
+        state.selftestFails++
+        const fails = (s.failures ?? []).map((f) => `${f.tool}: ${f.detail}`).join(' | ')
+        state.lastSelftestResult = `${passed}/${tools} tools live — כשלים-כנים: ${fails}`
+        log(`פעימת-אמת-עצמית: כשל-כן — ${state.lastSelftestResult}`)
+      }
+    } else {
+      state.selftestFails++
+      state.lastSelftestResult = `failed: HTTP ${res.status}`
+      log(`פעימת-אמת-עצמית: כשל-כן — ${state.lastSelftestResult}`)
+    }
+  } catch (e) {
+    state.selftestFails++
+    state.lastSelftestResult = e instanceof Error ? e.message : String(e)
+    log(`פעימת-אמת-עצמית: כשל-רשת — ${state.lastSelftestResult}`)
+  }
+}
+
 // ===== שרת-דופק (תצפית) =====
 Bun.serve({
   port: PORT,
@@ -538,7 +594,7 @@ setInterval(() => {
 }, 60_000)
 
 log(
-  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', דופק על :${PORT}`
+  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', פעימת-אמת-עצמית כל ${SELFTEST_PULSE_MS / 60_000} דק', דופק על :${PORT}`
 )
 
 setInterval(() => void tick(), TICK_MS)
@@ -550,6 +606,8 @@ setTimeout(() => void buildPulse(), BUILD_PULSE_FIRST_MS)
 setInterval(() => void buildPulse(), BUILD_PULSE_MS)
 setTimeout(() => void opsPulse(), OPS_PULSE_FIRST_MS)
 setInterval(() => void opsPulse(), OPS_PULSE_MS)
+setTimeout(() => void selftestPulse(), SELFTEST_PULSE_FIRST_MS)
+setInterval(() => void selftestPulse(), SELFTEST_PULSE_MS)
 setInterval(() => void appGuard(), APP_GUARD_MS)
 
 void tick() // פעימה-ראשונה מיידית

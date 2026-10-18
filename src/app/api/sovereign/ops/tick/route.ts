@@ -5,10 +5,19 @@ import { extractArtifact } from '@/lib/handoff'
 import { reviewArtifact } from '@/lib/review-policy'
 import { evolutionBudgetUsed, EVOLUTION_BUDGET_PER_HOUR } from '@/lib/evolution'
 
-// טיק-ריבונות (Task 43): POST /api/sovereign/ops/tick
+// טיק-ריבונות (Task 43 + Task 45): POST /api/sovereign/ops/tick
 // סריקה → פסק-דין (חוק review-policy) → פעולה אמיתית דרך השער הקיים
 // (approve+execute עם כל-השערים שלהם: סריקת-סודות, אכיפת-hash, נתיבים-חדשים-בלבד,
 // read-back) → חתימת-שרשרת AUDIT. הסף-לא-יורד-גם-כשהבעלים-ישן.
+//
+// לקח-Task 45: מסירה היא פעולת-גיט טהורה (approve→execute→PUT→read-back) —
+// היא צורכת אפס תקציב-LLM. מגן-התקציב-הישן (שנגרר אחרי evolutionBudgetUsed)
+// חסם-בפועל ניקוז-מלאי בשעות-שהתקציב-השעתי-מוצה — תיקון: מכסת-מסירות-לטיק
+// עצמאית (קצב, לא תלות-בתקציב-אחר). תקציב-ה-LLM נשאר-מדווח-למעלה כמידע בלבד.
+
+// קצב-מסירות-לטיק: 6 לטיק × 6 טיקים/שעה (עורק-ו כל 10 דק') = עד 36 מסירות-שעה
+// — מנקז מלאי-אמת בקצב-מרוסן, בלי להציף את שער-הגיט.
+export const MAX_DELIVERIES_PER_TICK = 6
 
 export const dynamic = 'force-dynamic'
 
@@ -31,7 +40,8 @@ export async function POST(req: NextRequest) {
     db.handoff.findMany({ where: { status: 'PROPOSED' }, orderBy: { createdAt: 'asc' } }),
     evolutionBudgetUsed(),
   ])
-  const remaining = Math.max(0, EVOLUTION_BUDGET_PER_HOUR - budgetUsed)
+  // מידע-בלבד (המסירות לא צורכות תקציב-זה) — נדווח בשקיפות מלאה
+  const llmBudgetRemaining = Math.max(0, EVOLUTION_BUDGET_PER_HOUR - budgetUsed)
 
   const outcomes: TickOutcome[] = []
   let deliverableSeen = 0
@@ -52,12 +62,13 @@ export async function POST(req: NextRequest) {
       continue
     }
 
-    // הסף-תקציב: אל-תרוקן את תקציב-ההתפתחות — השאר לפחות 1 ל-drill/חירום
-    if (remaining - deliverableSeen <= 1) {
+    // מכסת-מסירות-לטיק (Task 45): קצב-עצמי, לא תלות בתקציב-LLM שלא נצרך.
+    // העודף לא נעלם — הוא מקבל SKIP עם סיבה-כנה וימסר בטיק-הבא (עורק-ו כל 10 דק').
+    if (deliverableSeen >= MAX_DELIVERIES_PER_TICK) {
       outcomes.push({
         id: h.id,
         verdict: 'SKIP',
-        reasons: ['budget-guard'],
+        reasons: [`delivery-cap:${MAX_DELIVERIES_PER_TICK}-per-tick`],
         approved: false,
         executed: false,
       })
@@ -108,7 +119,8 @@ export async function POST(req: NextRequest) {
     suspended,
     skipped,
     durationMs: Date.now() - t0,
-    budgetRemaining: remaining - delivered,
+    deliveryCap: MAX_DELIVERIES_PER_TICK,
+    llmBudgetRemaining, // מידע-בלבד — לא מגביל מסירות (Task 45)
   }
 
   // חתימת-שרשרת על הטיק עצמו — ההחלטות נשמרות לנצח (אפס-מחיקה)
