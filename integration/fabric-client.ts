@@ -181,7 +181,7 @@ export class FabricClient {
    *  - 'auto' (ברירת-מחדל): הרשת מחליטה — ממצא-HIGH לא-מטופל → מחזור-למידה; אחרת → הצעה-עצמית.
    *  - 'propose': הצעה-עצמית בלבד.
    *  - 'learn': למידה בלבד — אין ממצא-HIGH פתוח = 404 {errorClass:'nothing-to-learn'} (כנות).
-   * כל מחזור = ירי-LLM אמיתי; תקציב-שעתי 6 (429 = מוצה). המשימה שנשגרת מבוצעת-ונחתמת בשרשרת.
+   * כל מחזור = ירי-LLM אמיתי; תקציב-שעתי 12 (429 = מוצה; Task 29). המשימה שנשגרת מבוצעת-ונחתמת בשרשרת.
    */
   async evolution(
     mode: 'auto' | 'propose' | 'learn' = 'auto'
@@ -196,6 +196,33 @@ export class FabricClient {
   /** היסטוריית-המחזורים-העצמיים + תקציב + ממצאי-HIGH פתוחים */
   async evolutionStatus(): Promise<Record<string, unknown>> {
     return this.call('/api/evolution')
+  }
+
+  /**
+   * שער-ההעברה (Task 20 + Task 29) — פריסה-מאושרת-לגיט:
+   * הארכיטקטורה/הריבונות שוגרות משימה (dispatchTask/waitForBatch), ממתינות ל-DONE,
+   * ומציעות את התוצר לפריסה לריפו-יעד. ההצעה נולדת PROPOSED — אישור-בעלים מחייב
+   * (approve → execute → putContents + read-back-אומת). תוצר-CODE של למידה/התפתחות
+   * עם יעד-ריפו נכנס לשער אוטומטית (auto=true).
+   */
+  async proposeHandoff(
+    input: { taskId: string; repo: string; path: string; message: string; branch?: string; field?: string }
+  ): Promise<{ ok: true; handoff: Record<string, unknown>; org: string }> {
+    return this.call('/api/handoffs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    })
+  }
+
+  /** רשימת-ההצעות-והקבלות של שער-ההעברה (20 אחרונות) */
+  async handoffs(): Promise<{ ok: true; handoffs: Record<string, unknown>[] }> {
+    return this.call('/api/handoffs')
+  }
+
+  /** סקר-הצעת-העברה בודדת (מצב/קומיט/אימות) */
+  async handoffStatus(id: string): Promise<{ ok: true; handoff: Record<string, unknown> }> {
+    return this.call(`/api/handoffs/${encodeURIComponent(id)}`)
   }
 
   /**

@@ -68,6 +68,7 @@ model Handoff {
   errorClass   String?
   attempts     Int      @default(0)
   durationMs   Int?
+  auto         Boolean  @default(false) // Task 29: הוצעה-אוטומטית ע"י לולאת-הלמידה (האישור נשאר של-הבעלים)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

@@ -13,8 +13,9 @@ import { KNOWN_REPOS, verifyRepo, ghErrorClass, ghErrorMessage } from '@/lib/git
 // אין סימולציה, והגנת-כפילות: כותרת-זהה למשימה מ-24h אחרונות נפסלת בדיוק כמו
 // מועמד-כפול בסולם (duplicate).
 
-// Task 28 (הוראת-בעלים "צריך יותר גבוה"): תקציב 3→6/שעה + פעימת-לב 10 דק' — עד 6 מחזורים-עצמיים/שעה.
-export const EVOLUTION_BUDGET_PER_HOUR = 6
+// Task 28 (הוראת-בעלים "צריך יותר גבוה"): תקציב 3→6/שעה + פעימת-לב 10 דק'.
+// Task 29 ("טפל בפתוחים בצורה הטובה ביותר"): תקציב 6→12/שעה + פעימת-לב 5 דק' — 12 פעימות/שעה, התקציב קושר בדיוק.
+export const EVOLUTION_BUDGET_PER_HOUR = 12
 
 export const evolutionProposalSchema = z.object({
   kind: z.enum(['CODE', 'AUDIT', 'PLAN']),

@@ -177,6 +177,7 @@ interface HandoffDto {
   errorClass: string | null
   attempts: number
   durationMs: number | null
+  auto: boolean
   createdAt: string
   task: { title: string; kind: TaskKind; repo: string | null }
 }
@@ -1311,8 +1312,10 @@ export default function Home() {
                         ['GET', '/api/batches/<id>', 'סקר-אצווה: משימות, ספירות, קבלה'],
                         ['GET', '/api/tasks/<id>', 'סקר-משימה בודדת'],
                         ['POST', '/api/tasks', 'שגירת משימה בודדת'],
-                        ['POST', '/api/evolution', 'מחזור-עצמי (auto): למידה-מממצא-HIGH-פתוח או הצעה-עצמית · גוף-רשותי {"mode":"propose"|"learn"} · תקציב 6/שעה'],
+                        ['POST', '/api/evolution', 'מחזור-עצמי (auto): למידה-מממצא-HIGH-פתוח או הצעה-עצמית · גוף-רשותי {"mode":"propose"|"learn"} · תקציב 12/שעה'],
                         ['GET', '/api/evolution', 'היסטוריית-ההצעות-העצמיות + תקציב'],
+                        ['POST', '/api/handoffs', 'שער-ההעברה: הצעת-פריסה לגיט (PROPOSED) · תוצר-CODE של הלמידה נכנס אוטומטית · אישור-בעלים מחייב'],
+                        ['POST', '/api/handoffs/<id>/approve·execute', 'אישור-בעלים ואז ביצוע: putContents + read-back-אומת בשרשרת'],
                         ['GET', '/api/metrics', 'מדדי-הרשת: אימות-שרשרת + פילוחי-יעילות'],
                         ['GET', '/api/ledger', 'שרשרת-האמת + אימות חי'],
                         ['POST', '/api/drill', 'בדיקת-חיות מסילות-מוח'],
@@ -1376,7 +1379,7 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                 התפתחות-עצמית
               </CardTitle>
               <CardDescription>
-                עורק-ג בלב: כל 10 דק' הרשת קוראת את מצב-האמת שלה (מטא-דאטה בלבד) ומחליטה בעצמה — ממצא-HIGH לא-מטופל מביקורת-עצמית → לולאת-למידה (משימת-המשך קונקרטית); אחרת → הצעה-עצמית (יעד-ריפו רשותי עם אימות-חי). ירי-LLM אמיתי בכל מחזור. תקציב-כן: 6 בשעה.
+                עורק-ג בלב: כל 5 דק' הרשת קוראת את מצב-האמת שלה (מטא-דאטה בלבד) ומחליטה בעצמה — ממצא-HIGH לא-מטופל מביקורת-עצמית → לולאת-למידה (משימת-המשך קונקרטית); אחרת → הצעה-עצמית (יעד-ריפו רשותי עם אימות-חי). ירי-LLM אמיתי בכל מחזור. תקציב-כן: 12 בשעה. תוצר-CODE של מחזור-למידה-עם-יעד-ריפו נכנס אוטומטית לשער-ההעברה כהצעה ממתינה-לאישורך.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -1722,6 +1725,15 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                           {h.field && (
                             <Badge variant="outline" dir="ltr" className="font-mono text-[10px]">
                               field: {h.field}
+                            </Badge>
+                          )}
+                          {h.auto && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] border-primary/30 bg-primary/10 text-primary"
+                            >
+                              <Sparkles className="h-2.5 w-2.5" />
+                              הצעת-למידה אוטומטית
                             </Badge>
                           )}
                           <span className="text-[10px] text-muted-foreground ms-auto">{fmtTime(h.createdAt)}</span>

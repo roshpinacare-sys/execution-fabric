@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { appendLedger, sha256Short } from '@/lib/ledger'
 import { runTaskChain, type TaskKind } from '@/lib/llm-chain'
 import { buildRepoContext, renderRepoContext, ghErrorClass, ghErrorMessage } from '@/lib/github'
+import { autoProposeHandoffForTask } from '@/lib/autohandoff'
 
 // המבצע-האמיתי (Task 23 — ריפקטור מ-run-route לשימוש-משותף):
 // claim אטומי RUNNING → (יעד-ריפו? הקשר-חי מ-GitHub) → סולם-מועמדים חי
@@ -123,7 +124,18 @@ export async function executeTaskOnce(id: string): Promise<ExecuteResult> {
         outputHash: result.outputHash,
       })
     )
-    return { claimed: true, executed: true, status: 'DONE' }
+    // Task 29 — החוליה-החסרה: למידה/התפתחות CODE-DONE-עם-יעד-ריפו → הצעת-העברה-אוטומטית
+    // לשער (PROPOSED). כשל-הצעה לא מפיל ביצוע — התוצאה החתומה בשרשרת קודמת; הכנות ב-note.
+    let autoHandoffNote: string | undefined
+    try {
+      const hp = await autoProposeHandoffForTask(id)
+      autoHandoffNote = hp.proposed
+        ? `auto-handoff: PROPOSED → ${hp.path}`
+        : `auto-handoff: skipped (${hp.reason ?? 'unknown'})`
+    } catch {
+      autoHandoffNote = 'auto-handoff: skipped (exception)'
+    }
+    return { claimed: true, executed: true, status: 'DONE', note: autoHandoffNote }
   }
 
   await writeResult(() =>
