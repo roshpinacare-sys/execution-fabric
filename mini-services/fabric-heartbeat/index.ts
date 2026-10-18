@@ -9,6 +9,9 @@
 //   עורק-ג (Task 26 + Task 28 + Task 29): פעימת-התפתחות כל 5 דק' → POST /api/evolution (auto) — הרשת מחליטה
 //            בעצמה: ממצא-HIGH לא-מטופל מביקורת-עצמית → למידה; אחרת → הצעה-עצמית. ירי-LLM אמיתי.
 //            תקציב-שעתי 12/שעה נאכף שרת-צד (429 = דילוג-כן) — הקצב-קושר בדיוק.
+//   עורק-ד (Task 32): פעימת-בנייה כל 10 דק' → POST /api/sovereign/build — הרשת לא רק בודקת:
+//            היא **בונה** את המוצר עצמו (תוכן/נתונים/הצעות — ארטיפקטים ב-sovereign/site/,
+//            נדחפים-לגיט ע"י עורק-ב). תקציב 6/שעה נאכף שרת-צד.
 //   עורק-0 (Task 26): שומר-האפליקציה — בדיקת-בריאות כל 15 שניות; 3 כשלים-רצופים
 //            = הזנקת-האפליקציה מחדש מבן-עץ-הלב (העץ-המתמיד). הרשת מרפאת-את-עצמה.
 //   עורק-ב שדרוג (Task 27): קונפליקט-db ב-pull-rebase — פתרון-עצמי מוכח-שרשרת:
@@ -32,6 +35,8 @@ const GIT_PULSE_MS = 15 * 60_000
 const GIT_PULSE_FIRST_MS = 90_000
 const EVOLUTION_PULSE_MS = 5 * 60_000 // Task 29: 10→5 דק' — "טפל בפתוחים בצורה הטובה ביותר" (התקציב השעתי 12 קושר בדיוק)
 const EVOLUTION_PULSE_FIRST_MS = 120_000
+const BUILD_PULSE_MS = 10 * 60_000 // Task 32: עורק-הבנייה — 6 פעימות/שעה = התקציב השעתי בדיוק
+const BUILD_PULSE_FIRST_MS = 4 * 60_000
 const APP_GUARD_MS = 15_000
 const APP_GUARD_FAILS_TO_RESTART = 3
 
@@ -52,6 +57,10 @@ interface State {
   evolutionQueued: number
   lastEvolutionAt: string | null
   lastEvolutionResult: string | null
+  buildPulses: number
+  buildApplied: number
+  lastBuildAt: string | null
+  lastBuildResult: string | null
   appRestarts: number
   lastAppGuardAt: string | null
   lastAppGuardResult: string | null
@@ -76,6 +85,10 @@ const state: State = {
   evolutionQueued: 0,
   lastEvolutionAt: null,
   lastEvolutionResult: null,
+  buildPulses: 0,
+  buildApplied: 0,
+  lastBuildAt: null,
+  lastBuildResult: null,
   appRestarts: 0,
   lastAppGuardAt: null,
   lastAppGuardResult: null,
@@ -381,6 +394,34 @@ async function evolutionPulse(): Promise<void> {
   }
 }
 
+// ===== עורק-ד: פעימת-בנייה (Task 32) — הרשת בונה את המוצר עצמו, לא רק בודקת =====
+async function buildPulse(): Promise<void> {
+  state.buildPulses++
+  state.lastBuildAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/sovereign/build`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(180_000), // מחזור-בנייה = ירי-LLM אמיתי — נותנים-רשת
+    })
+    if (res.status === 201) {
+      const d = (await res.json()) as { improvement?: { title?: string; kind?: string } }
+      state.buildApplied++
+      state.lastBuildResult = `${d.improvement?.kind ?? '?'}: ${d.improvement?.title ?? ''}`
+      log(`פעימת-בנייה: שיפור-מוצר נולד ✓ ${state.lastBuildResult} (סה\"כ: ${state.buildApplied})`)
+    } else if (res.status === 429) {
+      state.lastBuildResult = 'skipped: תקציב-בנייה שעתי מוצה (כנות)'
+      log('פעימת-בנייה: תקציב-מוצה — דילוג-כן')
+    } else {
+      const body = (await res.json().catch(() => ({}))) as { errorClass?: string; error?: string }
+      state.lastBuildResult = `failed: ${body.errorClass ?? `HTTP ${res.status}`}`
+      log(`פעימת-בנייה: כשל-כן — ${state.lastBuildResult}`)
+    }
+  } catch (e) {
+    state.lastBuildResult = e instanceof Error ? e.message : String(e)
+    log(`פעימת-בנייה: כשל-רשת — ${state.lastBuildResult}`)
+  }
+}
+
 // ===== שרת-דופק (תצפית) =====
 Bun.serve({
   port: PORT,
@@ -408,7 +449,7 @@ setInterval(() => {
 }, 60_000)
 
 log(
-  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', דופק על :${PORT}`
+  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', דופק על :${PORT}`
 )
 
 setInterval(() => void tick(), TICK_MS)
@@ -416,6 +457,8 @@ setTimeout(() => void gitPulseChecked(), GIT_PULSE_FIRST_MS)
 setInterval(() => void gitPulseChecked(), GIT_PULSE_MS)
 setTimeout(() => void evolutionPulse(), EVOLUTION_PULSE_FIRST_MS)
 setInterval(() => void evolutionPulse(), EVOLUTION_PULSE_MS)
+setTimeout(() => void buildPulse(), BUILD_PULSE_FIRST_MS)
+setInterval(() => void buildPulse(), BUILD_PULSE_MS)
 setInterval(() => void appGuard(), APP_GUARD_MS)
 
 void tick() // פעימה-ראשונה מיידית

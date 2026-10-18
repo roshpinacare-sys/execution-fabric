@@ -250,6 +250,30 @@ export class FabricClient {
   }
 
   /**
+   * עורק-הבנייה (Task 32) — מחזור-בנייה אחד: ירי-LLM אמיתי → שיפור-מוצר אמיתי
+   * (CONTENT/DATA → APPLIED; PROPOSAL → PROPOSED). ארטיפקטים ב-sovereign/site/
+   * נדחפים-לגיט ע"י פעימת-הגיט של הלב. תקציב 6/שעה (429 = מוצה — כנות).
+   */
+  async buildCycle(): Promise<{ ok: true; improvement: Record<string, unknown> }> {
+    return this.call('/api/sovereign/build', { method: 'POST' })
+  }
+
+  /** סטטוס-עורק-הבנייה: תקציב/ספירות-לפי-סוג/ממתינות-הכרעה/מחזור-אחרון */
+  async buildStatus(): Promise<Record<string, unknown>> {
+    return this.call('/api/sovereign/build')
+  }
+
+  /** קיר-הצמיחה: השיפורים שנולדו (מטא-דאטה + תקציר; תוכן-מלא בגיט) */
+  async improvements(limit = 30): Promise<{ ok: true; items: Record<string, unknown>[] }> {
+    return this.call(`/api/sovereign/improvements?limit=${encodeURIComponent(String(limit))}`)
+  }
+
+  /** ארסנל-הכלים (Task 35) — קטלוג-השמישות המלא של הרשת: נתיבי-שימוש ומצבים-כנים */
+  async arsenal(): Promise<{ ok: true; tools: Record<string, unknown>[]; meta?: Record<string, unknown> }> {
+    return this.call('/api/arsenal')
+  }
+
+  /**
    * סקר-אצווה עד-סוף-חיים (כל-המשימות DONE/FAILED) — timeout כן שמעיד-אמת.
    * אין-הימור: אם-לא-הסתיים-בזמן — FabricTimeoutError, לעולם לא שקר-של-הצלחה.
    */

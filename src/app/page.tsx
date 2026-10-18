@@ -45,6 +45,9 @@ import {
   GraduationCap,
   Boxes,
   ScanSearch,
+  Sprout,
+  Wrench,
+  MoonStar,
 } from 'lucide-react'
 
 // ===== טיפוסים =====
@@ -293,6 +296,143 @@ const SEVERITY_STYLES: Record<string, string> = {
   attention: 'border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400',
   watch: 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400',
   info: 'border-zinc-500/30 bg-zinc-500/10 text-zinc-600 dark:text-zinc-400',
+}
+
+// ===== קיר-הצמיחה + צי-הכלים + משמרת-לילה (Task 34 — הרחבה בלבד, אפס-מחיקה) =====
+
+type ImprovementKind = 'CONTENT' | 'DATA' | 'PROPOSAL'
+type ImprovementStatus = 'APPLIED' | 'PROPOSED'
+
+interface ImprovementDto {
+  id: number
+  kind: ImprovementKind
+  title: string
+  summary: string
+  status: ImprovementStatus
+  artifactPath: string | null
+  createdAt: string
+}
+
+interface BuildStatusDto {
+  ok: boolean
+  budget: { used: number; cap: number; remaining: number }
+  total: number
+  byKind: Record<string, number>
+  proposedPending: number
+  lastAt: string | null
+  lastTitle: string | null
+}
+
+interface BuildPostResponseDto {
+  ok: boolean
+  improvement?: ImprovementDto
+  error?: string
+  errorClass?: string
+}
+
+type ArsenalCategory = 'execution' | 'truth' | 'evolution' | 'delivery' | 'access' | 'infra' | 'platform'
+type ArsenalToolStatus = 'LIVE' | 'SEALED' | 'PROPOSED'
+
+interface ArsenalToolDto {
+  id: string
+  nameHe: string
+  category: ArsenalCategory
+  usagePath: string
+  status: ArsenalToolStatus
+  notesHe: string
+}
+
+const IMPROVEMENT_KIND_LABEL: Record<ImprovementKind, string> = {
+  CONTENT: 'תוכן',
+  DATA: 'נתונים',
+  PROPOSAL: 'הצעה',
+}
+
+// פלטה-קיימת בלבד (אפס-כחול/אינדיגו): CONTENT=emerald · DATA=teal · PROPOSAL=amber
+const IMPROVEMENT_KIND_STYLES: Record<ImprovementKind, string> = {
+  CONTENT: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+  DATA: 'border-teal-500/30 bg-teal-500/10 text-teal-600 dark:text-teal-400',
+  PROPOSAL: 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400',
+}
+
+const IMPROVEMENT_STATUS_LABEL: Record<ImprovementStatus, string> = {
+  APPLIED: 'הוחל במוצר',
+  PROPOSED: 'ממתין-הכרעה',
+}
+
+const ARSENAL_CATEGORY_LABEL: Record<ArsenalCategory, string> = {
+  execution: 'ביצוע',
+  truth: 'אמת',
+  evolution: 'התפתחות',
+  delivery: 'העברה',
+  access: 'גישה',
+  infra: 'תשתית',
+  platform: 'פלטפורמה',
+}
+
+const ARSENAL_CATEGORY_ORDER: ArsenalCategory[] = [
+  'execution',
+  'truth',
+  'evolution',
+  'delivery',
+  'access',
+  'infra',
+  'platform',
+]
+
+const ARSENAL_STATUS_LABEL: Record<ArsenalToolStatus, string> = {
+  LIVE: 'חי',
+  SEALED: 'אטום',
+  PROPOSED: 'מוצע',
+}
+
+const ARSENAL_STATUS_STYLES: Record<ArsenalToolStatus, string> = {
+  LIVE: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+  SEALED: 'border-zinc-500/30 bg-zinc-500/10 text-zinc-600 dark:text-zinc-400',
+  PROPOSED: 'text-muted-foreground', // outline בלבד
+}
+
+// עורקי-הלב למשמרת-לילה: שדה-חותמת-אחרונה ב-/status של הלב ← שם-עברי. לא-נמדד = "—"
+const NIGHT_ARTERY_LABELS: { key: string; label: string }[] = [
+  { key: 'lastTickAt', label: 'א · ביצוע' },
+  { key: 'lastGitPulseAt', label: 'ב · גיט' },
+  { key: 'lastEvolutionAt', label: 'ג · התפתחות' },
+  { key: 'lastAppGuardAt', label: '0 · שומר-האפליקציה' },
+]
+
+function arteryIso(a: Record<string, unknown> | undefined, key: string): string | null {
+  const v = a?.[key]
+  return typeof v === 'string' && v.length > 0 ? v : null
+}
+
+// זמן-יחסי כן (עברית) — לא-ניתן לפענוח = המחרוזת עצמה, אפס-המצאה
+function fmtRelHe(iso: string | null): string {
+  if (!iso) return '—'
+  try {
+    const t = new Date(iso).getTime()
+    if (Number.isNaN(t)) return iso
+    const diff = Date.now() - t
+    if (diff < 0) return new Date(iso).toLocaleString('he-IL')
+    const m = Math.floor(diff / 60000)
+    if (m < 1) return 'עכשיו'
+    if (m < 60) return `לפני ${m} דק'`
+    const h = Math.floor(m / 60)
+    if (h < 24) return `לפני ${h} שע'`
+    return `לפני ${Math.floor(h / 24)} ימים`
+  } catch {
+    return iso
+  }
+}
+
+function fmtStampHe(iso: string | null): string {
+  if (!iso) return '—'
+  try {
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return iso
+    return d.toLocaleString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  } catch {
+    return iso
+  }
 }
 
 function fmtTime(iso: string): string {
@@ -687,6 +827,13 @@ export default function Home() {
   // פקח-הריבונות (Task 30)
   const [census, setCensus] = useState<CensusDto | null>(null)
 
+  // קיר-הצמיחה + צי-הכלים + משמרת-לילה (Task 34)
+  const [build, setBuild] = useState<BuildStatusDto | null>(null)
+  const [improvements, setImprovements] = useState<ImprovementDto[] | null>(null)
+  const [building, setBuilding] = useState(false)
+  const [buildMsg, setBuildMsg] = useState<{ tone: 'ok' | 'rate' | 'err'; text: string } | null>(null)
+  const [arsenal, setArsenal] = useState<ArsenalToolDto[] | null>(null)
+
   // עובד-רקע (Task 23): ריצה-אוטומטית של משימות-QUEUED ברירת-מחדל דלוקה
   const [autoRun, setAutoRun] = useState(true)
   const [workerLoopAlive, setWorkerLoopAlive] = useState(false)
@@ -815,6 +962,41 @@ export default function Home() {
     }
   }, [])
 
+  // קיר-הצמיחה (Task 34): עורק-הבנייה. 404 בזמן-בניית-העורק = שקט — מצב "ממתין לנתיב..." נשאר גלוי
+  const loadBuild = useCallback(async () => {
+    try {
+      const res = await fetch('/api/sovereign/build')
+      if (!res.ok) return
+      const j = await res.json()
+      if (j.ok && j.budget && typeof j.total === 'number') setBuild(j)
+    } catch {
+      /* polling — שקט */
+    }
+  }, [])
+
+  const loadImprovements = useCallback(async () => {
+    try {
+      const res = await fetch('/api/sovereign/improvements?limit=30')
+      if (!res.ok) return
+      const j = await res.json()
+      if (j.ok && Array.isArray(j.items)) setImprovements(j.items)
+    } catch {
+      /* polling — שקט */
+    }
+  }, [])
+
+  // צי-הכלים (Task 34): סקר-ארסנל כל 60 שניות
+  const loadArsenal = useCallback(async () => {
+    try {
+      const res = await fetch('/api/arsenal')
+      if (!res.ok) return
+      const j = await res.json()
+      if (j.ok && Array.isArray(j.tools)) setArsenal(j.tools)
+    } catch {
+      /* polling — שקט */
+    }
+  }, [])
+
   // מחזור-הצעה ידני אחד (Task 26) — ירי-LLM אמיתי; 429 = תקציב-שעתי מוצה (כנות)
   // Task 28: mode — 'auto' (למידה-ראשונה-אם-יש-ממצא-HIGH, אחרת הצעה) או 'learn' (למידה בלבד)
   const triggerEvolution = useCallback(
@@ -865,6 +1047,54 @@ export default function Home() {
     [toast, loadEvolution, loadTasks, loadMetrics]
   )
 
+  // מחזור-בנייה ידני אחד (Task 34) — 201 = שיפור אמיתי שנבנה; 429 = תקציב-שעתי מוצה; כל-כשל כן וגלוי, אפס-הצגת-הצלחה-מדומה
+  const triggerBuild = useCallback(async () => {
+    setBuilding(true)
+    setBuildMsg(null)
+    try {
+      const res = await fetch('/api/sovereign/build', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      let j: BuildPostResponseDto | null = null
+      try {
+        j = (await res.json()) as BuildPostResponseDto
+      } catch {
+        j = null // גוף-לא-JSON — כנות
+      }
+      if (res.status === 201 && j?.ok && j.improvement) {
+        setBuildMsg({ tone: 'ok', text: `מחזור-הבנייה הושלם: ${j.improvement.title}` })
+        toast({
+          title: 'מחזור-בנייה הושלם',
+          description: `${j.improvement.kind ?? '?'} — ${j.improvement.title} — הפיד התרענן`,
+        })
+      } else if (res.status === 429) {
+        setBuildMsg({ tone: 'rate', text: 'תקציב-הבנייה השעתי מוצה — הלב ינסה שוב בפעימה הבאה' })
+        toast({
+          title: 'תקציב-הבנייה השעתי מוצה',
+          description: 'הלב ינסה שוב בפעימה הבאה',
+          variant: 'destructive',
+        })
+      } else {
+        const errText = j?.error ?? `שגיאת-שרת ${res.status} — ללא גוף-שגיאה`
+        setBuildMsg({ tone: 'err', text: errText.slice(0, 300) })
+        toast({
+          title: 'מחזור-הבנייה נכשל בכנות',
+          description: `${j?.errorClass ?? res.status}: ${j?.error ?? ''}`.slice(0, 200),
+          variant: 'destructive',
+        })
+      }
+    } catch {
+      setBuildMsg({ tone: 'err', text: 'שגיאת-רשת — לא ניתן ליצור קשר עם השרת' })
+      toast({ title: 'שגיאת-רשת במחזור-הבנייה', variant: 'destructive' })
+    } finally {
+      setBuilding(false)
+      loadBuild()
+      loadImprovements()
+    }
+  }, [toast, loadBuild, loadImprovements])
+
   useEffect(() => {
     loadTasks()
     loadLedger()
@@ -894,6 +1124,29 @@ export default function Home() {
       clearInterval(ivh)
     }
   }, [loadTasks, loadLedger, loadHealth, loadRails, loadKnownRepos, loadHandoffs, loadBatches, loadEvolution, loadMetrics, loadCensus])
+
+  // Task 34: קיר-הצמיחה (כל 15 שניות) · משמרת-לילה (כל 30 שניות) · צי-הכלים (כל 60 שניות)
+  useEffect(() => {
+    loadBuild()
+    loadImprovements()
+    loadArsenal()
+    loadCensus()
+    const ivBuild = setInterval(() => {
+      loadBuild()
+      loadImprovements()
+    }, 15000)
+    const ivNight = setInterval(() => {
+      loadCensus()
+    }, 30000)
+    const ivArsenal = setInterval(() => {
+      loadArsenal()
+    }, 60000)
+    return () => {
+      clearInterval(ivBuild)
+      clearInterval(ivNight)
+      clearInterval(ivArsenal)
+    }
+  }, [loadBuild, loadImprovements, loadArsenal, loadCensus])
 
   // לולאת-עובד-הרקע (Task 23): tick חי — משימת-QUEUED ותיקה אחת בכל-סבב, עד-סיומה.
   // אין-תור → המתנה-שקטה. משימות-FAILED לא נתפסות-שוב אוטומטית — ניסיון-חוזר הוא החלטה-אנושית.
@@ -2176,6 +2429,278 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                   </div>
                 </>
               )}
+            </CardContent>
+          </Card>
+
+          {/* קיר-הצמיחה (Task 34 — הרחבה בלבד): עורק-הבנייה — תקציב, ספירות, מחזור-אחרון ופיד-שיפורים */}
+          <Card>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Sprout className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                קיר-הצמיחה
+              </CardTitle>
+              <CardDescription>
+                עורק-הבנייה של הרשת (סקר-חי כל 15 שניות): תקציב-בנייה שעתי, ספירות-שיפורים ומחזור-אחרון — מה שהרשת בנתה בעצמה. לא-נמדד = “—”, אפס-סימולציה.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {!build ? (
+                <p className="rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground">
+                  ממתין לנתיב... /api/sovereign/build — עורק-הבנייה נבנה כרגע במקביל
+                </p>
+              ) : (
+                <>
+                  <div>
+                    <div className="mb-1 flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">תקציב-בנייה השעה</span>
+                      <span className="font-mono" dir="ltr">
+                        {build.budget.used}/{build.budget.cap}
+                      </span>
+                    </div>
+                    <div
+                      className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+                      role="img"
+                      aria-label={`תקציב-בנייה השעה: ${build.budget.used} מתוך ${build.budget.cap}`}
+                    >
+                      <div
+                        className={`h-full ${build.budget.used >= build.budget.cap ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                        style={{ width: `${Math.min(100, (build.budget.used / Math.max(1, build.budget.cap)) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Badge variant="outline" className="gap-1 text-[10px] border-zinc-500/30 text-zinc-600 dark:text-zinc-400">
+                      שיפורים {build.total}
+                    </Badge>
+                    <Badge variant="outline" className="gap-1 text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                      ממתינות-הכרעה {build.proposedPending}
+                    </Badge>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="shrink-0 text-muted-foreground">מחזור אחרון:</span>
+                    <span className="min-w-0 flex-1 truncate font-medium" title={build.lastTitle ?? undefined}>
+                      {build.lastTitle ?? '—'}
+                    </span>
+                    <span className="shrink-0 font-mono text-muted-foreground" title={build.lastAt ?? undefined}>
+                      {build.lastAt ? fmtStampHe(build.lastAt) : '—'}
+                    </span>
+                  </div>
+                </>
+              )}
+
+              <div>
+                <p className="mb-1.5 text-xs font-medium text-muted-foreground">פיד-השיפורים (30 אחרונות)</p>
+                {improvements === null ? (
+                  <p className="rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground">
+                    ממתין לנתיב... /api/sovereign/improvements
+                  </p>
+                ) : improvements.length === 0 ? (
+                  <p className="rounded-md border p-3 text-center text-xs text-muted-foreground">
+                    עדיין אין שיפורים — פעימת-הבנייה הראשונה של הלב תמלא את הקיר.
+                  </p>
+                ) : (
+                  <div className="max-h-96 space-y-2 overflow-y-auto pe-1" aria-label="פיד-שיפורים">
+                    {improvements.map((im) => (
+                      <div key={im.id} className="space-y-1.5 rounded-md border p-2.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Badge variant="outline" className={`text-[10px] ${IMPROVEMENT_KIND_STYLES[im.kind] ?? ''}`}>
+                            {IMPROVEMENT_KIND_LABEL[im.kind] ?? im.kind}
+                          </Badge>
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] ${
+                              im.status === 'APPLIED'
+                                ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                : 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                            }`}
+                          >
+                            {IMPROVEMENT_STATUS_LABEL[im.status] ?? im.status}
+                          </Badge>
+                          <span className="ms-auto text-[10px] text-muted-foreground" title={fmtStampHe(im.createdAt)}>
+                            {fmtRelHe(im.createdAt)}
+                          </span>
+                        </div>
+                        <p className="text-sm font-medium leading-snug">{im.title}</p>
+                        <p className="text-xs leading-relaxed text-muted-foreground">{im.summary}</p>
+                        {im.artifactPath && (
+                          <p dir="ltr" className="break-all font-mono text-[10px] text-muted-foreground">
+                            {im.artifactPath}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Button
+                  className="min-h-11 w-full gap-2"
+                  onClick={triggerBuild}
+                  disabled={building}
+                  aria-label="הרץ מחזור-בנייה עכשיו"
+                >
+                  {building ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sprout className="h-4 w-4" />}
+                  {building ? 'מחזור-בנייה רץ…' : 'מחזור-בנייה עכשיו'}
+                </Button>
+                {buildMsg && (
+                  <p
+                    role="status"
+                    className={`rounded-md border p-2 text-xs leading-relaxed ${
+                      buildMsg.tone === 'ok'
+                        ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400'
+                        : buildMsg.tone === 'rate'
+                          ? 'border-amber-500/30 bg-amber-500/5 text-amber-600 dark:text-amber-400'
+                          : 'border-rose-500/30 bg-rose-500/5 text-rose-600 dark:text-rose-400'
+                    }`}
+                  >
+                    {buildMsg.text}
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* צי-הכלים (Task 34 — הרחבה בלבד): ארסנל-הרשת לפי-קטגוריה — קריאה-בלבד, אפס-פעולה מחיקתית */}
+          <Card>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Wrench className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                צי-הכלים
+              </CardTitle>
+              <CardDescription>
+                הארסנל שהרשת מכירה בעצמה (GET /api/arsenal כל 60 שניות): חי · אטום · מוצע — נתיבי-שימוש בלבד, ללא סודות.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {arsenal === null ? (
+                <p className="rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground">
+                  ממתין לנתיב... /api/arsenal
+                </p>
+              ) : arsenal.length === 0 ? (
+                <p className="rounded-md border p-3 text-center text-xs text-muted-foreground">
+                  הארסנל ריק כרגע — הרשת תרשום כלי ככל שתאמת אותו.
+                </p>
+              ) : (
+                <div className="max-h-96 space-y-3 overflow-y-auto pe-1" aria-label="רשימת-כלים לפי קטגוריה">
+                  {(() => {
+                    const groups: { key: string; label: string; tools: ArsenalToolDto[] }[] = ARSENAL_CATEGORY_ORDER.map(
+                      (cat) => ({
+                        key: cat,
+                        label: ARSENAL_CATEGORY_LABEL[cat],
+                        tools: arsenal.filter((t) => t.category === cat),
+                      })
+                    )
+                    const otherTools = arsenal.filter((t) => !ARSENAL_CATEGORY_ORDER.includes(t.category))
+                    if (otherTools.length > 0) groups.push({ key: 'other', label: 'אחר', tools: otherTools })
+                    return groups
+                      .filter((g) => g.tools.length > 0)
+                      .map((g) => (
+                        <div key={g.key}>
+                          <p className="mb-1.5 text-xs font-semibold">
+                            {g.label} <span className="font-normal text-muted-foreground">({g.tools.length})</span>
+                          </p>
+                          <div className="space-y-1.5">
+                            {g.tools.map((t) => (
+                              <div key={t.id} className="space-y-1 rounded-md border p-2">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className="text-sm font-medium">{t.nameHe}</span>
+                                  <Badge variant="outline" className={`text-[10px] ${ARSENAL_STATUS_STYLES[t.status] ?? ''}`}>
+                                    {ARSENAL_STATUS_LABEL[t.status] ?? t.status}
+                                  </Badge>
+                                  {t.usagePath && (
+                                    <span
+                                      dir="ltr"
+                                      className="ms-auto min-w-0 break-all font-mono text-[10px] text-muted-foreground"
+                                    >
+                                      {t.usagePath}
+                                    </span>
+                                  )}
+                                </div>
+                                {t.notesHe && <p className="text-xs leading-relaxed text-muted-foreground">{t.notesHe}</p>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                  })()}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* משמרת-לילה (Task 34 — הרחבה בלבד): הוכחות-חיים להפעלה-בלתי-מושגחת — הכל נגזר מהפקח, לא-נמדד = "—" */}
+          <Card>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-base flex items-center gap-2">
+                <MoonStar className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                משמרת-לילה
+              </CardTitle>
+              <CardDescription>
+                הבעלים ישן — הרשת פועלת לבד. הוכחות-חיים מהפקח (GET /api/census כל 30 שניות): דופק-הלב ועורקיו, שרשרת-האמת, המתנות-אישור והתקציב שנותר. אפס-הנחות.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge
+                  variant="outline"
+                  className={`gap-1 text-[10px] ${
+                    census?.heartbeat.reachable
+                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                      : 'border-zinc-500/30 text-zinc-500'
+                  }`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${census?.heartbeat.reachable ? 'animate-pulse bg-emerald-500' : 'bg-zinc-400'}`} />
+                  הלב {census === null ? '—' : census.heartbeat.reachable ? 'דופק' : 'לא-נגיש'}
+                </Badge>
+                <Badge
+                  variant="outline"
+                  className={`gap-1 text-[10px] ${
+                    census === null
+                      ? 'border-zinc-500/30 text-zinc-500'
+                      : census.chain.verify.ok
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                        : 'border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                  }`}
+                >
+                  <ShieldCheck className="h-2.5 w-2.5" />
+                  שרשרת: {census === null ? '—' : census.chain.verify.ok ? 'מאומתת' : 'שבורה'}
+                </Badge>
+              </div>
+
+              <div>
+                <p className="mb-1.5 text-xs font-medium text-muted-foreground">עורקי-הלב (פעימה אחרונה)</p>
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                  {NIGHT_ARTERY_LABELS.map((a) => {
+                    const iso = arteryIso(census?.heartbeat.arteries, a.key)
+                    return (
+                      <div key={a.key} className="flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px]">
+                        <span
+                          className={`h-1.5 w-1.5 shrink-0 rounded-full ${iso ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}
+                          aria-hidden="true"
+                        />
+                        <span className="font-medium">{a.label}</span>
+                        <span className="ms-auto shrink-0 text-muted-foreground" title={iso ? fmtStampHe(iso) : undefined}>
+                          {iso ? fmtRelHe(iso) : '—'}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-center">
+                <div className="rounded-md border bg-muted/40 p-2">
+                  <div className="text-lg font-semibold">{census ? (census.handoff.byStatus.PROPOSED ?? 0) : '—'}</div>
+                  <div className="text-[10px] text-muted-foreground">המתנות-אישור</div>
+                </div>
+                <div className="rounded-md border bg-muted/40 p-2">
+                  <div className="text-lg font-semibold" dir="ltr">
+                    {census ? `${census.budget.remaining}/${census.budget.cap}` : '—'}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground">תקציב-שנותר (התפתחות)</div>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>
