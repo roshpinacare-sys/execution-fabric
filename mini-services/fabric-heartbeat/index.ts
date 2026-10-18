@@ -37,6 +37,7 @@ const EVOLUTION_PULSE_MS = 5 * 60_000 // Task 29: 10→5 דק' — "טפל בפ�
 const EVOLUTION_PULSE_FIRST_MS = 120_000
 const BUILD_PULSE_MS = 10 * 60_000 // Task 32: עורק-הבנייה — 6 פעימות/שעה = התקציב השעתי בדיוק
 const BUILD_PULSE_FIRST_MS = 4 * 60_000
+const NARRATE_TIMEOUT_MS = 120_000 // Task 39: ירי-TTS אמיתי — מהיר, אך-נותנים-רשת
 const APP_GUARD_MS = 15_000
 const APP_GUARD_FAILS_TO_RESTART = 3
 
@@ -61,6 +62,10 @@ interface State {
   buildApplied: number
   lastBuildAt: string | null
   lastBuildResult: string | null
+  narrations: number
+  narrationFails: number
+  lastNarrationAt: string | null
+  lastNarrationResult: string | null
   appRestarts: number
   lastAppGuardAt: string | null
   lastAppGuardResult: string | null
@@ -89,6 +94,10 @@ const state: State = {
   buildApplied: 0,
   lastBuildAt: null,
   lastBuildResult: null,
+  narrations: 0,
+  narrationFails: 0,
+  lastNarrationAt: null,
+  lastNarrationResult: null,
   appRestarts: 0,
   lastAppGuardAt: null,
   lastAppGuardResult: null,
@@ -404,10 +413,12 @@ async function buildPulse(): Promise<void> {
       signal: AbortSignal.timeout(180_000), // מחזור-בנייה = ירי-LLM אמיתי — נותנים-רשת
     })
     if (res.status === 201) {
-      const d = (await res.json()) as { improvement?: { title?: string; kind?: string } }
+      const d = (await res.json()) as { improvement?: { title?: string; kind?: string; id?: number } }
       state.buildApplied++
       state.lastBuildResult = `${d.improvement?.kind ?? '?'}: ${d.improvement?.title ?? ''}`
       log(`פעימת-בנייה: שיפור-מוצר נולד ✓ ${state.lastBuildResult} (סה\"כ: ${state.buildApplied})`)
+      // עורק-ההקראה (Task 39): כל-תוכן-שנולד — מוקרא מיידית (best-effort, כנות-מלאה)
+      if (d.improvement?.id) void narratePulse(d.improvement.id)
     } else if (res.status === 429) {
       state.lastBuildResult = 'skipped: תקציב-בנייה שעתי מוצה (כנות)'
       log('פעימת-בנייה: תקציב-מוצה — דילוג-כן')
@@ -419,6 +430,36 @@ async function buildPulse(): Promise<void> {
   } catch (e) {
     state.lastBuildResult = e instanceof Error ? e.message : String(e)
     log(`פעימת-בנייה: כשל-רשת — ${state.lastBuildResult}`)
+  }
+}
+
+// ===== עורק-ההקראה (Task 39) — השימוש-הראשון-המוצדק בכלי-SDK-TTS =====
+// כל-תוכן-שנולד בעורק-הבנייה מוקרא (עברית) ל-mp3 בגיט — המוצר לא רק נראה, הוא גם נשמע.
+// best-effort: כשל-הקראה לא מכתיר לידת-תוכן — אבל-הוא כן ומתועד (NARRATE FAILED בשרשרת).
+async function narratePulse(improvementId: number): Promise<void> {
+  state.lastNarrationAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/sovereign/content/${improvementId}/narrate`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(NARRATE_TIMEOUT_MS),
+    })
+    if (res.status === 200) {
+      const d = (await res.json().catch(() => ({}))) as { already?: boolean; sizeBytes?: number }
+      state.narrations++
+      state.lastNarrationResult = d.already
+        ? `already (${improvementId})`
+        : `narrated #${improvementId} (${d.sizeBytes ?? '?'} bytes)`
+      log(`עורק-ההקראה: ${state.lastNarrationResult}`)
+    } else {
+      state.narrationFails++
+      const body = (await res.json().catch(() => ({}))) as { errorClass?: string; error?: string }
+      state.lastNarrationResult = `failed: ${body.errorClass ?? `HTTP ${res.status}`}`
+      log(`עורק-ההקראה: כשל-כן — ${state.lastNarrationResult}`)
+    }
+  } catch (e) {
+    state.narrationFails++
+    state.lastNarrationResult = e instanceof Error ? e.message : String(e)
+    log(`עורק-ההקראה: כשל-רשת — ${state.lastNarrationResult}`)
   }
 }
 

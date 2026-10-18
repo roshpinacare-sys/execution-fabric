@@ -39,8 +39,9 @@ const BUILD_PRIMARY = [
   '2. kind=DATA — נתוני-תצוגה לקונסולה (מדדים/יעדים/צ\'ק-ליסט/תצורות): שדה payload=אובייקט JSON; body מסביר מה-הנתונים-ואיך-להציגם.',
   '3. kind=PROPOSAL — הצעת-שינוי קונקרטית ל-UI/קוד המוצר: body כולל מה/למה/איך; ההצעה לא מבוצעת אוטומטית (זה טוב — כך שום-דבר לא נשבר).',
   '4. אל תחזור על כותרת מרשימות-האיסור (כשל-כפילות).',
-  '5. body עצמאי לחלוטין: הקורא יראה רק אותו. אין סודות, אין מפתחות, אין נתיבים-מקומיים.',
-  '6. איכות-מעל-כמות: שיפור אחד ששווה-משהו עדיף על רעיון-כללי. קונקרטי, מדיד, בר-שימוש.',
+  '5. מגוון-נושאים מחייב: אל תחזור על-נושא שכבר-טופל (גם-אם-הכותרת-שונה — נושא-זהה = כפילות). הישען על כיוון-גלגל-הכיוונים שיסופק לך בהקשר, ואל תיגע בנושאים-האסורים שיסופקו לך.',
+  '6. body עצמאי לחלוטין: הקורא יראה רק אותו. אין סודות, אין מפתחות, אין נתיבים-מקומיים.',
+  '7. איכות-מעל-כמות: שיפור אחד ששווה-משהו עדיף על רעיון-כללי. קונקרטי, מדיד, בר-שימוש.',
   'הפלט שלך חייב להיות אובייקט JSON תקף בלבד — בלי markdown-גדרות, בלי טקסט-עוטף.',
   'הסכימה המדויקת: {"kind":"CONTENT"|"DATA"|"PROPOSAL","title":"<כותרת ייחודית>","summary":"<שורה-תמציתית>","body":"<markdown מלא>","payload":{אובייקט — חובה רק ל-DATA}}',
 ].join(' ')
@@ -64,9 +65,54 @@ const PRODUCT_SURFACES = [
 
 // זיכרון-עדין: כותרות-שנפסלו-כפילות — נכנסות לאיסור-של-המחזור-הבא (אפס-סכימה)
 const bannedTitles: string[] = []
+// זיכרון-עדין (Task 39): מילות-נושא-אסורות — הלקח מ-4 מדריכי-"ממצאי-HIGH" רצופים:
+// כפילות-כותרת-מדויקת לא תופסת סחרור-נושא. עכשיו יש גם דדופ-נושאים (חפיפת-מילים-משמעותיות).
+const bannedTopicWords: string[] = []
+
+// גלגל-הכיוונים (Task 39) — רוטציה נגזרת (ספירת-השיפורים % גודל-הגלגל): הכיוון-המומלץ
+// למחזור נקבע מראש, כך שמחזורים-רצופים אינם יכולים להסתחרר על-אותו-סוג-תוצר.
+export const TOPIC_WHEEL = [
+  'DATA — מדדים/צ\'ק-ליסט/תצורה שהקונסולה מציגה (payload JSON)',
+  'PROPOSAL — שיפור-UX קונקרטי לכרטיס-קיים בקונסולה',
+  'CONTENT — מדריך-תפעול מעשי למשטח-ספציפי מהמוצר (לא על ממצאי-ביקורת)',
+  'CONTENT — שאלות-ותשובות / טעויות-נפוצות-ותיקונן ברשת',
+  'DATA — יעדים-שבועיים ומדדי-הצלחה (payload JSON)',
+  'PROPOSAL — אינטגרציית-כלי מהארסנל למוצר (שימוש-מוצדק בכלי)',
+  'CONTENT — חזון/רפלקציה קצרה על צמיחת-הרשת (לא מדריך, לא כיצד)',
+  'DATA — אינדיקטורי-בריאות ומשמרת-לילה (payload JSON)',
+  'PROPOSAL — שיפור-נגישות/מובייל קונקרטי',
+  'CONTENT — לקחים-וסיכום בפורמט רשימה-מעשית על נושא-חדש לגמרי',
+]
 
 function normalizeTitle(t: string): string {
   return t.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+// מילים-משמעותיות-בעברית: השלכת-תחיליות (ש/מ/ב/ל/ה/ו) כשהשארית-ארוכה, השלכת-מילות-מדידה-כלליות.
+// מטרה-אחת: ש-"מדריך לסגירת ממצאי-HIGH" ו-"מדריך להתמודדות עם ממצאי-HIGH" ייחשבו-אותו-נושא.
+const TOPIC_STOPWORDS = new Set([
+  'מדריך', 'מדריכים', 'פיתוח', 'ניהול', 'התמודדות', 'טיפול', 'סקירה', 'עדכון', 'שיפור', 'שיפורים',
+  'ממצאי', 'ממצא', 'מצאי', 'פתוחים', 'פתוח', 'סגירת', 'סגירה', 'רשת', 'ביצוע', 'אתר', 'מוצר',
+  'בצורה', 'בצורת', 'אפקטיבית', 'אפקטיבי', 'כיצד', 'איך', 'למה', 'מה', 'עם', 'של', 'על', 'אל',
+  'high', 'low', 'med', 'finding', 'findings', 'guide', 'network', 'site', 'product', 'system',
+])
+
+function significantWords(t: string): string[] {
+  const words = t
+    .toLowerCase()
+    .replace(/[^\u0590-\u05FF0-9a-z\s]/g, ' ')
+    .split(/\s+/)
+    .map((w) => w.replace(/^[שמבלהו]+(?=.{3,})/, ''))
+    .filter((w) => w.length >= 3 && !TOPIC_STOPWORDS.has(w))
+  return [...new Set(words)].sort()
+}
+
+// חפיפת-נושא: יחס-המילים-המשותפות מתוך-הקטן-מבין-השניים. ≥0.6 = אותו-נושא-בלבוש-אחר.
+function topicOverlap(a: string[], b: string[]): number {
+  if (a.length === 0 || b.length === 0) return 0
+  const setB = new Set(b)
+  const inter = a.filter((w) => setB.has(w)).length
+  return inter / Math.min(a.length, b.length)
 }
 
 async function recentTitleSet(): Promise<Set<string>> {
@@ -78,10 +124,24 @@ async function recentTitleSet(): Promise<Set<string>> {
   return new Set([...imps, ...tasks].map((r) => normalizeTitle(r.title)))
 }
 
+// נושאי-24ש׳ האחרונים (Task 39): מערך-מערכי-מילים-משמעותיות של כותרות-השיפורים —
+// הבסיס לדדופ-נושאים (חפיפה ≥0.6 = סחרור-נושא, כפילות-כן גם-אם-הכותרת-שונה).
+async function recentTopicWordSets(): Promise<string[][]> {
+  const since24h = new Date(Date.now() - 24 * 60 * 60_000)
+  const imps = await db.improvement.findMany({
+    where: { createdAt: { gte: since24h } },
+    select: { title: true },
+    orderBy: { id: 'desc' },
+    take: 30,
+  })
+  return imps.map((r) => significantWords(r.title))
+}
+
 export interface SiteBuildContext {
   generatedAt: string
   product: { surfaces: string[] }
   improvements: { total: number; byKind: Record<string, number>; recentTitles: string[]; banned: string[] }
+  rotation: { wheelHint: string; bannedTopicWords: string[] }
   network: {
     chain: { done: number; failed: number }
     tasksByStatus: Record<string, number>
@@ -111,6 +171,11 @@ export async function gatherSiteBuildContext(): Promise<SiteBuildContext> {
       recentTitles: recent.map((r) => r.title),
       banned: [...bannedTitles],
     },
+    // גלגל-הכיוונים (Task 39): רוטציה נגזרת-מהספירה — מחזור-רצוף לא יכול לסחרר
+    rotation: {
+      wheelHint: TOPIC_WHEEL[improvementsTotal % TOPIC_WHEEL.length],
+      bannedTopicWords: [...bannedTopicWords],
+    },
     network: {
       chain: { done: census.chain.done, failed: census.chain.failed },
       tasksByStatus: census.tasks.byStatus,
@@ -137,6 +202,10 @@ function contextUserPrompt(ctx: SiteBuildContext): string {
     JSON.stringify(ctx, null, 0),
     '',
     'בחר את השיפור הבעל-ערך ביותר עכשיו: מה שהמוצר צריך — לא מה שקל להמציא. אם שווה-מבט מציג כיוון — אפשר להישען עליו (בלי לחזור על כותרת-ממצא קיימת).',
+    `כיוון-המחזור המומלץ מגלגל-הכיוונים: ${ctx.rotation.wheelHint} — הישען עליו אם-יש מה-לבנות בו.`,
+    ctx.rotation.bannedTopicWords.length > 0
+      ? `נושאים-אסורים (מילים-אלו/צירופיהם אסורים בכותרת ובנושא): ${ctx.rotation.bannedTopicWords.join(', ')}`
+      : 'אין-נושאים-אסורים כרגע.',
   ].join('\n')
 }
 
@@ -232,6 +301,25 @@ export async function runSiteBuildCycle(): Promise<SiteBuildResult> {
     return {
       ok: false,
       error: `duplicate: improvement title matches an existing item from the last 24h — "${out.title}"`,
+      errorClass: 'duplicate',
+      attempts: result.attempts,
+      durationMs: Date.now() - t0,
+    }
+  }
+
+  // דדופ-נושאים (Task 39): חפיפת-מילים-משמעותיות ≥0.6 מול-כותרת-מ-24ש׳ = סחרור-נושא (כפילות-כן)
+  const topicWords = significantWords(out.title)
+  const recentTopics = await recentTopicWordSets()
+  const colliding = recentTopics.find((rt) => rt.length > 0 && topicOverlap(topicWords, rt) >= 0.6)
+  if (colliding) {
+    // זיכרון-עדין: מילות-הנושא-האסורות נכנסות להקשר-של-המחזור-הבא
+    for (const w of topicWords) {
+      if (!bannedTopicWords.includes(w)) bannedTopicWords.push(w)
+    }
+    while (bannedTopicWords.length > 60) bannedTopicWords.shift()
+    return {
+      ok: false,
+      error: `duplicate: topic spins an existing improvement from the last 24h (topic overlap) — "${out.title}"`,
       errorClass: 'duplicate',
       attempts: result.attempts,
       durationMs: Date.now() - t0,

@@ -274,6 +274,31 @@ export class FabricClient {
   }
 
   /**
+   * בית-התוכן (Task 39) — התוכן-המלא (body) של שיפורי-התוכן-המיושמים,
+   * כולל הצהרת-הקראה נגזרת (הקראה קיימת רק אם-קובץ-האודיו חי). זהו התוכן
+   * שהאתר עצמו מציג — פני-המוצר שנולדו בעורק-הבנייה.
+   */
+  async contentWall(limit = 12): Promise<{ ok: true; items: Record<string, unknown>[] }> {
+    return this.call(`/api/sovereign/content?limit=${encodeURIComponent(String(limit))}`)
+  }
+
+  /**
+   * הקראת-תוכן (Task 39) — השימוש-הראשון-המוצדק בכלי-SDK-TTS: ירי-TTS אמיתי
+   * (backend) → mp3 ב-sovereign/site/audio/ + מניפסט-גיט + חתימת-NARRATE בשרשרת.
+   * אידימפוטנטי (already:true בלי-ירי-כפול); כשל = {ok:false,error,errorClass} כן.
+   */
+  async narrate(improvementId: number): Promise<Record<string, unknown>> {
+    return this.call(`/api/sovereign/content/${encodeURIComponent(String(improvementId))}/narrate`, {
+      method: 'POST',
+    })
+  }
+
+  /** נתיב-הזרמת-האודיו להקראה-קיימת (404 כן אם-אין) */
+  audioUrl(improvementId: number): string {
+    return `/api/sovereign/content/${encodeURIComponent(String(improvementId))}/audio`
+  }
+
+  /**
    * סקר-אצווה עד-סוף-חיים (כל-המשימות DONE/FAILED) — timeout כן שמעיד-אמת.
    * אין-הימור: אם-לא-הסתיים-בזמן — FabricTimeoutError, לעולם לא שקר-של-הצלחה.
    */
