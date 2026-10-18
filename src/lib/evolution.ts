@@ -211,14 +211,12 @@ export async function proposeAndQueueEvolutionTask(): Promise<EvolutionResult> {
     }
   }
 
-  const task = await db.task.create({
-    data: {
-      title: proposal.title,
-      kind: proposal.kind,
-      prompt: proposal.prompt,
-      repo: null, // יעד-ריפו לא נדרש להצעה-עצמית; הצעה עם-ריפו תוגש-כהצעה-מאומתת בעתיד
-      source: 'evolution',
-    },
+  const task = await createTaskSafely({
+    title: proposal.title,
+    kind: proposal.kind,
+    prompt: proposal.prompt,
+    repo: null, // יעד-ריפו לא נדרש להצעה-עצמית-הכללית; ראה proposeLearningTask/חוזה-ה-repo (Task 28)
+    source: 'evolution',
   })
 
   return {
@@ -309,6 +307,23 @@ export async function findUnaddressedHighFindings(): Promise<HighFinding[]> {
     }
   }
   return out
+}
+
+// הקשחה (Task 28): פעימת-הגיט-האוטונומית נוגעת ב-db — כתיבה-חולפת יכולה-להיתקל ב-readonly-רגעי.
+// ניסיון-חוזר-אחד אחרי-המתנה-קצרה; כשל-שני = כשל-כן (הירי-לא-מבוזבז על-שתיקה).
+async function createTaskSafely(data: {
+  title: string
+  kind: string
+  prompt: string
+  repo: string | null
+  source: string
+}): Promise<Awaited<ReturnType<typeof db.task.create>>> {
+  try {
+    return await db.task.create({ data })
+  } catch {
+    await new Promise((r) => setTimeout(r, 2_000))
+    return await db.task.create({ data })
+  }
 }
 
 const LEARNING_PRIMARY = [
@@ -414,14 +429,12 @@ export async function proposeLearningTask(finding: HighFinding): Promise<Learnin
     }
   }
 
-  const task = await db.task.create({
-    data: {
-      title: proposal.title,
-      kind: proposal.kind,
-      prompt: proposal.prompt,
-      repo: proposal.repo ?? null,
-      source: 'learning',
-    },
+  const task = await createTaskSafely({
+    title: proposal.title,
+    kind: proposal.kind,
+    prompt: proposal.prompt,
+    repo: proposal.repo ?? null,
+    source: 'learning',
   })
 
   return {

@@ -122,7 +122,7 @@ export async function GET() {
     evolutionBudgetUsed(),
   ])
 
-  const [total, done, failed, queued, learning, highOpen] = await Promise.all([
+  const [total, done, failed, queued, learning, highFindingsOpen] = await Promise.all([
     db.task.count({ where: { source: { in: SELF_SOURCES } } }),
     db.task.count({ where: { source: { in: SELF_SOURCES }, status: 'DONE' } }),
     db.task.count({ where: { source: { in: SELF_SOURCES }, status: 'FAILED' } }),
