@@ -36,6 +36,24 @@
       "textChars": 109,
       "narratedAt": "2026-10-18T04:49:19.215Z",
       "worker": "sdk-tts:tongtong"
+    },
+    "14": {
+      "audioPath": "sovereign/site/audio/improvement-14.wav",
+      "sizeBytes": 1441296,
+      "voice": "tongtong",
+      "speed": 1,
+      "textChars": 121,
+      "narratedAt": "2026-10-18T05:49:19.025Z",
+      "worker": "sdk-tts:tongtong"
+    },
+    "17": {
+      "audioPath": "sovereign/site/audio/improvement-17.wav",
+      "sizeBytes": 1420176,
+      "voice": "tongtong",
+      "speed": 1,
+      "textChars": 86,
+      "narratedAt": "2026-10-18T06:19:05.602Z",
+      "worker": "sdk-tts:tongtong"
     }
   }
 }
