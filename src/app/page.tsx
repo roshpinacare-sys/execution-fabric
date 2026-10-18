@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { MobileNav } from '@/components/MobileNav'
+import { AutonomyOps } from '@/components/AutonomyOps'
 import {
   Network,
   Bot,
@@ -2386,6 +2387,9 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
               )}
             </CardContent>
           </Card>
+
+          {/* שער-התפעול-האוטונומי (Task 43): הדף כמשטח-תפעול — לאוטונומיה ולבעלים כאחד */}
+          <AutonomyOps />
 
           {/* פקח-הריבונות (Task 30 — tobi/disktree): אינטליגנציה-קודם, אפס-מחיקה */}
           <Card id="sec-map" className="scroll-mt-20">

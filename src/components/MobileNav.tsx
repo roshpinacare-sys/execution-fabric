@@ -9,6 +9,7 @@ import {
   Send,
   BarChart3,
   ShieldCheck,
+  Bot,
   Boxes,
   BookOpenText,
   LayoutDashboard,
@@ -18,6 +19,7 @@ const SECTIONS = [
   { id: 'sec-dispatch', label: 'שיגור', icon: Send },
   { id: 'sec-metrics', label: 'מדדים', icon: BarChart3 },
   { id: 'sec-chain', label: 'שרשרת', icon: ShieldCheck },
+  { id: 'sec-ops', label: 'אוטונומיה', icon: Bot },
   { id: 'sec-map', label: 'ריבונות', icon: Boxes },
   { id: 'sec-content', label: 'תוכן', icon: BookOpenText },
   { id: 'sec-board', label: 'לוח', icon: LayoutDashboard },
@@ -50,7 +52,7 @@ export function MobileNav() {
       className="fixed inset-x-0 bottom-0 z-40 border-t bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80 lg:hidden"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
-      <div className="mx-auto grid max-w-6xl grid-cols-6">
+      <div className="mx-auto grid max-w-6xl grid-cols-7">
         {SECTIONS.map(({ id, label, icon: Icon }) => {
           const isActive = active === id
           return (
