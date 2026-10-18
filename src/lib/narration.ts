@@ -14,14 +14,18 @@ import { classify, type ErrorClass } from '@/lib/llm-chain'
 //   נדחף-לגיט ע"י פעימת-הגיט) + אימות-קיום-קובץ. אם-המניפסט-כן-והקובץ-נעלם → ירי-מחדש (ריפוי-עצמי).
 // - אפס-סכימה-חדשה: השרשרת-הקנונית קפואה; המניפסט = קובץ-גיט-נגזר, השיוך לשיפור = המפתח-במניפסט.
 // - אילוצי-API כנים: עד-1024 תווים לירייה (מקראה = כותרת+תקציר — קצר במכוון), speed 0.5–2.0,
-//   stream:false ל-mp3 (streaming = pcm בלבד — לא נדרש כאן).
+//   stream:false ל-wav (streaming = pcm בלבד — לא נדרש כאן).
 
 export const TTS_VOICE = 'tongtong'
 export const TTS_SPEED = 1.0
 export const TTS_MAX_CHARS = 1000 // מתחת-לתקרת-ה-API (1024) — מרווח-כנות
+// פורמט-אמת: הספק-דחה mp3 בירי-ראשון (1214 — response_format לא-נתמך, נרשם-FAILED בשרשרת);
+// wav = פורמט-ברירת-המחדל-המאומת בסקיל, מתאר-עצמו (24kHz) — הפורמט-הכן.
+export const TTS_FORMAT = 'wav'
 
 export const AUDIO_DIR_REL = 'sovereign/site/audio'
 export const MANIFEST_REL = 'sovereign/site/narrations.json'
+export const audioExtension = (): string => `.${TTS_FORMAT}`
 
 export interface NarrationManifestItem {
   audioPath: string
@@ -60,7 +64,7 @@ function writeManifest(m: NarrationManifest): void {
 }
 
 export function audioFileAbs(improvementId: number): string {
-  return path.join(process.cwd(), AUDIO_DIR_REL, `improvement-${improvementId}.mp3`)
+  return path.join(process.cwd(), AUDIO_DIR_REL, `improvement-${improvementId}${audioExtension()}`)
 }
 
 // מקראה-עברית נקייה: כותרת+תקציר, בלי-סימון-markdown, בלי-גרשיים-משוננים-בעייתיים
@@ -131,7 +135,7 @@ export async function narrateImprovement(improvementId: number): Promise<Narrati
       input: text,
       voice: TTS_VOICE,
       speed: TTS_SPEED,
-      response_format: 'mp3',
+      response_format: TTS_FORMAT,
       stream: false,
     })
     const arrayBuffer = await response.arrayBuffer()
@@ -192,7 +196,7 @@ export async function narrateImprovement(improvementId: number): Promise<Narrati
   const abs = audioFileAbs(improvementId)
   mkdirSync(path.dirname(abs), { recursive: true })
   writeFileSync(abs, buffer)
-  const relAudio = `${AUDIO_DIR_REL}/improvement-${improvementId}.mp3`
+  const relAudio = `${AUDIO_DIR_REL}/improvement-${improvementId}${audioExtension()}`
   const item: NarrationManifestItem = {
     audioPath: relAudio,
     sizeBytes: buffer.length,

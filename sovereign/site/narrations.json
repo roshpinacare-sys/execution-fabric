@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "items": {
+    "4": {
+      "audioPath": "sovereign/site/audio/improvement-4.wav",
+      "sizeBytes": 619536,
+      "voice": "tongtong",
+      "speed": 1,
+      "textChars": 113,
+      "narratedAt": "2026-10-18T03:38:56.671Z",
+      "worker": "sdk-tts:tongtong"
+    },
+    "5": {
+      "audioPath": "sovereign/site/audio/improvement-5.wav",
+      "sizeBytes": 323856,
+      "voice": "tongtong",
+      "speed": 1,
+      "textChars": 95,
+      "narratedAt": "2026-10-18T03:35:21.814Z",
+      "worker": "sdk-tts:tongtong"
+    }
+  }
+}

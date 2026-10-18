@@ -48,7 +48,10 @@ import {
   Sprout,
   Wrench,
   MoonStar,
+  BookOpenText,
+  Volume2,
 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
 
 // ===== טיפוסים =====
 
@@ -328,6 +331,29 @@ interface BuildPostResponseDto {
   improvement?: ImprovementDto
   error?: string
   errorClass?: string
+}
+
+// בית-התוכן (Task 39): התוכן-המלא שנולד בעורק-הבנייה + הצהרת-הקראה נגזרת
+interface NarrationDto {
+  ready: true
+  audioPath: string
+  sizeBytes: number
+  voice: string
+  narratedAt: string
+  url: string
+}
+
+interface ContentItemDto {
+  id: number
+  kind: ImprovementKind
+  title: string
+  summary: string
+  body: string
+  artifactPath: string | null
+  worker: string
+  durationMs: number | null
+  createdAt: string
+  narration: NarrationDto | null
 }
 
 type ArsenalCategory = 'execution' | 'truth' | 'evolution' | 'delivery' | 'access' | 'infra' | 'platform'
@@ -834,6 +860,12 @@ export default function Home() {
   const [buildMsg, setBuildMsg] = useState<{ tone: 'ok' | 'rate' | 'err'; text: string } | null>(null)
   const [arsenal, setArsenal] = useState<ArsenalToolDto[] | null>(null)
 
+  // בית-התוכן + הקראה (Task 39): התוכן שהרשת בנתה — נראה באתר עצמו וניתן להאזנה
+  const [contentItems, setContentItems] = useState<ContentItemDto[] | null>(null)
+  const [contentSelectedId, setContentSelectedId] = useState<number | null>(null)
+  const [narratingId, setNarratingId] = useState<number | null>(null)
+  const [narrateMsg, setNarrateMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
+
   // עובד-רקע (Task 23): ריצה-אוטומטית של משימות-QUEUED ברירת-מחדל דלוקה
   const [autoRun, setAutoRun] = useState(true)
   const [workerLoopAlive, setWorkerLoopAlive] = useState(false)
@@ -997,6 +1029,18 @@ export default function Home() {
     }
   }, [])
 
+  // בית-התוכן (Task 39): סקר-תוכן-מלא כל 30 שניות
+  const loadContent = useCallback(async () => {
+    try {
+      const res = await fetch('/api/sovereign/content?limit=12')
+      if (!res.ok) return
+      const j = await res.json()
+      if (j.ok && Array.isArray(j.items)) setContentItems(j.items)
+    } catch {
+      /* polling — שקט */
+    }
+  }, [])
+
   // מחזור-הצעה ידני אחד (Task 26) — ירי-LLM אמיתי; 429 = תקציב-שעתי מוצה (כנות)
   // Task 28: mode — 'auto' (למידה-ראשונה-אם-יש-ממצא-HIGH, אחרת הצעה) או 'learn' (למידה בלבד)
   const triggerEvolution = useCallback(
@@ -1095,6 +1139,43 @@ export default function Home() {
     }
   }, [toast, loadBuild, loadImprovements])
 
+  // הקראת-תוכן (Task 39) — ירי-TTS אמיתי; אידימפוטנטי (already = ללא-ירי-כפול); כל-כשל כן וגלוי
+  const triggerNarrate = useCallback(
+    async (id: number) => {
+      setNarratingId(id)
+      setNarrateMsg(null)
+      try {
+        const res = await fetch(`/api/sovereign/content/${id}/narrate`, { method: 'POST' })
+        const j = await res.json().catch(() => null)
+        if (res.ok && j?.ok) {
+          setNarrateMsg({
+            tone: 'ok',
+            text: j.already
+              ? 'ההקראה כבר קיימת (אידימפוטנטי — ללא ירי כפול) — מוכן להאזנה'
+              : 'ההקראה נוצרה כעת — ירי-TTS אמיתי, ארטיפקט-אודיו בגיט',
+          })
+          loadContent()
+        } else {
+          setNarrateMsg({
+            tone: 'err',
+            text: `${j?.errorClass ?? res.status}: ${j?.error ?? 'כשל-הקראה'}`.slice(0, 240),
+          })
+          toast({
+            title: 'ההקראה נכשלה בכנות',
+            description: `${j?.errorClass ?? res.status}`.slice(0, 120),
+            variant: 'destructive',
+          })
+        }
+      } catch {
+        setNarrateMsg({ tone: 'err', text: 'שגיאת-רשת בהקראה' })
+        toast({ title: 'שגיאת-רשת בהקראה', variant: 'destructive' })
+      } finally {
+        setNarratingId(null)
+      }
+    },
+    [toast, loadContent]
+  )
+
   useEffect(() => {
     loadTasks()
     loadLedger()
@@ -1147,6 +1228,19 @@ export default function Home() {
       clearInterval(ivArsenal)
     }
   }, [loadBuild, loadImprovements, loadArsenal, loadCensus])
+
+  // Task 39: בית-התוכן (כל 30 שניות) + הנבחר-הנגזר (ברירת-מחדל: החדש ביותר)
+  useEffect(() => {
+    loadContent()
+    const ivContent = setInterval(() => {
+      loadContent()
+    }, 30000)
+    return () => {
+      clearInterval(ivContent)
+    }
+  }, [loadContent])
+
+  const selectedContent = contentItems?.find((c) => c.id === contentSelectedId) ?? contentItems?.[0] ?? null
 
   // לולאת-עובד-הרקע (Task 23): tick חי — משימת-QUEUED ותיקה אחת בכל-סבב, עד-סיומה.
   // אין-תור → המתנה-שקטה. משימות-FAILED לא נתפסות-שוב אוטומטית — ניסיון-חוזר הוא החלטה-אנושית.
@@ -2558,6 +2652,129 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                   </p>
                 )}
               </div>
+            </CardContent>
+          </Card>
+
+          {/* בית-התוכן (Task 39): התוכן שנולד בעורק-הבנייה — מוצג כמוצר באתר עצמו + הקראת-עברית (ירי-TTS אמיתי) */}
+          <Card>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-base flex items-center gap-2">
+                <BookOpenText className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+                בית-התוכן
+              </CardTitle>
+              <CardDescription>
+                התשובה-המוצרית ל“למה האתר לא משתפר?” — התוכן שהרשת בנתה בעצמה נראה ונקרא כאן (לא רק קובץ בגיט), וניתן להאזנה. ההקראה = ירי-TTS אמיתי, אידימפוטנטי, ארטיפקט-אודיו בגיט.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {contentItems === null ? (
+                <p className="rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground">
+                  ממתין לנתיב... /api/sovereign/content
+                </p>
+              ) : contentItems.length === 0 ? (
+                <p className="rounded-md border p-3 text-center text-xs text-muted-foreground">
+                  עדיין אין תוכן-מיושם — פעימות-הבנייה של הלב תמלאנה את הבית.
+                </p>
+              ) : (
+                <>
+                  <div>
+                    <p className="mb-1.5 text-xs font-medium text-muted-foreground">המדריכים שנולדו ({contentItems.length} אחרונים)</p>
+                    <div className="max-h-40 space-y-1.5 overflow-y-auto pe-1" aria-label="רשימת-תוכן">
+                      {contentItems.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => setContentSelectedId(c.id)}
+                          aria-pressed={selectedContent?.id === c.id}
+                          className={`w-full rounded-md border p-2.5 text-start transition-colors ${
+                            selectedContent?.id === c.id
+                              ? 'border-teal-500/40 bg-teal-500/10'
+                              : 'border-input hover:bg-muted/50'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <span className="min-w-0 flex-1 truncate text-sm font-medium">{c.title}</span>
+                            {c.narration && (
+                              <Badge
+                                variant="outline"
+                                className="shrink-0 gap-1 text-[10px] border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                              >
+                                <Volume2 className="h-3 w-3" />
+                                מוקרא
+                              </Badge>
+                            )}
+                            <span className="shrink-0 text-[10px] text-muted-foreground" title={fmtStampHe(c.createdAt)}>
+                              {fmtRelHe(c.createdAt)}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {selectedContent && (
+                    <div className="space-y-2 rounded-md border p-3">
+                      <p className="text-sm font-semibold leading-snug">{selectedContent.title}</p>
+                      <p className="text-xs leading-relaxed text-muted-foreground">{selectedContent.summary}</p>
+                      <div
+                        className="max-h-96 overflow-y-auto pe-1 text-sm leading-relaxed [&_blockquote]:border-s-2 [&_blockquote]:border-muted-foreground/30 [&_blockquote]:ps-3 [&_blockquote]:text-muted-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[11px] [&_h1]:mb-2 [&_h1]:mt-2 [&_h1]:text-base [&_h1]:font-bold [&_h2]:mb-1.5 [&_h2]:mt-3 [&_h2]:text-sm [&_h2]:font-bold [&_h3]:mb-1 [&_h3]:mt-2 [&_h3]:text-sm [&_h3]:font-semibold [&_li]:my-0.5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:ps-5 [&_p]:my-1.5 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-2 [&_strong]:font-semibold [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:ps-5"
+                        aria-label="תוכן-מלא"
+                      >
+                        <ReactMarkdown>{selectedContent.body}</ReactMarkdown>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                        {selectedContent.artifactPath && (
+                          <span dir="ltr" className="break-all font-mono">
+                            {selectedContent.artifactPath}
+                          </span>
+                        )}
+                        <span>· {fmtStampHe(selectedContent.createdAt)}</span>
+                        <span>· עובד: {selectedContent.worker}</span>
+                      </div>
+                      <div className="space-y-2">
+                        <Button
+                          className="min-h-11 w-full gap-2"
+                          onClick={() => triggerNarrate(selectedContent.id)}
+                          disabled={narratingId !== null}
+                          aria-label={`הקרא את התוכן: ${selectedContent.title}`}
+                        >
+                          {narratingId !== null ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Volume2 className="h-4 w-4" />
+                          )}
+                          {narratingId !== null
+                            ? 'מקריא… (TTS אמיתי)'
+                            : selectedContent.narration
+                              ? 'הקרא מחדש (קיים — ללא ירי כפול)'
+                              : 'הקרא (ירי-TTS אמיתי)'}
+                        </Button>
+                        {selectedContent.narration && (
+                          <audio
+                            controls
+                            preload="none"
+                            src={selectedContent.narration.url}
+                            className="w-full"
+                            aria-label={`הקראת ${selectedContent.title}`}
+                          />
+                        )}
+                        {narrateMsg && (
+                          <p
+                            role="status"
+                            className={`rounded-md border p-2 text-xs leading-relaxed ${
+                              narrateMsg.tone === 'ok'
+                                ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400'
+                                : 'border-rose-500/30 bg-rose-500/5 text-rose-600 dark:text-rose-400'
+                            }`}
+                          >
+                            {narrateMsg.text}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </CardContent>
           </Card>
 

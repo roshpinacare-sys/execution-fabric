@@ -417,8 +417,9 @@ async function buildPulse(): Promise<void> {
       state.buildApplied++
       state.lastBuildResult = `${d.improvement?.kind ?? '?'}: ${d.improvement?.title ?? ''}`
       log(`פעימת-בנייה: שיפור-מוצר נולד ✓ ${state.lastBuildResult} (סה\"כ: ${state.buildApplied})`)
-      // עורק-ההקראה (Task 39): כל-תוכן-שנולד — מוקרא מיידית (best-effort, כנות-מלאה)
-      if (d.improvement?.id) void narratePulse(d.improvement.id)
+      // עורק-ההקראה (Task 39): תוכן-מיושם מוקרא מיידית (best-effort, כנות-מלאה).
+      // PROPOSAL/DATA אינם-מוקראים-כלל (המסילה מקריאה APPLIED CONTENT בלבד) — אין-כשל-כאן.
+      if (d.improvement?.id && d.improvement?.kind === 'CONTENT') void narratePulse(d.improvement.id)
     } else if (res.status === 429) {
       state.lastBuildResult = 'skipped: תקציב-בנייה שעתי מוצה (כנות)'
       log('פעימת-בנייה: תקציב-מוצה — דילוג-כן')

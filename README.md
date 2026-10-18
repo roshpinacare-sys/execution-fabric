@@ -36,6 +36,9 @@
 | `GET/POST /api/sovereign/build` | **עורק-הבנייה** (Task 32): POST = מחזור-בנייה אחד — ירי-LLM אמיתי → שיפור-מוצר אמיתי (CONTENT/DATA→APPLIED; PROPOSAL→PROPOSED), ארטיפקט ב-`sovereign/site/` + חתימת-SITEBUILD בשרשרת. GET = סטטוס (תקציב 6/שעה — 429 כן). הלב דופק כל 10 דק' (עורק-ד) |
 | `GET /api/sovereign/improvements?limit=30` | קיר-הצמיחה: השיפורים שנולדו (מטא-דאטה + תקציר; תוכן-מלא בארטיפקטים בגיט) |
 | `GET /api/arsenal` | **ארסנל-הכלים** (Task 35): קטלוג-השמישות המלא — כל-כלי עם נתיב-שימוש ממשי, סיווג (ביצוע/אמת/התפתחות/העברה/גישה/תשתית/פלטפורמה) ומצב-כן (חי/אטום/מוצע) |
+| `GET /api/sovereign/content?limit=12` | **בית-התוכן** (Task 39): התוכן-המלא (body) של שיפורי-התוכן-המיושמים + הצהרת-הקראה נגזרת (קיימת רק אם-קובץ-אודיו חי) — התוכן שהאתר עצמו מציג |
+| `POST /api/sovereign/content/[id]/narrate` | **הקראת-תוכן** (Task 39): ירי-TTS אמיתי (SDK backend) → mp3 ב-`sovereign/site/audio/` + מניפסט-גיט + חתימת-NARRATE בשרשרת. אידימפוטנטי (already:true בלי-ירי-כפול); כשל = {ok:false,error,errorClass} כן |
+| `GET /api/sovereign/content/[id]/audio` | הזרמת-אודיו להקראה-קיימת (audio/mpeg; 404 כן אם-אין-הקראה) |
 
 סוגי-משימה (`kind`): `CODE` / `AUDIT` / `PLAN` — כל אחד עם חוזה-JSON מאומת (zod).
 

@@ -280,9 +280,9 @@ export const ARSENAL: ArsenalTool[] = [
     id: 'sdk-tts',
     nameHe: 'SDK · טקסט-לדיבור (TTS)',
     category: 'platform',
-    usagePath: 'z-ai-web-dev-sdk — backend',
-    status: 'PROPOSED',
-    notesHe: 'ממתין-שימוש-ראשון-מוצדק במוצר',
+    usagePath: 'POST /api/sovereign/content/[id]/narrate — zai.audio.tts (wav, tongtong)',
+    status: 'LIVE',
+    notesHe: 'חי מ-Task 39: הקראת-תוכן-עברית לקונסולה — ירי-אמת מוכח (323KB wav/2.6s, חתימת-NARRATE בשרשרת)',
   },
   {
     id: 'sdk-asr',

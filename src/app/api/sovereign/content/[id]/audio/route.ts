@@ -32,7 +32,7 @@ export async function GET(
     return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {
-        'Content-Type': 'audio/mpeg',
+        'Content-Type': 'audio/wav',
         'Content-Length': String(size),
         'Cache-Control': 'public, max-age=3600',
       },
