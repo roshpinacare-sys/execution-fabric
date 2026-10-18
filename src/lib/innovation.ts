@@ -61,6 +61,8 @@ export interface ChainCheckpoint {
 export interface DeltaVerifyResult extends VerifyResult {
   mode: 'delta' | 'full-fallback'
   checkedEntries: number // כמה רשומות נאותו בפועל בקריאה-זו
+  /** ה-checkpoint הבא להעביר בקריאה-הבאה (null כשלא-אומת מלא) — Task 61 */
+  nextCheckpoint: ChainCheckpoint | null
 }
 
 export function verifyChainDelta(
@@ -86,14 +88,34 @@ export function verifyChainDelta(
     }
     const verified = checkpoint.count + suffixVerified
     const head = verified > 0 ? entries[verified - 1].hash : GENESIS
-    return { ok: brokenAt === null, head, brokenAt, verified, mode: 'delta', checkedEntries: suffixVerified }
+    const ok = brokenAt === null
+    const nextCheckpoint: ChainCheckpoint | null =
+      ok && verified === entries.length
+        ? { count: verified, headHash: head, at: new Date().toISOString() }
+        : null
+    return { ok, head, brokenAt, verified, mode: 'delta', checkedEntries: suffixVerified, nextCheckpoint }
   }
-  // fallback כן: אין-checkpoint תקף → אימות-מלא (הקו-המהיר-המלא) ובניית-checkpoint חדש
+  // fallback כן: אין-checkpoint תקף → אימות-מלא (הקו-המהיר-המלא) + checkpoint חדש להמשך
   const full = verifyChainFullFast(entries)
-  const next: ChainCheckpoint | null = full.ok
-    ? { count: full.verified, headHash: full.head, at: new Date().toISOString() }
-    : null
-  return { ...full, mode: 'full-fallback', checkedEntries: full.verified, ...(next ? {} : {}) }
+  const nextCheckpoint: ChainCheckpoint | null =
+    full.ok && full.verified === entries.length
+      ? { count: full.verified, headHash: full.head, at: new Date().toISOString() }
+      : null
+  return { ...full, mode: 'full-fallback', checkedEntries: full.verified, nextCheckpoint }
+}
+
+// Task 61: מחסן-checkpoint מודולי — בדיקת-חיים שקוראת שוב-ושוב לא מפסידה את החיסכון.
+// כלל-עדכון נשמרני: מתעדכן רק-כשכל-השרשרת אומתה-מלא (ok && verified==length).
+let autoCheckpoint: ChainCheckpoint | null = null
+
+export function currentAutoCheckpoint(): ChainCheckpoint | null {
+  return autoCheckpoint
+}
+
+export function verifyChainAuto(entries: LedgerEntry[]): DeltaVerifyResult {
+  const r = verifyChainDelta(entries, autoCheckpoint)
+  if (r.ok && r.nextCheckpoint) autoCheckpoint = r.nextCheckpoint
+  return r
 }
 
 // ===== מחזור-חדשנות: מדידה → הוכחת-שקילות → מדידה → חתימה =====
@@ -189,10 +211,13 @@ function round3(n: number): number {
 }
 
 // ===== טיק: מוניזציית פסקי-דין (אותו-ארטיפקט → אותו-פסק-דין, אפס-חישוב-חוזר) =====
-// reviewArtifact דטרמיניסטי לחלוטין — קנה-מידה לפי (handoffId + artifactHash).
-// מפתח-טיק: בדוח מופרד "חידוש" מ"ידוע" — הבעלים רואה במבט-אחד מה-חדש.
+// reviewArtifact דטרמיניסטי לחלוטין — קנה-מידה לפי (handoffId + artifactHash + codeHash).
+// Task 61 תיקון-תקינות: המפתח חייב-לכלול את hash-הקוד עצמו — אם task.output השתנה
+// (הרצה-חוזרת), אותו-artifactHash לא מספיק: פסק-דין-ישן על קוד-חדש הוא שקר. בלי-codeHash
+// במפתח המוניז היה לא-בטוח — תוקן.
 const verdictCache = new Map<string, { deliverable: boolean; reasons: string[]; at: number }>()
 const VERDICT_TTL_MS = 60 * 60_000 // שעה
+const VERDICT_CACHE_CAP = 1000 // תקרה-קשיחה — אפס-נפיחות-לא-חסומה
 
 export function memoizedVerdict(
   key: string,
@@ -204,6 +229,7 @@ export function memoizedVerdict(
     return { ...hit, cached: true }
   }
   if (hit) verdictCache.delete(key) // פינוי-פג-תוקף
+  if (verdictCache.size >= VERDICT_CACHE_CAP) verdictCache.clear() // תקרה-קשיחה
   const v = compute()
   verdictCache.set(key, { ...v, at: now })
   return { ...v, cached: false }

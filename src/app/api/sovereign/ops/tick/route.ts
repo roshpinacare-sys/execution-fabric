@@ -48,13 +48,21 @@ export async function POST(req: NextRequest) {
   const outcomes: TickOutcome[] = []
   let deliverableSeen = 0
 
+  // Task 61: חיסול N+1 — שליפת-כל-המשימות של ההצעות בשאילתה אחת (במקום findUnique לכל-הצעה)
+  const taskIds = [...new Set(proposed.map((h) => h.taskId))]
+  const tasksForProposals = await db.task.findMany({
+    where: { id: { in: taskIds } },
+    select: { id: true, output: true },
+  })
+  const taskOutputById = new Map(tasksForProposals.map((t) => [t.id, t.output]))
+
   for (const h of proposed) {
-    const task = await db.task.findUnique({ where: { id: h.taskId } })
-    const code = extractArtifact(task?.output ?? '', h.field)
-    // Task 60 (מסילת-החדשנות): reviewArtifact דטרמיניסטי — מוניז לפי (handoffId+artifactHash)
-    // חוסך חישוב-חוזר על אותם-מועמדים ומפריד "חידוש" מ"ידוע" בדוח.
-    const v = memoizedVerdict(`${h.id}:${h.artifactHash ?? 'no-hash'}`, () =>
-      reviewArtifact(code, h.artifactHash)
+    const code = extractArtifact(taskOutputById.get(h.taskId) ?? '', h.field)
+    // Task 60 (מסילת-החדשנות): reviewArtifact דטרמיניסטי — מוניז.
+    // Task 61 תיקון-תקינות: המפתח כולל את hash-הקוד עצמו — שינוי-תוצר מבטל-מוניז.
+    const v = memoizedVerdict(
+      `${h.id}:${h.artifactHash ?? 'no-hash'}:${sha256Short(code ?? '')}`,
+      () => reviewArtifact(code, h.artifactHash)
     )
 
     if (!v.deliverable) {

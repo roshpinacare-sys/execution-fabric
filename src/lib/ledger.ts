@@ -73,12 +73,24 @@ export function verifyChain(entries: LedgerEntry[]): VerifyResult {
 // הוספת רשומה לשרשרת: prev = hash הראש הנוכחי (או GENESIS)
 // opts.batchId — מקשר-ניווט בלבד (Task 24): נשמר בעמודה נפרדת, מחוץ ל-hash הקנוני,
 // כדי שהחתימה-ההיסטורית של כל-השרשרת תישאר בדיוק כמו-שהיא.
-export async function appendLedger(
+//
+// Task 61 (בחינה-עמוקה): תיקון תנאי-תחרות קריטי — findFirst→create לא-אטומי.
+// שתי-בקשות-מקבילות היו קוראות את אותו-ראש ויוצרות מזלג (שתי-רשומות עם אותו-prev
+// → השרשרת-נשברת). כל-הכותבים בתהליך-זה עוברים דרך כאן → שרשרת-הבטחות מסדרת-אותם:
+// כל-append קורא את הראש רק אחרי שהקודם הסתיים — prev תמיד הראש-האמיתי.
+let appendQueue: Promise<unknown> = Promise.resolve()
+
+export function appendLedger(
   rec: Omit<LedgerRecord, 'prev'>,
   opts?: { batchId?: string }
 ): Promise<LedgerEntry> {
-  const last = await db.ledgerEntry.findFirst({ orderBy: { id: 'desc' } })
-  const full: LedgerRecord = { ...rec, prev: last?.hash ?? GENESIS }
-  const hash = ledgerHash(full)
-  return db.ledgerEntry.create({ data: { ...full, hash, batchId: opts?.batchId ?? null } })
+  const run = async (): Promise<LedgerEntry> => {
+    const last = await db.ledgerEntry.findFirst({ orderBy: { id: 'desc' } })
+    const full: LedgerRecord = { ...rec, prev: last?.hash ?? GENESIS }
+    const hash = ledgerHash(full)
+    return db.ledgerEntry.create({ data: { ...full, hash, batchId: opts?.batchId ?? null } })
+  }
+  const p = appendQueue.then(run, run) // רץ-גם-אם-קודם-נכשל — התור-לא-קורס
+  appendQueue = p.catch(() => undefined) // הכישלון-של-הקורא-לא-מזהם-את-התור
+  return p
 }
