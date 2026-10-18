@@ -225,6 +225,30 @@ export class FabricClient {
     return this.call(`/api/handoffs/${encodeURIComponent(id)}`)
   }
 
+  /** אישור-בעלים על הצעת-העברה (PROPOSED → APPROVED) — השער-הריבוני */
+  async approveHandoff(id: string): Promise<{ ok: true; handoff: Record<string, unknown> }> {
+    return this.call(`/api/handoffs/${encodeURIComponent(id)}/approve`, { method: 'POST' })
+  }
+
+  /** ביצוע-העברה מאושרת (APPROVED → putContents + read-back מאומת → DONE) */
+  async executeHandoff(id: string): Promise<{ ok: boolean; handoff?: Record<string, unknown>; error?: string }> {
+    return this.call(`/api/handoffs/${encodeURIComponent(id)}/execute`, { method: 'POST' })
+  }
+
+  /**
+   * פקח-הריבונות (Task 30) — אינטליגנציית-אחזות מלאה, נגזרת-מאמת בזמן-הקריאה:
+   * שרשרת/משימות/שער/תקציב/מסילות/לב/פסיפס-סוגים/שווה-מבט (ממצאים-לא-הרסניים) + חומר-הזיכרון.
+   * עקרונות (tobi/disktree): נגזר-לעולם-לא-נעקב; מסמן-ולא-מוחק; לא-נמדד = לא-נטען.
+   */
+  async census(): Promise<{ ok: true; census: Record<string, unknown> }> {
+    return this.call('/api/census')
+  }
+
+  /** חומר-הזיכרון הנגזר בלבד (מה-נלמד/נוצר/נאסף-לגיט/פתוח) — תשתית-ניהול-זיכרון */
+  async memoryDigest(): Promise<{ ok: true; memory: Record<string, unknown> }> {
+    return this.call('/api/census?view=memory')
+  }
+
   /**
    * סקר-אצווה עד-סוף-חיים (כל-המשימות DONE/FAILED) — timeout כן שמעיד-אמת.
    * אין-הימור: אם-לא-הסתיים-בזמן — FabricTimeoutError, לעולם לא שקר-של-הצלחה.

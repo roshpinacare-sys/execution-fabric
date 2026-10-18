@@ -43,6 +43,8 @@ import {
   Sparkles,
   BarChart3,
   GraduationCap,
+  Boxes,
+  ScanSearch,
 } from 'lucide-react'
 
 // ===== טיפוסים =====
@@ -237,6 +239,60 @@ function fmtMs(ms: number | null | undefined): string {
   if (ms == null) return '—'
   if (ms < 1000) return `${ms}ms`
   return `${(ms / 1000).toFixed(1)}s`
+}
+
+// ===== פקח-הריבונות (Task 30 — tobi/disktree: נגזר-לעולם-לא-נעקב, מסמן-ולא-מוחק) =====
+
+interface CensusFindingDto {
+  id: string
+  severity: 'info' | 'watch' | 'attention'
+  kind: string
+  title: string
+  detail: string
+  pointer?: string
+}
+
+interface MosaicItemDto {
+  label: string
+  kind: string
+  value: number
+  unit: string
+  hint?: string
+}
+
+interface CensusDto {
+  generatedAt: string
+  chain: {
+    total: number
+    done: number
+    failed: number
+    verify: { ok: boolean; head: string | null; brokenAt: string | number | null; verified: number }
+    headAgeMs: number | null
+    byKind: Record<string, number>
+  }
+  tasks: { total: number; byStatus: Record<string, number>; stuckRunning: number; exhausted: number; queuedOrphans: number; bySource: Record<string, number> }
+  handoff: { byStatus: Record<string, number>; pendingApprovals: { id: string; repo: string; path: string; auto: boolean; ageMs: number }[]; delivered: number }
+  budget: { used: number; cap: number; remaining: number }
+  heartbeat: { reachable: boolean; arteries?: Record<string, unknown> }
+  mosaic: MosaicItemDto[]
+  worthALook: CensusFindingDto[]
+  memory: { learned: { total: number }; produced: { total: number }; delivered: { total: number }; openLoops: { total: number | null } }
+}
+
+// סיווג-סוגים (disktree classify) — אפס-כחול/אינדיגו, פלטה-רגועה
+const CENSUS_KIND_STYLES: Record<string, { bar: string; text: string }> = {
+  execution: { bar: 'bg-emerald-500/70', text: 'text-emerald-600 dark:text-emerald-400' },
+  ops: { bar: 'bg-amber-500/70', text: 'text-amber-600 dark:text-amber-400' },
+  delivery: { bar: 'bg-teal-500/70', text: 'text-teal-600 dark:text-teal-400' },
+  'self-origin': { bar: 'bg-violet-500/70', text: 'text-violet-600 dark:text-violet-400' },
+  memory: { bar: 'bg-rose-500/70', text: 'text-rose-600 dark:text-rose-400' },
+  access: { bar: 'bg-zinc-500/70', text: 'text-zinc-600 dark:text-zinc-400' },
+}
+
+const SEVERITY_STYLES: Record<string, string> = {
+  attention: 'border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400',
+  watch: 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  info: 'border-zinc-500/30 bg-zinc-500/10 text-zinc-600 dark:text-zinc-400',
 }
 
 function fmtTime(iso: string): string {
@@ -628,6 +684,9 @@ export default function Home() {
   const [metrics, setMetrics] = useState<MetricsDto | null>(null)
   const [evolving, setEvolving] = useState(false)
 
+  // פקח-הריבונות (Task 30)
+  const [census, setCensus] = useState<CensusDto | null>(null)
+
   // עובד-רקע (Task 23): ריצה-אוטומטית של משימות-QUEUED ברירת-מחדל דלוקה
   const [autoRun, setAutoRun] = useState(true)
   const [workerLoopAlive, setWorkerLoopAlive] = useState(false)
@@ -746,6 +805,16 @@ export default function Home() {
     }
   }, [])
 
+  const loadCensus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/census')
+      const j = await res.json()
+      if (j.ok) setCensus(j.census)
+    } catch {
+      /* polling — שקט */
+    }
+  }, [])
+
   // מחזור-הצעה ידני אחד (Task 26) — ירי-LLM אמיתי; 429 = תקציב-שעתי מוצה (כנות)
   // Task 28: mode — 'auto' (למידה-ראשונה-אם-יש-ממצא-HIGH, אחרת הצעה) או 'learn' (למידה בלבד)
   const triggerEvolution = useCallback(
@@ -806,6 +875,7 @@ export default function Home() {
     loadBatches()
     loadEvolution()
     loadMetrics()
+    loadCensus()
     const iv = setInterval(() => {
       loadTasks()
       loadLedger()
@@ -817,12 +887,13 @@ export default function Home() {
       loadHealth()
       loadRails()
       loadMetrics()
+      loadCensus()
     }, 15000)
     return () => {
       clearInterval(iv)
       clearInterval(ivh)
     }
-  }, [loadTasks, loadLedger, loadHealth, loadRails, loadKnownRepos, loadHandoffs, loadBatches, loadEvolution, loadMetrics])
+  }, [loadTasks, loadLedger, loadHealth, loadRails, loadKnownRepos, loadHandoffs, loadBatches, loadEvolution, loadMetrics, loadCensus])
 
   // לולאת-עובד-הרקע (Task 23): tick חי — משימת-QUEUED ותיקה אחת בכל-סבב, עד-סיומה.
   // אין-תור → המתנה-שקטה. משימות-FAILED לא נתפסות-שוב אוטומטית — ניסיון-חוזר הוא החלטה-אנושית.
@@ -1964,6 +2035,146 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                     </tbody>
                   </table>
                 </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* פקח-הריבונות (Task 30 — tobi/disktree): אינטליגנציה-קודם, אפס-מחיקה */}
+          <Card>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Boxes className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+                מפת-הריבונות
+              </CardTitle>
+              <CardDescription>
+                פקח-האחזות (עקרונות tobi/disktree): כל-מספר נגזר-מאמת בזמן-ריצה, מסומן-ולא-נמחק — הבעלים מחליט מה עושים.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {!census ? (
+                <Skeleton className="h-40 w-full" />
+              ) : (
+                <>
+                  {/* פסיפס-האחזות — גודל=מדידת-אמת, צבע=סוג */}
+                  <div>
+                    <div className="mb-1.5 flex items-center justify-between text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">פסיפס-האחזות לפי-סוג</span>
+                      <span dir="ltr">{census.chain.verify.ok ? `seq ${census.chain.total} ✓` : 'chain ✗'}</span>
+                    </div>
+                    <div className="flex h-8 w-full overflow-hidden rounded-md border">
+                      {(() => {
+                        const total = census.mosaic.reduce((s, m) => s + m.value, 0)
+                        if (total === 0)
+                          return (
+                            <div className="flex w-full items-center justify-center text-[11px] text-muted-foreground">
+                              אחזות-ריקה
+                            </div>
+                          )
+                        return census.mosaic
+                          .filter((m) => m.value > 0)
+                          .map((m) => {
+                            const st = CENSUS_KIND_STYLES[m.kind] ?? CENSUS_KIND_STYLES.access
+                            return (
+                              <div
+                                key={m.label}
+                                title={`${m.label} — ${m.value} ${m.unit}${m.hint ? ` (${m.hint})` : ''}`}
+                                style={{ flexGrow: m.value, flexBasis: 0 }}
+                                className={`flex items-center justify-center ${st.bar} border-e last:border-e-0 border-white/40 dark:border-black/40`}
+                              >
+                                <span className="px-1 text-[11px] font-semibold text-white drop-shadow">{m.value}</span>
+                              </div>
+                            )
+                          })
+                      })()}
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
+                      {census.mosaic.map((m) => {
+                        const st = CENSUS_KIND_STYLES[m.kind] ?? CENSUS_KIND_STYLES.access
+                        return (
+                          <span key={m.label} className="flex items-center gap-1 text-[10px] text-muted-foreground" title={m.hint ?? ''}>
+                            <span className={`h-2 w-2 rounded-sm ${st.bar}`} />
+                            {m.label} · <span className="font-medium text-foreground">{m.value}</span>
+                          </span>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* חומר-הזיכרון הנגזר */}
+                  <div className="grid grid-cols-4 gap-2 text-center">
+                    <div className="rounded-md border bg-muted/40 p-2">
+                      <div className="text-lg font-semibold">{census.memory.learned.total}</div>
+                      <div className="text-[10px] text-muted-foreground">נלמד</div>
+                    </div>
+                    <div className="rounded-md border bg-muted/40 p-2">
+                      <div className="text-lg font-semibold">{census.memory.produced.total}</div>
+                      <div className="text-[10px] text-muted-foreground">נוצר</div>
+                    </div>
+                    <div className="rounded-md border bg-muted/40 p-2">
+                      <div className="text-lg font-semibold">{census.memory.delivered.total}</div>
+                      <div className="text-[10px] text-muted-foreground">נאסף-לגיט</div>
+                    </div>
+                    <div className="rounded-md border bg-muted/40 p-2">
+                      <div className="text-lg font-semibold">{census.memory.openLoops.total ?? '—'}</div>
+                      <div className="text-[10px] text-muted-foreground">פתוח-HIGH</div>
+                    </div>
+                  </div>
+
+                  {/* תקציב + לב */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">תקציב-התפתחות שעתי</span>
+                      <span className="font-mono" dir="ltr">
+                        {census.budget.used}/{census.budget.cap}
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                      <div
+                        className={`h-full ${census.budget.used >= census.budget.cap ? 'bg-amber-500' : 'bg-violet-500'}`}
+                        style={{ width: `${Math.min(100, (census.budget.used / Math.max(1, census.budget.cap)) * 100)}%` }}
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <Badge variant="outline" className="gap-1 text-[10px] border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        הלב {census.heartbeat.reachable ? 'דופק' : 'לא-נגיש'}
+                      </Badge>
+                      <Badge variant="outline" className="gap-1 text-[10px] border-zinc-500/30 text-zinc-600 dark:text-zinc-400">
+                        משימות {census.tasks.total}
+                      </Badge>
+                      <Badge variant="outline" className="gap-1 text-[10px] border-zinc-500/30 text-zinc-600 dark:text-zinc-400">
+                        הצעות-ממתינות {census.handoff.pendingApprovals.length}
+                      </Badge>
+                    </div>
+                  </div>
+
+                  {/* שווה-מבט — סימון-בלבד, אפס-פעולה */}
+                  <div>
+                    <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium">
+                      <ScanSearch className="h-3.5 w-3.5 text-muted-foreground" />
+                      שווה-מבט ({census.worthALook.length})
+                    </div>
+                    {census.worthALook.length === 0 ? (
+                      <p className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-2 text-xs text-emerald-600 dark:text-emerald-400">
+                        אין-ממצאים — הרשת נקייה ונמדדת-חי.
+                      </p>
+                    ) : (
+                      <div className="max-h-56 space-y-1.5 overflow-y-auto">
+                        {census.worthALook.map((f) => (
+                          <div key={f.id} className="rounded-md border p-2 text-xs" title={f.pointer ?? ''}>
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="font-medium leading-snug">{f.title}</span>
+                              <Badge variant="outline" className={`shrink-0 text-[9px] ${SEVERITY_STYLES[f.severity] ?? SEVERITY_STYLES.info}`}>
+                                {f.severity === 'attention' ? 'דורש-הבטה' : f.severity === 'watch' ? 'שווה-עין' : 'מידע'}
+                              </Badge>
+                            </div>
+                            <p className="mt-0.5 text-[11px] text-muted-foreground">{f.detail}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
