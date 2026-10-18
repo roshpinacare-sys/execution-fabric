@@ -97,3 +97,25 @@ model LedgerEntry {
 
   task Task? @relation(fields: [taskId], references: [id])
 }
+
+// עורק-הבנייה (worklog Task 32): הרשת לא רק בודקת ולומדת — היא בונה את המוצר עצמו.
+// Improvement = שיפור-מוצר אמיתי שנולד במחזור-בנייה: ארטיפקט בקובץ (sovereign/site/)
+// + רשומה כאן + חתימה בשרשרת (SITEBUILD). PROPOSAL = הצעת-שינוי-קוד/UI למוצר —
+// נשמרת ומוצגת, מבוצעת רק דרך התור/שער-ההעברה הקיימים (אפס-עריכת-קוד-אוטומטית).
+// דיסציפלינה: שינוי-סכימה אדיטיבי-בלבד — השרשרת הקנונית קפואה.
+model Improvement {
+  id           Int      @id @default(autoincrement())
+  kind         String // CONTENT | DATA | PROPOSAL
+  title        String
+  summary      String
+  body         String // markdown — התוכן המלא
+  payload      String? // JSON — לסוג DATA (נתוני-תצוגה וכד')
+  status       String   @default("APPLIED") // APPLIED | PROPOSED
+  artifactPath String? // sovereign/site/<ts>-<slug>.md
+  worker       String? // המועמד-הנבחר בסולם
+  attempts     Int      @default(0)
+  durationMs   Int?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+}
