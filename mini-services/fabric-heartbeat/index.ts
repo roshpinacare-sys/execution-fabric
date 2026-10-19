@@ -549,14 +549,14 @@ async function restorePulse(): Promise<void> {
     })
     const d = (await res.json()) as {
       ok?: boolean
-      drill?: { ran?: boolean; ok?: boolean; reason?: string; verified?: number; headMatch?: boolean }
+      drill?: { ran?: boolean; ok?: boolean; reason?: string; verified?: number; prefixMatch?: boolean }
     }
     const dr = d.drill ?? {}
     if (dr.ran === false) {
       state.lastRestoreResult = `skipped: ${dr.reason ?? 'recent'}`
     } else if (d.ok && dr.ok) {
       state.restoreOk = true
-      state.lastRestoreResult = `restored: ${dr.verified} entries · headMatch:${dr.headMatch}`
+      state.lastRestoreResult = `restored: ${dr.verified} entries · prefixMatch:${dr.prefixMatch}`
       log(`עורק-השחזור: הכפילות-הרחוקה מאומתת ✓ ${state.lastRestoreResult}`)
     } else {
       state.restoreOk = false

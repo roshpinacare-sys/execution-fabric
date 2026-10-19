@@ -20,7 +20,8 @@ import { db } from '@/lib/db'
 import { appendLedger, sha256Short, verifyChain, GENESIS } from '@/lib/ledger'
 
 const REPO_URL = 'https://github.com/roshpinacare-sys/execution-fabric.git'
-const DRILL_TASK = 'restore-drill'
+const DRILL_TASK = 'restore-drill' // זהות-לוגית בלבד — בשרשרת היא ב-worker (taskId = מפתח-זר ל-Task אמיתית, קונבנציית drill:*)
+const DRILL_WORKER = 'drill:restore'
 const MIN_INTERVAL_MS = 30 * 60_000
 const CLONE_TIMEOUT_MS = 120_000
 
@@ -33,7 +34,7 @@ export interface RestoreDrillResult {
   total?: number
   cloneHead?: string | null
   prodHead?: string | null
-  headMatch?: boolean
+  prefixMatch?: boolean
   durationMs?: number
   at: string
   ledgerId?: number
@@ -49,7 +50,7 @@ export interface LastDrillBrief {
 
 export async function lastRestoreDrill(): Promise<LastDrillBrief | null> {
   const rec = await db.ledgerEntry.findFirst({
-    where: { kind: 'DRILL', taskId: DRILL_TASK },
+    where: { kind: 'DRILL', worker: DRILL_WORKER },
     orderBy: { id: 'desc' },
   })
   if (!rec) return null
@@ -95,6 +96,7 @@ export async function runRestoreDrill(force = false): Promise<RestoreDrillResult
 
       const prodRec = await db.ledgerEntry.findFirst({ orderBy: { id: 'desc' } })
       const prodHead = prodRec?.hash ?? GENESIS
+      const prodTotal = prodRec?.id ?? 0
 
       // קורא-חד-פעמי על-עותק-השחזור — ה-db-הייצור-שלי לא נוגע-כלל
       const reader = new PrismaClient({ datasources: { db: { url: `file:${cloneDb}` } } })
@@ -112,16 +114,23 @@ export async function runRestoreDrill(force = false): Promise<RestoreDrillResult
         await reader.$disconnect()
       }
 
-      const headMatch = cloneHead === prodHead
-      if (!headMatch) {
-        throw new Error(`head-mismatch clone=${cloneHead.slice(0, 8)} prod=${prodHead.slice(0, 8)}`)
+      // הצלבה-נכונה למערכת-חיה (לקח-הרצה-ראשונה, Task 70): הייצור גדל-בין-דחיפות —
+      // שוויון-ראש-מלא אינו-הקריטריון. קריטריון-האמת: העותק-המשוחזר = קידומת-מאומתת
+      // של השרשרת-החיה — hash-העותק בגובה-סדר-העותק זהה-ביט-ביט ל-hash-הייצור-שם.
+      // הזנב-שנולד-אחרי-הדחיפה-האחרונה מכוסה-על-ידי-פעימת-הדופק (כל-15דק').
+      if (total > prodTotal) {
+        throw new Error(`clone-ahead-of-production clone=${total} prod=${prodTotal}`)
+      }
+      const anchor = await db.ledgerEntry.findFirst({ where: { id: total } })
+      if (!anchor || anchor.hash !== cloneHead) {
+        throw new Error(`clone-not-a-prefix seq=${total} clone=${cloneHead.slice(0, 8)} prod=${anchor?.hash.slice(0, 8) ?? 'missing'}`)
       }
       const durationMs = Date.now() - started
       const entry = await appendLedger({
-        taskId: DRILL_TASK,
+        taskId: null,
         kind: 'DRILL',
         status: 'DONE',
-        worker: 'fabric-app',
+        worker: DRILL_WORKER,
         attempts: 1,
         durationMs,
         errorClass: null,
@@ -134,7 +143,7 @@ export async function runRestoreDrill(force = false): Promise<RestoreDrillResult
         total,
         cloneHead,
         prodHead,
-        headMatch: true,
+        prefixMatch: true,
         durationMs,
         at: entry.createdAt.toISOString(),
         ledgerId: entry.id,
@@ -145,17 +154,17 @@ export async function runRestoreDrill(force = false): Promise<RestoreDrillResult
   } catch (e) {
     const durationMs = Date.now() - started
     const msg = e instanceof Error ? e.message : String(e)
-    const errorClass = msg.startsWith('head-mismatch')
-      ? 'head-mismatch'
-      : msg.includes('clone-chain-broken')
-        ? 'clone-chain-broken'
+    const errorClass = msg.startsWith('clone-chain-broken')
+      ? 'clone-chain-broken'
+      : msg.startsWith('clone-')
+        ? 'clone-not-prefix'
         : 'clone-failed'
     try {
       const entry = await appendLedger({
-        taskId: DRILL_TASK,
+        taskId: null,
         kind: 'DRILL',
         status: 'FAILED',
-        worker: 'fabric-app',
+        worker: DRILL_WORKER,
         attempts: 1,
         durationMs,
         errorClass,

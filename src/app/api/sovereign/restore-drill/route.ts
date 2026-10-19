@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { runRestoreDrill, lastRestoreDrill } from '@/lib/restore-drill'
 
 // תרגיל-שחזור (Task 70) — הוכחה-חיה שהכפילות-הרחוקה (GitHub) מחזירה-מערכת-שלמה-מאומתת.
@@ -19,7 +19,9 @@ export async function GET() {
   }
 }
 
-export async function POST() {
-  const drill = await runRestoreDrill()
+export async function POST(req: NextRequest) {
+  // ?force=1 — מניפולציית-בדיקה בלבד: מדלג-על-מגבלת-ה-30דק' (בשימוש-מסודר-נדיר)
+  const force = req.nextUrl.searchParams.get('force') === '1'
+  const drill = await runRestoreDrill(force)
   return NextResponse.json({ ok: drill.ok, drill })
 }
