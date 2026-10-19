@@ -4,7 +4,7 @@
   "private": true,
   "description": "הזקיפה (Task 71): מעקב-חי אחרי הלב (:3031), העד (:3050) והאפליקציה (:3000) + החייאה-עצמית של הלב-והעד + מראת-גיבוי-מקומית + תמונות-db. fail-honest בכל-שדה.",
   "scripts": {
-    "dev": "bun --hot index.ts"
+    "dev": "bun index.ts"
   },
   "type": "module"
 }

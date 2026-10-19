@@ -19,10 +19,13 @@
 // Task 72 — מצב-עמיד-להתחדשות: לקח-חי (הריצה-הראשונה): bun --hot עלול-להתחדש-בגלל
 // פעימות-הגיט-של-הלב — ואז-המונים/האירועים/ה-backoff מתאפסים (הפסד-ראיות!). מעתה:
 // כל-המצב-החי נשמר-ב-state-file מחוץ-לעץ-הפרויקט, נטען-באתחול, ונשמר-בשינוי.
-// בנוסף: כל-הטיימרים-רשומים-פעם-אחת-בלבד (הגנת-globalThis — אפס-כפילויות-הזנקה-בהתחדשות-חמה),
-// ופעימות-האתחול (מראה/תמונה) מגובלות-ברעננות — אפס-ספאם-אתחול.
 //
-// כנות: מי-משגיח-על-הזקיפה? העץ-המתמיד של הפלטפורמה (bun --hot) + כלב-השמיר
+// Task 72 — לקח-חי-שני (תרגיל-ההרג): bun --hot גרם-פיצול-מוח — הטיימרים-הישנים-המשיכו-
+// לחיות-על-המצב-הישן (והחיו-באמת!), בזמן-שהמודול-החדש-הגיש-מצב-קפוא-דרך-השרת.
+// התיקון-מהשורש: הזקיפה-רצה-**בלי---hot** — תהליך-יציב-אחד, אפס-פיצול. עדכון-קוד
+// = הזנקה-מחדש-יזומה (פרוטוקול-התחייה) — ואפילו-שם-המצב-עמיד-על-הדיסק.
+//
+// כנות: מי-משגיח-על-הזקיפה? יציבות-התהליך-העצמית (ללא-התחדשות-חמה — אפס-פיצול) + כלב-השמיר
 // של הלב + badge-חי לבעלים ב-census + כלי-'keeper' ב-selftest (Task 72 — עדות-חתומה
 // בשרשרת-כל-30דק'). הזקיפה אינה-אלוהות — היא-שכבה.
 // אף-סוד לא נוגע/נדפס כאן. אף-כתיבה-לגיט לא נעשית כאן (רק-קריאה-למראה).
@@ -156,15 +159,6 @@ function pushEvent(kind: string, msg: string): void {
   events.unshift({ at: new Date().toISOString(), kind, msg })
   if (events.length > EVENTS_MAX) events.length = EVENTS_MAX
   markDirty()
-}
-
-// ── הגנת-טיימרים (Task 72): רישום-פעם-אחת-בלבד לכל-חיי-התהליך-על-פני-התחדשויות-חמות
-const g = globalThis as unknown as { __keeperTimers?: boolean }
-
-function onceTimers(): boolean {
-  if (g.__keeperTimers) return false
-  g.__keeperTimers = true
-  return true
 }
 
 // ── עזרי-גיט (spawnSync — פשוט, אין-ערימה) ────────────────────────────────
@@ -391,7 +385,7 @@ log(
 )
 
 void check()
-// פעימות-אתחול מגובלות-ברעננות (Task 72): התחדשות-חמה/אתחול-מחדש לא יזרוק-תמונה/עדכון-מראה
+// פעימות-אתחול מגובלות-ברעננות (Task 72): אתחול-מחדש לא יזרוק-תמונה/עדכון-מראה
 // אם-הקודמת-טרייה — אפס-ספאם-אתחול, המרווחים-הקבועים-ממשיכים-לתזמן.
 const mirrorStale =
   !mirror.lastUpdateAt || Date.now() - new Date(mirror.lastUpdateAt).getTime() > MIRROR_PULSE_MS - 5 * 60_000
@@ -400,18 +394,16 @@ const snapStale =
 if (mirrorStale) void mirrorPulse()
 if (snapStale) void snapshotPulse()
 
-if (onceTimers()) {
-  setInterval(() => void check(), CHECK_MS)
-  setTimeout(() => {
-    void mirrorPulse()
-    setInterval(() => void mirrorPulse(), MIRROR_PULSE_MS)
-  }, MIRROR_FIRST_MS)
-  setTimeout(() => {
-    void snapshotPulse()
-    setInterval(() => void snapshotPulse(), SNAPSHOT_PULSE_MS)
-  }, SNAPSHOT_FIRST_MS)
-  setInterval(() => {
-    if (dirty) flushState()
-  }, FLUSH_MS)
-  setInterval(flushState, 15 * 60_000) // עיגון-תקופתי-גם-בלי-dirty (אחריות-עמידות)
-}
+setInterval(() => void check(), CHECK_MS)
+setTimeout(() => {
+  void mirrorPulse()
+  setInterval(() => void mirrorPulse(), MIRROR_PULSE_MS)
+}, MIRROR_FIRST_MS)
+setTimeout(() => {
+  void snapshotPulse()
+  setInterval(() => void snapshotPulse(), SNAPSHOT_PULSE_MS)
+}, SNAPSHOT_FIRST_MS)
+setInterval(() => {
+  if (dirty) flushState()
+}, FLUSH_MS)
+setInterval(flushState, 15 * 60_000) // עיגון-תקופתי-גם-בלי-dirty (אחריות-עמידות)
