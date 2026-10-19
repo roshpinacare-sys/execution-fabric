@@ -6,6 +6,21 @@ import { runInnovationCycle } from '@/lib/innovation'
 // מסילת-החדשנות (Task 60): POST מריץ מחזור-חדשנות אמיתי —
 // מדידת קו-בסיס → אופטימיזציה → הוכחת-שקילות → מדידה → חתימת INNOVATION בשרשרת.
 // GET גוזר את היסטוריית-החדשנות מהשרשרת עצמה (אפס-טבלה-חדשה, אפס-מונים).
+//
+// Task 73 — מחזור-חדשנות #6, מסלול-שני: POST ?subject=witness — מדידת-העד החי
+// (chain-witness :3050/bench): אימות-מלא-בזרימה מול טעינה-מלאה, שני-מימושים-בלתי-
+// תלויים-שחייבים-להסכים. שקילות = אימוץ; מהירות = רישום-כן (הסיבה-לאימוץ: חסימות-זיכרון).
+interface WitnessBench {
+  ok?: boolean
+  runs?: number
+  equivalence?: boolean
+  total?: number
+  verified?: number
+  head?: string
+  stream?: { minMs: number; avgMs: number; maxMs: number }
+  load?: { minMs: number; avgMs: number; maxMs: number }
+  streamOverLoad?: number
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -30,6 +45,60 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const subject = req.nextUrl.searchParams.get('subject') ?? 'verifyChain'
+
+  // מסלול-#6 (Task 73): מדידת-העד-החי — האמת-על-ביצועי-העד מקורה-בעד-עצמו, לא-בהערכה.
+  if (subject === 'witness') {
+    let bench: WitnessBench
+    try {
+      const res = await fetch('http://127.0.0.1:3050/bench?runs=25', {
+        signal: AbortSignal.timeout(120_000),
+        cache: 'no-store',
+      })
+      bench = (await res.json()) as WitnessBench
+    } catch (e) {
+      // fail-honest: עד-דממה = אין-מדידה = אין-חתימה. אפס-המצאה-מספרים.
+      return NextResponse.json(
+        { ok: false, error: 'bench-unreachable', detail: e instanceof Error ? e.message : String(e) },
+        { status: 502 }
+      )
+    }
+    if (bench.ok !== true || !bench.stream || !bench.load) {
+      return NextResponse.json({ ok: false, error: 'bench-invalid', bench }, { status: 502 })
+    }
+    // שקילות-היא-תנאי-אימוץ-מוחלט: שני-מימושים-שלא-מסכימים = FAILED (fail-closed).
+    const equivalenceProven = bench.equivalence === true
+    const status = equivalenceProven ? 'DONE' : 'FAILED'
+    const entry = await appendLedger({
+      taskId: null,
+      kind: 'INNOVATION',
+      status,
+      worker: 'innovation-cycle-witness',
+      attempts: 1,
+      durationMs: Math.round((bench.stream.avgMs + bench.load.avgMs) * 1000),
+      errorClass: equivalenceProven ? null : 'equivalence-mismatch',
+      outputHash: sha256Short(
+        JSON.stringify({
+          subject: 'witness-stream-vs-load',
+          runs: bench.runs,
+          chainEntries: bench.total,
+          verified: bench.verified,
+          head: bench.head,
+          streamMinMs: bench.stream.minMs,
+          streamAvgMs: bench.stream.avgMs,
+          loadMinMs: bench.load.minMs,
+          loadAvgMs: bench.load.avgMs,
+          streamOverLoad: bench.streamOverLoad,
+          equivalenceProven,
+          // הערת-האימוץ הכנה: אימוץ-הזרימה על-בסיס-חסימות-זיכרון (O(מנת-אצווה) מול O(n))
+          // בשירות-לנצח; מהירות-בקנה-המידה-הנוכחי נרשמת-כפי-שהיא.
+          adoptionRationale: 'bounded-memory',
+        })
+      ),
+    })
+    return NextResponse.json({ ok: true, status, bench, ledgerEntryId: entry.id })
+  }
+
   const m = await runInnovationCycle()
 
   // אם-השקילות-לא-הוכחה — זה כשל-כן (fail-closed): נרשם FAILED, לא נחגוג שיפור.
