@@ -24,6 +24,12 @@ import { verifyChainStreamed } from '@/lib/ledger'
 // Task 76 — מחזור-חדשנות #9: ?subject=metrics — הזרמת-מסלולי-הקריאה-הציבוריים (metrics+ledger
 // — ה-O(n)-האחרון-שנותר): מימוש-האגרגציות-החדש-ב-SQL מוצלב-מול-ה-census-מ-#7 (כבר-חתום) —
 // שני-מימושים-בלתי-תלויים-שחייבים-להסכים-על-כל-הפלטים-המשותפים (קנון-ממוין — לקח-#7).
+//
+// Task 78 — מחזור-חדשנות #11: ?subject=snapshot-drill — מקור-שחזור-שני, התמונה-השעתית
+// (VACUUM INTO). עד-היום ההוכחה-הקבועה-נשענה-על-מקור-אחד (clone-גיט, מחזור-#8). אם-הגיט-
+// עצמו-נפגע — אין-הוכחה-שהמקור-השני-באמת-משחזר. מעתה: העתקת-התמונה-הטרייה-ביותר →
+// אימות-עצמאי-בזרימה על-העותק → הצלבת-קידומת-מול-הייצור → חתימה ב-worker משלו.
+// שני-מקורות-בלתי-תלויים, אותו-קנון-אמת, שניהם-מוכחים-ריצה.
 interface WitnessBench {
   ok?: boolean
   runs?: number
@@ -178,6 +184,49 @@ export async function POST(req: NextRequest) {
           drillLedgerId: drill.ledgerId ?? null,
           reason: drill.reason ?? null,
           adoptionRationale: 'remote-duplication-proven',
+        })
+      ),
+    })
+    return NextResponse.json({ ok: true, status, drill, ledgerEntryId: entry.id })
+  }
+
+  // מחזור-#11 (Task 78): תרגיל-שחזור-מהמקור-השני — התמונה-השעתית. אותו-קנון-אמת של #8
+  // (ran + ok + prefixMatch = תנאי-אימוץ-מוחלט), מקור-בלתי-תלוי: VACUUM INTO טרייה-ביותר.
+  // תמונה-חסרה/ישנה-מ-90דק' = כשל-כן-חתום (snapshot-missing / snapshot-stale) — אפס-המצאה.
+  if (subject === 'snapshot-drill') {
+    let drill: RestoreDrillResult
+    try {
+      drill = await runRestoreDrill(true, 'snapshot') // כפייה-במסילה בלבד: המחזור-חייב-לרוץ-בפועל
+    } catch (e) {
+      return NextResponse.json(
+        { ok: false, error: 'drill-unreachable', detail: e instanceof Error ? e.message : String(e) },
+        { status: 502 }
+      )
+    }
+    const adoptionProven = drill.ran === true && drill.ok === true && drill.prefixMatch === true
+    const status = adoptionProven ? 'DONE' : 'FAILED'
+    const entry = await appendLedger({
+      taskId: null,
+      kind: 'INNOVATION',
+      status,
+      worker: 'innovation-cycle-snapshot-drill',
+      attempts: 1,
+      durationMs: drill.durationMs ?? 0,
+      errorClass: adoptionProven ? null : (drill.errorClass ?? 'drill-not-proven'),
+      outputHash: sha256Short(
+        JSON.stringify({
+          subject: 'snapshot-restore-drill-forced',
+          source: drill.source ?? 'snapshot',
+          snapshotName: drill.snapshotName ?? null,
+          snapshotAgeMs: drill.snapshotAgeMs ?? null,
+          verified: drill.verified ?? null,
+          total: drill.total ?? null,
+          copyHead: drill.cloneHead ?? null,
+          prodHead: drill.prodHead ?? null,
+          prefixMatch: drill.prefixMatch ?? null,
+          drillLedgerId: drill.ledgerId ?? null,
+          reason: drill.reason ?? null,
+          adoptionRationale: 'independent-backup-source-proven',
         })
       ),
     })
