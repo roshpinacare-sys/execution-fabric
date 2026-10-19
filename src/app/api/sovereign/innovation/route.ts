@@ -626,6 +626,69 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  // מחזור-#18 (Task 86): מרכז-הפיקוח-המרכזי — מימוש-הצעה-אוטונומית שנולדה-מהרשת-עצמה
+  // (sovereign/site/2026-10-19T18-58-08-improvement.md). תנאי-האימוץ-המוחלט: נקודת-הקצה
+  // /api/operations מודדת-חי — ok + networkStatus 'active' + שרשרת-מאומתת + ארבעת-האיברים
+  // למעלה + שלוש-קבוצות-המדדים (tasks/proposals/memory) נוכחות. המדידה-דרך-HTTP-עצמי —
+  // ההוכחה עוברת-בשער-הציבורי-בפועל, לא-בקריאה-פנימית. כל-כישלון = FAILED-חתום.
+  if (subject === 'operations-hub') {
+    type OperationsProbe = {
+      ok?: boolean
+      networkStatus?: string
+      chain?: { ok?: boolean; total?: number; verified?: number }
+      tasks?: Record<string, unknown>
+      proposals?: Record<string, unknown>
+      memory?: Record<string, unknown>
+      organs?: Record<string, { up?: boolean }>
+    }
+    let ops: OperationsProbe
+    try {
+      const res = await fetch('http://127.0.0.1:3000/api/operations', {
+        signal: AbortSignal.timeout(30_000),
+        cache: 'no-store',
+      })
+      ops = (await res.json()) as OperationsProbe
+    } catch (e) {
+      return NextResponse.json(
+        { ok: false, error: 'operations-unreachable', detail: e instanceof Error ? e.message : String(e) },
+        { status: 502 }
+      )
+    }
+    const organsUp =
+      !!ops.organs &&
+      Object.values(ops.organs).every((o) => (o as { up?: boolean })?.up === true)
+    const adoptionProven =
+      ops.ok === true &&
+      ops.networkStatus === 'active' &&
+      ops.chain?.ok === true &&
+      organsUp &&
+      !!ops.tasks &&
+      !!ops.proposals &&
+      !!ops.memory
+    const status = adoptionProven ? 'DONE' : 'FAILED'
+    const entry = await appendLedger({
+      taskId: null,
+      kind: 'INNOVATION',
+      status,
+      worker: 'innovation-cycle-operations-hub',
+      attempts: 1,
+      durationMs: 0,
+      errorClass: adoptionProven ? null : 'operations-not-proven',
+      outputHash: sha256Short(
+        JSON.stringify({
+          subject: 'operations-hub-live',
+          networkStatus: ops.networkStatus ?? null,
+          chainTotal: ops.chain?.total ?? null,
+          chainVerified: ops.chain?.verified ?? null,
+          chainOk: ops.chain?.ok ?? null,
+          organs: ops.organs ?? null,
+          adoptionRationale: 'central-observability-proven-over-live-endpoint',
+        })
+      ),
+    })
+    return NextResponse.json({ ok: true, status, adoptionProven, ops, ledgerEntryId: entry.id })
+  }
+
   const m = await runInnovationCycle()
 
   // אם-השקילות-לא-הוכחה — זה כשל-כן (fail-closed): נרשם FAILED, לא נחגוג שיפור.

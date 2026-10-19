@@ -45,6 +45,8 @@ export function chainRepairConfirmMatches(token: string | null): boolean {
 }
 
 // כתיבת-הייצוא-מחדש מהמצב-המתוקן: הקידומת-בייט-בייט מהקובץ-הקיים, הזנב-מהייצור.
+// לקח-התיקון-החי (נתפס-מיד-באימות-מול-המציאות): idCursor מתקדם רק-על-שורות-שנשמרו —
+// הגרסה-הראשונה קידמה אותו גם-על-שורת-ה-break (1045) והזנב-נבנה-מ-1046 (פער-חתום).
 async function rewriteExportTail(brokenAt: number): Promise<number> {
   if (!existsSync(EXPORT_PATH)) return 0
   const { readFile } = await import('node:fs/promises')
@@ -61,8 +63,8 @@ async function rewriteExportTail(brokenAt: number): Promise<number> {
       break // שורה-פגומה — הקידומת-היא-מה-שלפניה; הזנב-יבנה-מהייצור
     }
     if (parsed.id !== idCursor + 1) break // פער — עצירה-בגבול-הקידומת-התקינה
-    idCursor = parsed.id
     if (parsed.id >= brokenAt) break // כאן-מתחיל-הזנב-שנכתב-מהייצור-המתוקן
+    idCursor = parsed.id // מתקדם-רק-על-שורה-שנשמרת-באמת
     kept.push(line)
   }
   const tailRows = await db.ledgerEntry.findMany({
@@ -80,10 +82,24 @@ export async function runChainRepair(): Promise<ChainRepairResult> {
   const started = Date.now()
   const at0 = new Date().toISOString()
   return appendSlot(async (): Promise<ChainRepairResult> => {
-    // 0. אם-השרשרת-תקינה — אין-מה-לתקן (idempotent-כן)
+    // 0. אם-השרשרת-תקינה — אין-מה-לתקן-בשרשרת; הייצוא-עדיין-נבנה-מחדש-מהייצור
+    //    (סגירת-הלקח-החי: הריצה-הראשונה השאירה-פער-בקובץ-שנתפס-בסנכרון-הבא).
     const before = await verifyChainStreamed()
     if (before.ok) {
-      return { ok: true, noOp: true, reason: 'chain already fully verified', verifiedAfter: before, at: at0 }
+      let exportRows = 0
+      try {
+        exportRows = await rewriteExportTail(1) // מה-Genesis: הקובץ-כולו-מושוה-מול-הייצור
+      } catch {
+        exportRows = 0
+      }
+      return {
+        ok: true,
+        noOp: true,
+        reason: 'chain already fully verified',
+        exportRewritten: exportRows > 0,
+        verifiedAfter: before,
+        at: at0,
+      }
     }
     if (before.brokenAt === null || before.verified === 0) {
       return { ok: false, reason: `unexpected verify state brokenAt=${before.brokenAt} verified=${before.verified}`, at: at0 }

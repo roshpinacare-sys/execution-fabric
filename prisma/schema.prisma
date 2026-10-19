@@ -88,7 +88,7 @@ model LedgerEntry {
   durationMs Int      @default(0)
   errorClass String?
   outputHash String // sha256(output) מקוצץ 32 — או sha256 של "" עבור כשל
-  prev       String // GENESIS | hash קודם
+  prev       String @unique // GENESIS | hash קודם — UNIQUE=משמרת-מזלג ברמת-המסד (Task 86): שתי-רשומות עם אותו-prev = מזלג; המסד דוחה-את-השני, הכותב מנסה-שוב-עם-ראש-טרייה
   hash       String // sha256(JSON.stringify({...rec, prev})).slice(0,32)
   // מקשר-ניווט בלבד (Task 24): מחוץ-ל-hash הקנוני — ה-hash הקנוני נשאר יציב לכל-השרשרת.
   // קבלת-האצווה עצמה מכוסה-השלמות דרך outputHash (sha256 של סיכום-האצווה הקנוני).
