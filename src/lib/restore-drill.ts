@@ -22,7 +22,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { PrismaClient } from '@prisma/client'
 import { db } from '@/lib/db'
-import { appendLedger, sha256Short, verifyChain, GENESIS } from '@/lib/ledger'
+import { appendLedger, sha256Short, verifyChain, ledgerHash, GENESIS } from '@/lib/ledger'
 
 const REPO_URL = 'https://github.com/roshpinacare-sys/execution-fabric.git'
 const DRILL_TASK = 'restore-drill' // זהות-לוגית בלבד — בשרשרת היא ב-worker (taskId = מפתח-זר ל-Task אמיתית, קונבנציית drill:*)
@@ -119,18 +119,44 @@ export async function runRestoreDrill(force = false): Promise<RestoreDrillResult
       const prodHead = prodRec?.hash ?? GENESIS
       const prodTotal = prodRec?.id ?? 0
 
-      // קורא-חד-פעמי על-עותק-השחזור — ה-db-הייצור-שלי לא נוגע-כלל
+      // קורא-חד-פעמי על-עותק-השחזור — ה-db-הייצור-שלי לא נוגע-כלל.
+      // מחזור-#10 (Task 77): האימות-על-העותק-בזרימה (cursor-pagination) — הטעינה-המלאה
+      // של-העותק-מוסרת; אותו-דגם-אמונים: מה-Genesis, בלי-דלתא, בלי-checkpoint.
       const reader = new PrismaClient({ datasources: { db: { url: `file:${cloneDb}` } } })
       let verified: number
       let total: number
       let cloneHead: string
       try {
-        const entries = await reader.ledgerEntry.findMany({ orderBy: { id: 'asc' } })
-        total = entries.length
-        const v = verifyChain(entries)
-        if (!v.ok) throw new Error(`clone-chain-broken-at-${v.brokenAt}`)
-        verified = v.verified
-        cloneHead = v.head
+        total = await reader.ledgerEntry.count()
+        let prev = GENESIS
+        let brokenAt: number | null = null
+        verified = 0
+        let cursorId: number | undefined
+        const PAGE = 500
+        while (brokenAt === null) {
+          const page = await reader.ledgerEntry.findMany({
+            orderBy: { id: 'asc' },
+            take: PAGE,
+            ...(cursorId !== undefined ? { cursor: { id: cursorId }, skip: 1 } : {}),
+          })
+          if (page.length === 0) break
+          for (const e of page) {
+            if (e.prev !== prev) {
+              brokenAt = e.id
+              break
+            }
+            if (e.hash !== ledgerHash(e)) {
+              brokenAt = e.id
+              break
+            }
+            prev = e.hash
+            verified++
+          }
+          if (page.length < PAGE) break
+          cursorId = page[page.length - 1].id
+        }
+        if (brokenAt !== null) throw new Error(`clone-chain-broken-at-${brokenAt}`)
+        cloneHead = verified > 0 ? prev : GENESIS
       } finally {
         await reader.$disconnect()
       }

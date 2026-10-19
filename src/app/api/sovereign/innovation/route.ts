@@ -5,6 +5,7 @@ import { runInnovationCycle, runCensusCycle, type CensusCycleMeasurement } from 
 import { runRestoreDrill, type RestoreDrillResult } from '@/lib/restore-drill'
 import { buildMetricsStreamed } from '@/lib/metrics'
 import { buildCensus } from '@/lib/census'
+import { verifyChainStreamed } from '@/lib/ledger'
 
 // מסילת-החדשנות (Task 60): POST מריץ מחזור-חדשנות אמיתי —
 // מדידת קו-בסיס → אופטימיזציה → הוכחת-שקילות → מדידה → חתימת INNOVATION בשרשרת.
@@ -251,6 +252,73 @@ export async function POST(req: NextRequest) {
       equivalenceProven,
       streamMs: Math.round(streamMs * 1000) / 1000,
       censusMs: Math.round(censusMs * 1000) / 1000,
+      ledgerEntryId: entry.id,
+    })
+  }
+
+  // מחזור-#10 (Task 77): סגירת-הדלתא + שערי-הקריאה — ops (טעינה-מלאה) ו-registry
+  // (דלתא-עם-checkpoint-בזיכרון-תהליך — האמון-הטפילי-שנדחה-בכל-המחזורים) מוזרמים-מעתה
+  // ל-verifyChainStreamed; גם-התרגיל-מאמת-את-העותק-בזרימה. ההוכחה — הצלבה-כפולת-תהליכים:
+  // העד-העצמאי (:3050, תהליך-נפרד, קוד-בלתי-תלוי) מול-הייצור-המזרים — שני-גופים-שחייבים-
+  // להסכים-ברגע-החתימה; שקילות-זו-מכסה-את-כל-השערים-המוזרמים (אותו-קנון-זרימה).
+  if (subject === 'chain-sources') {
+    let witness: { ok?: boolean; verified?: number; total?: number; head?: string }
+    try {
+      const res = await fetch('http://127.0.0.1:3050/witness', {
+        signal: AbortSignal.timeout(30_000),
+        cache: 'no-store',
+      })
+      witness = (await res.json()) as typeof witness
+    } catch (e) {
+      return NextResponse.json(
+        { ok: false, error: 'witness-unreachable', detail: e instanceof Error ? e.message : String(e) },
+        { status: 502 }
+      )
+    }
+    if (witness.ok !== true) {
+      return NextResponse.json({ ok: false, error: 'witness-invalid', witness }, { status: 502 })
+    }
+    const t0 = performance.now()
+    const stream = await verifyChainStreamed()
+    const streamMs = Math.round((performance.now() - t0) * 1000) / 1000
+
+    const equivalenceProven =
+      witness.verified === stream.verified &&
+      witness.total === stream.total &&
+      witness.head === stream.head
+
+    const status = equivalenceProven ? 'DONE' : 'FAILED'
+    const entry = await appendLedger({
+      taskId: null,
+      kind: 'INNOVATION',
+      status,
+      worker: 'innovation-cycle-chain-sources',
+      attempts: 1,
+      durationMs: Math.round(streamMs * 1000),
+      errorClass: equivalenceProven ? null : 'witness-production-divergence',
+      outputHash: sha256Short(
+        JSON.stringify({
+          subject: 'witness-vs-streamed-production',
+          witnessVerified: witness.verified ?? null,
+          witnessTotal: witness.total ?? null,
+          witnessHead: witness.head ?? null,
+          streamVerified: stream.verified,
+          streamTotal: stream.total,
+          streamHead: stream.head,
+          streamPages: stream.pages,
+          streamMs,
+          equivalenceProven,
+          adoptionRationale: 'no-delta-no-checkpoint-all-gates-streamed',
+        })
+      ),
+    })
+    return NextResponse.json({
+      ok: true,
+      status,
+      equivalenceProven,
+      witness: { verified: witness.verified, total: witness.total, head: witness.head },
+      stream: { verified: stream.verified, total: stream.total, head: stream.head, pages: stream.pages },
+      streamMs,
       ledgerEntryId: entry.id,
     })
   }

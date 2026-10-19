@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { readFileSync } from 'node:fs'
 import { db } from '@/lib/db'
-import { verifyChainAuto } from '@/lib/innovation'
+import { verifyChainStreamed } from '@/lib/ledger'
 
 // מראת-הצי (Task 65): המרשם-הקנוני של הצי (FLEET-REPOS-REGISTRY, steem@saos-cockpit)
 // נקרא-חי מ-github ומוצג כאן — מערכת-אחת-בראיה (חוק R360 §1-3: קץ-כפילויות, ערוץ-אחד, רישום-לפני-בנייה).
@@ -70,12 +70,14 @@ function readToken(): string | null {
 export async function GET() {
   const now = Date.now()
 
-  // המדדים-שלנו (השרשרת-האלגוריתמית) — חיים-תמיד, אפס-cache. אימות-מלא דורש-את-כל-השדות (אין-select-חלקי!)
+  // המדדים-שלנו (השרשרת-האלגוריתמית) — חיים-תמיד, אפס-cache.
+  // מחזור-#10 (Task 77): ההיסטוריה — השער-הזה-אימת בדלתא-עם-checkpoint-בזיכרון-תהליך
+  // (verifyChainAuto — האמון-הטפילי-שמחזורי-#6/#7/#9 דחו). מעתה: אימות-מלא-מה-Genesis
+  // בקריאה-בדפים — בלי-טעינת-שורות, בלי-אמון-על-זיכרון-קודם; כל-קריאה-עומדת-לבד.
   let chain: { total: number; head: string; ok: boolean }
   try {
-    const entries = await db.ledgerEntry.findMany({ orderBy: { id: 'asc' } })
-    const v = verifyChainAuto(entries)
-    chain = { total: entries.length, head: v.head, ok: v.ok }
+    const v = await verifyChainStreamed()
+    chain = { total: v.total, head: v.head, ok: v.ok }
   } catch {
     chain = { total: 0, head: '', ok: false } // fail-honest
   }

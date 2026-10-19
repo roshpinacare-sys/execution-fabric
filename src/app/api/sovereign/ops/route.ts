@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyChain } from '@/lib/ledger'
+import { verifyChainStreamed } from '@/lib/ledger'
 import { extractArtifact } from '@/lib/handoff'
 import { reviewArtifact } from '@/lib/review-policy'
 import { evolutionBudgetUsed, EVOLUTION_BUDGET_PER_HOUR } from '@/lib/evolution'
@@ -20,14 +20,16 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   const t0 = Date.now()
-  const [proposed, ticks, entries, budgetUsed, taskStats] = await Promise.all([
+  const [proposed, ticks, verification, budgetUsed, taskStats] = await Promise.all([
     db.handoff.findMany({ where: { status: 'PROPOSED' }, orderBy: { createdAt: 'asc' } }),
     db.ledgerEntry.findMany({
       where: { worker: 'sovereignty-ops-tick' },
       orderBy: { id: 'desc' },
       take: 8,
     }),
-    db.ledgerEntry.findMany({ orderBy: { id: 'asc' } }),
+    // מחזור-#10 (Task 77): ההיסטוריה — השער-טען-את-כל-השורות ואימת בטעינה-מלאה בכל-קריאה.
+    // מעתה: אימות-מלא-מה-Genesis-בקריאה-בדפים — בלי-טעינת-שורות-שרשרת, בלי-אמון-טפילי.
+    verifyChainStreamed(),
     evolutionBudgetUsed(),
     db.task.groupBy({ by: ['status'], _count: { _all: true } }),
   ])
@@ -54,7 +56,7 @@ export async function GET() {
     })
   }
 
-  const chain = verifyChain(entries)
+  const chain = verification
   const remaining = Math.max(0, EVOLUTION_BUDGET_PER_HOUR - budgetUsed)
 
   return NextResponse.json({
