@@ -3,6 +3,8 @@ import { db } from '@/lib/db'
 import { appendLedger, sha256Short } from '@/lib/ledger'
 import { runInnovationCycle, runCensusCycle, type CensusCycleMeasurement } from '@/lib/innovation'
 import { runRestoreDrill, type RestoreDrillResult } from '@/lib/restore-drill'
+import { buildMetricsStreamed } from '@/lib/metrics'
+import { buildCensus } from '@/lib/census'
 
 // מסילת-החדשנות (Task 60): POST מריץ מחזור-חדשנות אמיתי —
 // מדידת קו-בסיס → אופטימיזציה → הוכחת-שקילות → מדידה → חתימת INNOVATION בשרשרת.
@@ -17,6 +19,10 @@ import { runRestoreDrill, type RestoreDrillResult } from '@/lib/restore-drill'
 // Task 75 — מחזור-חדשנות #8: ?subject=restore-drill — תרגיל-שחזור-בכפייה כהוכחה-חתומה:
 // clone-רדוד-מ-github → אימות-עצמאי-על-העותק → הצלבת-קידומת-מול-הייצור. הצלבה-אינה-עוברת =
 // FAILED. זהו-המחזור-שסוגר-את-הכישלון-החי-מ-06:52 (Engine-not-connected → dbReady).
+//
+// Task 76 — מחזור-חדשנות #9: ?subject=metrics — הזרמת-מסלולי-הקריאה-הציבוריים (metrics+ledger
+// — ה-O(n)-האחרון-שנותר): מימוש-האגרגציות-החדש-ב-SQL מוצלב-מול-ה-census-מ-#7 (כבר-חתום) —
+// שני-מימושים-בלתי-תלויים-שחייבים-להסכים-על-כל-הפלטים-המשותפים (קנון-ממוין — לקח-#7).
 interface WitnessBench {
   ok?: boolean
   runs?: number
@@ -175,6 +181,78 @@ export async function POST(req: NextRequest) {
       ),
     })
     return NextResponse.json({ ok: true, status, drill, ledgerEntryId: entry.id })
+  }
+
+  // מחזור-#9 (Task 76): הזרמת-מסלולי-הקריאה-הציבוריים. ההוכחה — הצלבה-דו-מימושית:
+  // buildMetricsStreamed (האגרגציות-החדשות-ב-SQL) מול buildCensus (מ-#7) — שני-מימושים-
+  // בלתי-תלויים, שתי-קבוצות-שאילתות-שונות, שחייבים-להסכים-על-כל-הפלטים-המשותפים.
+  // קנון-ממוין למילונים (לקח-#7 — רשומה-775). מהירות = רישום-כן; האימוץ-מנומק-בחסימות-זיכרון.
+  if (subject === 'metrics') {
+    const canon = (o: Record<string, number>) =>
+      JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]]))
+    const t0 = performance.now()
+    const m = await buildMetricsStreamed()
+    const streamMs = performance.now() - t0
+    const t1 = performance.now()
+    const c = await buildCensus()
+    const censusMs = performance.now() - t1
+
+    const kindDiff = (() => {
+      const keys = new Set([...Object.keys(m.byKind), ...Object.keys(c.chain.byKind)])
+      for (const k of [...keys].sort()) if ((m.byKind[k] ?? 0) !== (c.chain.byKind[k] ?? 0)) return k
+      return null
+    })()
+    const errDiff = (() => {
+      const keys = new Set([...Object.keys(m.errorClasses), ...Object.keys(c.chain.errorClasses)])
+      for (const k of [...keys].sort())
+        if ((m.errorClasses[k] ?? 0) !== (c.chain.errorClasses[k] ?? 0)) return k
+      return null
+    })()
+
+    const equivalenceProven =
+      m.verify.ok === c.chain.verify.ok &&
+      m.verify.verified === c.chain.verify.verified &&
+      m.verify.head === c.chain.verify.head &&
+      m.total === c.chain.total &&
+      m.done === c.chain.done &&
+      m.failed === c.chain.failed &&
+      canon(m.byKind) === canon(c.chain.byKind) &&
+      canon(m.errorClasses) === canon(c.chain.errorClasses)
+
+    const status = equivalenceProven ? 'DONE' : 'FAILED'
+    const entry = await appendLedger({
+      taskId: null,
+      kind: 'INNOVATION',
+      status,
+      worker: 'innovation-cycle-metrics',
+      attempts: 1,
+      durationMs: Math.round((streamMs + censusMs) * 1000),
+      errorClass: equivalenceProven ? null : 'equivalence-mismatch',
+      outputHash: sha256Short(
+        JSON.stringify({
+          subject: 'metrics-sql-vs-census',
+          total: m.total,
+          done: m.done,
+          failed: m.failed,
+          verified: m.verify.verified,
+          head: m.verify.head,
+          streamMs: Math.round(streamMs * 1000) / 1000,
+          censusMs: Math.round(censusMs * 1000) / 1000,
+          kindDiff,
+          errDiff,
+          equivalenceProven,
+          adoptionRationale: 'bounded-memory-public-reads',
+        })
+      ),
+    })
+    return NextResponse.json({
+      ok: true,
+      status,
+      equivalenceProven,
+      streamMs: Math.round(streamMs * 1000) / 1000,
+      censusMs: Math.round(censusMs * 1000) / 1000,
+      ledgerEntryId: entry.id,
+    })
   }
 
   const m = await runInnovationCycle()
