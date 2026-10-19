@@ -11,6 +11,11 @@
 //
 // הגינות-מול-GitHub (docs/BEYOND-GITHUB.md): clone-גיט אינו-נגד-מכסת-ה-REST,
 // ובכל-זאת — מינוף-רדוד + דילוג-אם-תרגיל-טרי-מ-30דק' + מנעול-ריצה-בודדת.
+//
+// מחזור-חדשנות #8 (Task 75): הלקח-החי-מ-06:52 — הפעימה-האוטומטית רצה-150ש' אחרי-עליית-הלב,
+// הקריאה-הראשונה ל-db מעירה-את-תהליך-Next והמנוע-עוד-אינו-חובר ("Engine is not yet connected")
+// → התרגיל-חתם-FAILED-והשאיר-כוסת-הוכחות-של-4ש'. התיקון-מהשורש: dbReady() —
+// המתנה-למנוע ב-retry-קצר-וגלוי לפני-כל-הרצה; וסיווג-מדויק 'db-not-ready' אם-בכל-זאת-כשל.
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -48,6 +53,21 @@ export interface LastDrillBrief {
   errorClass: string | null
 }
 
+// חוסן-אתחול (מחזור-#8): הקריאה-הראשונה ל-db בתהליך-טרי עלולה-להיתקל-במנוע-שטרם-חובר.
+// ממתינים-למנוע ב-retry-קצר (עד ~8ש') — רק-על-סימן-הזיהוי המדויק; כל-שגיאה-אחרת מתעופפת-מיד.
+async function dbReady(maxAttempts = 16, delayMs = 500): Promise<void> {
+  for (let i = 1; ; i++) {
+    try {
+      await db.ledgerEntry.findFirst({ select: { id: true }, orderBy: { id: 'desc' } })
+      return
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      if (!msg.includes('not yet connected') || i >= maxAttempts) throw e
+      await new Promise((r) => setTimeout(r, delayMs))
+    }
+  }
+}
+
 export async function lastRestoreDrill(): Promise<LastDrillBrief | null> {
   const rec = await db.ledgerEntry.findFirst({
     where: { kind: 'DRILL', worker: DRILL_WORKER },
@@ -72,6 +92,7 @@ export async function runRestoreDrill(force = false): Promise<RestoreDrillResult
   running = true
   const started = Date.now()
   try {
+    await dbReady() // מחזור-#8: המנוע-חייב-להיות-מחובר-לפני-כל-קריאה-ולפני-החתימה
     const last = await lastRestoreDrill()
     if (!force && last && Date.now() - new Date(last.at).getTime() < MIN_INTERVAL_MS) {
       return {
@@ -158,7 +179,9 @@ export async function runRestoreDrill(force = false): Promise<RestoreDrillResult
       ? 'clone-chain-broken'
       : msg.startsWith('clone-')
         ? 'clone-not-prefix'
-        : 'clone-failed'
+        : msg.includes('not yet connected')
+          ? 'db-not-ready'
+          : 'clone-failed'
     try {
       const entry = await appendLedger({
         taskId: null,

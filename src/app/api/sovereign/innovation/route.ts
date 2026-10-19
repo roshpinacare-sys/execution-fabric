@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { appendLedger, sha256Short } from '@/lib/ledger'
 import { runInnovationCycle, runCensusCycle, type CensusCycleMeasurement } from '@/lib/innovation'
+import { runRestoreDrill, type RestoreDrillResult } from '@/lib/restore-drill'
 
 // מסילת-החדשנות (Task 60): POST מריץ מחזור-חדשנות אמיתי —
 // מדידת קו-בסיס → אופטימיזציה → הוכחת-שקילות → מדידה → חתימת INNOVATION בשרשרת.
@@ -10,6 +11,12 @@ import { runInnovationCycle, runCensusCycle, type CensusCycleMeasurement } from 
 // Task 73 — מחזור-חדשנות #6, מסלול-שני: POST ?subject=witness — מדידת-העד החי
 // (chain-witness :3050/bench): אימות-מלא-בזרימה מול טעינה-מלאה, שני-מימושים-בלתי-
 // תלויים-שחייבים-להסכים. שקילות = אימוץ; מהירות = רישום-כן (הסיבה-לאימוץ: חסימות-זיכרון).
+// Task 74 — מחזור-חדשנות #7: ?subject=census — הזרמת-המפקח-הריבוני מול-המימוש-ההיסטורי
+// (runCensusCycle: מדידה-מתחלפת, שקילות-על-כל-8-הפלטים).
+//
+// Task 75 — מחזור-חדשנות #8: ?subject=restore-drill — תרגיל-שחזור-בכפייה כהוכחה-חתומה:
+// clone-רדוד-מ-github → אימות-עצמאי-על-העותק → הצלבת-קידומת-מול-הייצור. הצלבה-אינה-עוברת =
+// FAILED. זהו-המחזור-שסוגר-את-הכישלון-החי-מ-06:52 (Engine-not-connected → dbReady).
 interface WitnessBench {
   ok?: boolean
   runs?: number
@@ -128,6 +135,46 @@ export async function POST(req: NextRequest) {
       ),
     })
     return NextResponse.json({ ok: true, status, bench, ledgerEntryId: entry.id })
+  }
+
+  // מחזור-#8 (Task 75): תרגיל-שחזור-בכפייה — ההוכחה-שהכפילות-הרחוקה (GitHub) מחזירה-מערכת-שלמה.
+  // תנאי-האימוץ-המוחלט: התרגיל-רץ (ran), עובר (ok), והעותק-מאומת-כקידומת-ביט-ביט של-הייצור
+  // (prefixMatch). כל-כישלון-בכל-שלב = FAILED-חתום (fail-honest — הכישלון-עצמו-הוא-ראיה).
+  if (subject === 'restore-drill') {
+    let drill: RestoreDrillResult
+    try {
+      drill = await runRestoreDrill(true) // כפייה-מגושמת במסילה-בלבד: המחזור-חייב-לרוץ-בפועל
+    } catch (e) {
+      return NextResponse.json(
+        { ok: false, error: 'drill-unreachable', detail: e instanceof Error ? e.message : String(e) },
+        { status: 502 }
+      )
+    }
+    const adoptionProven = drill.ran === true && drill.ok === true && drill.prefixMatch === true
+    const status = adoptionProven ? 'DONE' : 'FAILED'
+    const entry = await appendLedger({
+      taskId: null,
+      kind: 'INNOVATION',
+      status,
+      worker: 'innovation-cycle-restore-drill',
+      attempts: 1,
+      durationMs: drill.durationMs ?? 0,
+      errorClass: adoptionProven ? null : (drill.errorClass ?? 'drill-not-proven'),
+      outputHash: sha256Short(
+        JSON.stringify({
+          subject: 'restore-drill-forced',
+          verified: drill.verified ?? null,
+          total: drill.total ?? null,
+          cloneHead: drill.cloneHead ?? null,
+          prodHead: drill.prodHead ?? null,
+          prefixMatch: drill.prefixMatch ?? null,
+          drillLedgerId: drill.ledgerId ?? null,
+          reason: drill.reason ?? null,
+          adoptionRationale: 'remote-duplication-proven',
+        })
+      ),
+    })
+    return NextResponse.json({ ok: true, status, drill, ledgerEntryId: entry.id })
   }
 
   const m = await runInnovationCycle()
