@@ -3,6 +3,7 @@ import { buildCensus, memoryDigest } from '@/lib/census'
 import { complianceReport } from '@/lib/githubPolicy'
 import { lastRestoreDrill } from '@/lib/restore-drill'
 import { lastHistoryDrill } from '@/lib/history-drill'
+import { lastDocsDrill } from '@/lib/docs-drill'
 
 // פקח-הריבונות (worklog Task 30) — נקודת-האינטליגנציה של הרשת.
 // עקרונות (tobi/disktree): כל-מספר נגזר-מאומת בזמן-בקשה; הפקח מסמן-ולא-מוחק;
@@ -112,6 +113,8 @@ export async function GET(req: NextRequest) {
   ])
   // מחזור-#14 (Task 81) — עדות-אטימות-ההיסטוריה (fail-honest: null = טרם-רץ)
   const historyDrill = await lastHistoryDrill()
+  // מחזור-#15 (Task 82) — עדות-אטימות-המסמכים (fail-honest: null = טרם-רץ)
+  const docsDrill = await lastDocsDrill()
   // Task 71 — הזקיפה: מעקב-הישרדות + מראת-גיבוי + תמונות-db (רשת-לוקאלית-בלבד)
   const survival = await probeSurvival()
   return NextResponse.json({
@@ -130,6 +133,7 @@ export async function GET(req: NextRequest) {
       export: restoreDrillExport,
     },
     historyDrill,
+    docsDrill,
     survival,
   })
 }

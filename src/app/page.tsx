@@ -55,6 +55,7 @@ import {
   ArchiveRestore,
   History,
   ShieldPlus,
+  FileBadge,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 
@@ -295,6 +296,8 @@ interface CensusDto {
   } | null
   // מחזור-#14 (Task 81) — עדות-אטימות-ההיסטוריה (fail-honest; null = טרם-רץ)
   historyDrill?: { at: string; ok: boolean; ledgerId: number; durationMs: number; errorClass: string | null } | null
+  // מחזור-#15 (Task 82) — עדות-אטימות-המסמכים (fail-honest; null = טרם-רץ)
+  docsDrill?: { at: string; ok: boolean; ledgerId: number; durationMs: number; errorClass: string | null } | null
   // Task 71 — הזקיפה (survival-keeper :3051): מעקב-הישרדות + מראת-גיבוי + תמונות-db (fail-honest)
   survival?: {
     up: boolean
@@ -1040,7 +1043,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/census')
       const j = await res.json()
-      if (j.ok) setCensus({ ...j.census, witness: j.witness, githubGate: j.githubGate, restoreDrill: j.restoreDrill, restoreDrillSources: j.restoreDrillSources, historyDrill: j.historyDrill, survival: j.survival })
+      if (j.ok) setCensus({ ...j.census, witness: j.witness, githubGate: j.githubGate, restoreDrill: j.restoreDrill, restoreDrillSources: j.restoreDrillSources, historyDrill: j.historyDrill, docsDrill: j.docsDrill, survival: j.survival })
     } catch {
       /* polling — שקט */
     }
@@ -3163,6 +3166,37 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                             : st === 'stale'
                               ? 'מיושנת'
                               : 'אטומה'}
+                      </Badge>
+                    )
+                  })()}
+                {census &&
+                  (() => {
+                    // מחזור-#15 (Task 82): badge-אטימות-המסמכים — השרשרת-מעידה-על-פסיפס-
+                    // המסמכים (sovereign/site/*.md) שהרשת-בונה-בעצמה. fail-honest: טרם-רץ = amber.
+                    const d = census.docsDrill ?? null
+                    const ageH = d ? (Date.now() - new Date(d.at).getTime()) / 3_600_000 : null
+                    const st = !d ? 'none' : !d.ok ? 'broken' : (ageH ?? 0) > 13 ? 'stale' : 'ok'
+                    return (
+                      <Badge
+                        variant="outline"
+                        title={`תרגיל-אטימות-המסמכים (מחזור-#15): כל-ארטיפקטי-הרשת (sovereign/site/*.md) נבחנים — כל-שורה-חייבת-קובץ, כל-קובץ-חייב-frontMatter-תקין — והפסיפס-כולו נחתם-כ-digest-קנוני-ממוין בשרשרת. פגיעה-שקטה-בקובץ = digest-שונה-בתרגיל-הבא = חתום. ${d ? (d.ok ? `חתום (${new Date(d.at).toLocaleString('he-IL')})` : `נפגע — ${d.errorClass ?? '?'}`) : 'טרם-רץ'}`}
+                        className={`gap-1 text-[10px] ${
+                          st === 'broken'
+                            ? 'border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                            : st === 'stale' || st === 'none'
+                              ? 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                              : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                        }`}
+                      >
+                        <FileBadge className="h-2.5 w-2.5" />
+                        מסמכים:{' '}
+                        {st === 'none'
+                          ? 'טרם-נבחנו'
+                          : st === 'broken'
+                            ? 'נפגעו'
+                            : st === 'stale'
+                              ? 'מיושנים'
+                              : 'חתומים'}
                       </Badge>
                     )
                   })()}

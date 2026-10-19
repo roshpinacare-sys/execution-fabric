@@ -4,6 +4,7 @@ import { appendLedger, sha256Short } from '@/lib/ledger'
 import { runInnovationCycle, runCensusCycle, type CensusCycleMeasurement } from '@/lib/innovation'
 import { runRestoreDrill, type RestoreDrillResult } from '@/lib/restore-drill'
 import { runHistoryDrill, type HistoryDrillResult } from '@/lib/history-drill'
+import { runDocsDrill, type DocsDrillResult } from '@/lib/docs-drill'
 import { buildMetricsStreamed } from '@/lib/metrics'
 import { buildCensus } from '@/lib/census'
 import { verifyChainStreamed } from '@/lib/ledger'
@@ -314,6 +315,47 @@ export async function POST(req: NextRequest) {
           drillLedgerId: drill.ledgerId ?? null,
           reason: drill.reason ?? null,
           adoptionRationale: 'append-only-history-proven-across-time',
+        })
+      ),
+    })
+    return NextResponse.json({ ok: true, status, drill, ledgerEntryId: entry.id })
+  }
+
+  // מחזור-#15 (Task 82): תרגיל-אטימות-המסמכים — חיבור-פסיפס-המסמכים-אל-השרשרת.
+  // ארבעת-התרגילים-הקודמים מוכיחים-את-השרשרת-עצמה; הזה-מוכיח-את-הארטיפקטים-שהרשת-בונה-
+  // בעצמה (sovereign/site/*.md): row→file, file→frontMatter-תקין, digest-קנוני-ממוין-
+  // של-כל-הפסיפס נחתם-בשרשרת. פגיעה-שקטה-בקובץ = digest-שונה-בתרגיל-הבא = חתום.
+  // אותו-קנון: ran + ok + files>0 = תנאי-אימוץ-מוחלט.
+  if (subject === 'docs-drill') {
+    let drill: DocsDrillResult
+    try {
+      drill = await runDocsDrill(true) // כפייה-במסילה בלבד: המחזור-חייב-לרוץ-בפועל
+    } catch (e) {
+      return NextResponse.json(
+        { ok: false, error: 'drill-unreachable', detail: e instanceof Error ? e.message : String(e) },
+        { status: 502 }
+      )
+    }
+    const adoptionProven = drill.ran === true && drill.ok === true && (drill.files ?? 0) > 0
+    const status = adoptionProven ? 'DONE' : 'FAILED'
+    const entry = await appendLedger({
+      taskId: null,
+      kind: 'INNOVATION',
+      status,
+      worker: 'innovation-cycle-docs-drill',
+      attempts: 1,
+      durationMs: drill.durationMs ?? 0,
+      errorClass: adoptionProven ? null : (drill.errorClass ?? 'drill-not-proven'),
+      outputHash: sha256Short(
+        JSON.stringify({
+          subject: 'docs-mosaic-provenance-forced',
+          files: drill.files ?? null,
+          bound: drill.bound ?? null,
+          orphans: drill.orphans ?? null,
+          mosaicDigest: drill.mosaicDigest ?? null,
+          drillLedgerId: drill.ledgerId ?? null,
+          reason: drill.reason ?? null,
+          adoptionRationale: 'mosaic-provenance-proven',
         })
       ),
     })
