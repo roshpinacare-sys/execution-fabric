@@ -79,6 +79,12 @@ const HISTORY_PULSE_FIRST_MS = 90_000
 // 75ש' אחרי-עליית-הלב; הדילוג-הכן-המובנה (טרי-מ-30דק') קובע-את-הקצב-האמיתי.
 const DOCS_PULSE_MS = 30 * 60_000
 const DOCS_PULSE_FIRST_MS = 75_000
+// מחזור-חדשנות #16 (Task 83): עורק-יב — תרגיל-אטימות-היסטוריית-המסמכים.
+// כל-שעה: POST /api/sovereign/docs-history-drill — המסמכים-מהקומיט-העתיק-ביותר-במראה-
+// ה-bare מוצלבים-ביט-ביט-מול-הדיסק-החי (הפסיפס-append-only). שכתוב-שקט-של-מסמך-ישן
+// = docs-history-tampered = חתום. 105ש' אחרי-עליית-הלב; דילוג-כן-אם-טרי-מ-60דק'.
+const DOCS_HISTORY_PULSE_MS = 60 * 60_000
+const DOCS_HISTORY_PULSE_FIRST_MS = 105_000
 const NARRATE_TIMEOUT_MS = 120_000 // Task 39: ירי-TTS אמיתי — מהיר, אך-נותנים-רשת
 const APP_GUARD_MS = 15_000
 const APP_GUARD_FAILS_TO_RESTART = 3
@@ -146,6 +152,10 @@ interface State {
   docsOk: boolean | null
   lastDocsAt: string | null
   lastDocsResult: string | null
+  docsHistoryPulses: number
+  docsHistoryOk: boolean | null
+  lastDocsHistoryAt: string | null
+  lastDocsHistoryResult: string | null
 }
 
 const state: State = {
@@ -211,6 +221,10 @@ const state: State = {
   docsOk: null,
   lastDocsAt: null,
   lastDocsResult: null,
+  docsHistoryPulses: 0,
+  docsHistoryOk: null,
+  lastDocsHistoryAt: null,
+  lastDocsHistoryResult: null,
 }
 
 let lastTickAttemptMs = Date.now()
@@ -825,6 +839,40 @@ async function docsPulse(): Promise<void> {
   }
 }
 
+// ===== עורק-יב (מחזור-חדשנות #16): פעימת-אטימות-היסטוריית-המסמכים — המסמכים-מהעבר-שלא-נשכו =====
+// כל-שעה: POST /api/sovereign/docs-history-drill — הקומיט-העתיק-ביותר-במראה-ה-bare
+// הנוגע-בפסיפס מוצלב-ביט-ביט-מול-הדיסק-החי. מסמך-ששונה-או-נעלם = כשל-חתום בשרשרת.
+async function docsHistoryPulse(): Promise<void> {
+  state.docsHistoryPulses++
+  state.lastDocsHistoryAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/sovereign/docs-history-drill`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(60_000),
+    })
+    const d = (await res.json()) as {
+      ok?: boolean
+      drill?: { ran?: boolean; ok?: boolean; reason?: string; histFiles?: number; curFiles?: number; match?: boolean; commitSha?: string }
+    }
+    const dr = d.drill ?? {}
+    if (dr.ran === false) {
+      state.lastDocsHistoryResult = `skipped: ${dr.reason ?? 'recent'}`
+    } else if (d.ok && dr.ok) {
+      state.docsHistoryOk = true
+      state.lastDocsHistoryResult = `sealed: ${dr.histFiles}/${dr.histFiles} docs from ${(dr.commitSha ?? '').slice(0, 7)} · now ${dr.curFiles} · match:${dr.match}`
+      log(`עורק-היסטוריית-המסמכים: העבר-של-המסמכים-מאומת-שלא-נשכה ✓ ${state.lastDocsHistoryResult}`)
+    } else {
+      state.docsHistoryOk = false
+      state.lastDocsHistoryResult = `FAILED: ${dr.reason ?? 'unknown'}`
+      log(`עורק-היסטוריית-המסמכים: 🚨 תרגיל-האטימות-נכשל — ${state.lastDocsHistoryResult}`)
+    }
+  } catch (e) {
+    state.docsHistoryOk = false
+    state.lastDocsHistoryResult = `error: ${e instanceof Error ? e.message : String(e)}`
+    log(`עורק-היסטוריית-המסמכים: כשל-רשת — ${state.lastDocsHistoryResult}`)
+  }
+}
+
 // ===== עורק-ז: פעימת-אמת-עצמית (Task 45) — "האוטונומיה יודעת להשתמש בכלים" כהוכחה-רציפה =====
 // כל-30 דק': POST /api/sovereign/ops/selftest — הלב מריץ את כל-הכלים שלו בקריאות-אמת
 // (health/census/ops/improvements/db-reconnect/worker-tick/autonomy-tick/drill)
@@ -893,7 +941,7 @@ setInterval(() => {
 }, 60_000)
 
 log(
-  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', פעימת-אמת-עצמית כל ${SELFTEST_PULSE_MS / 60_000} דק', תרגיל-תמונה כל ${SNAPSHOT_RESTORE_PULSE_MS / 60_000} דק', סנכרון-ייצוא כל ${EXPORT_SYNC_PULSE_MS / 60_000} דק', תרגיל-ייצוא כל ${EXPORT_RESTORE_PULSE_MS / 60_000} דק', אטימות-היסטוריה כל ${HISTORY_PULSE_MS / 60_000} דק', אטימות-מסמכים כל ${DOCS_PULSE_MS / 60_000} דק', דופק על :${PORT}`
+  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', פעימת-אמת-עצמית כל ${SELFTEST_PULSE_MS / 60_000} דק', תרגיל-תמונה כל ${SNAPSHOT_RESTORE_PULSE_MS / 60_000} דק', סנכרון-ייצוא כל ${EXPORT_SYNC_PULSE_MS / 60_000} דק', תרגיל-ייצוא כל ${EXPORT_RESTORE_PULSE_MS / 60_000} דק', אטימות-היסטוריה כל ${HISTORY_PULSE_MS / 60_000} דק', אטימות-מסמכים כל ${DOCS_PULSE_MS / 60_000} דק', היסטוריית-מסמכים כל ${DOCS_HISTORY_PULSE_MS / 60_000} דק', דופק על :${PORT}`
 )
 
 setInterval(() => void tick(), TICK_MS)
@@ -919,6 +967,8 @@ setTimeout(() => void historyPulse(), HISTORY_PULSE_FIRST_MS) // מחזור-#14:
 setInterval(() => void historyPulse(), HISTORY_PULSE_MS)
 setTimeout(() => void docsPulse(), DOCS_PULSE_FIRST_MS) // מחזור-#15: אטימות-המסמכים
 setInterval(() => void docsPulse(), DOCS_PULSE_MS)
+setTimeout(() => void docsHistoryPulse(), DOCS_HISTORY_PULSE_FIRST_MS) // מחזור-#16: היסטוריית-המסמכים
+setInterval(() => void docsHistoryPulse(), DOCS_HISTORY_PULSE_MS)
 setInterval(() => void appGuard(), APP_GUARD_MS)
 
 void tick() // פעימה-ראשונה מיידית

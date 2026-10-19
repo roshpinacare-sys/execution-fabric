@@ -5,6 +5,7 @@ import { runInnovationCycle, runCensusCycle, type CensusCycleMeasurement } from 
 import { runRestoreDrill, type RestoreDrillResult } from '@/lib/restore-drill'
 import { runHistoryDrill, type HistoryDrillResult } from '@/lib/history-drill'
 import { runDocsDrill, type DocsDrillResult } from '@/lib/docs-drill'
+import { runDocsHistoryDrill, type DocsHistoryDrillResult } from '@/lib/docs-history-drill'
 import { buildMetricsStreamed } from '@/lib/metrics'
 import { buildCensus } from '@/lib/census'
 import { verifyChainStreamed } from '@/lib/ledger'
@@ -356,6 +357,49 @@ export async function POST(req: NextRequest) {
           drillLedgerId: drill.ledgerId ?? null,
           reason: drill.reason ?? null,
           adoptionRationale: 'mosaic-provenance-proven',
+        })
+      ),
+    })
+    return NextResponse.json({ ok: true, status, drill, ledgerEntryId: entry.id })
+  }
+
+  // מחזור-#16 (Task 83): תרגיל-אטימות-היסטוריית-המסמכים — המסמכים-מהעבר-מוכחים-שלא-נשכו.
+  // תרגיל-#15 חותם-את-הפסיפס-הנוכחי; הזה-מוכיח-שהמסמכים-מהקומיט-העתיק-ביותר-במראה-ה-bare
+  // עומדים-עדיין-ביט-ביט (הפסיפס-append-only). אותו-קנון: ran + ok + match = תנאי-אימוץ-מוחלט.
+  if (subject === 'docs-history-drill') {
+    let drill: DocsHistoryDrillResult
+    try {
+      drill = await runDocsHistoryDrill(true) // כפייה-במסילה בלבד: המחזור-חייב-לרוץ-בפועל
+    } catch (e) {
+      return NextResponse.json(
+        { ok: false, error: 'drill-unreachable', detail: e instanceof Error ? e.message : String(e) },
+        { status: 502 }
+      )
+    }
+    const adoptionProven = drill.ran === true && drill.ok === true && drill.match === true
+    const status = adoptionProven ? 'DONE' : 'FAILED'
+    const entry = await appendLedger({
+      taskId: null,
+      kind: 'INNOVATION',
+      status,
+      worker: 'innovation-cycle-docs-history-drill',
+      attempts: 1,
+      durationMs: drill.durationMs ?? 0,
+      errorClass: adoptionProven ? null : (drill.errorClass ?? 'drill-not-proven'),
+      outputHash: sha256Short(
+        JSON.stringify({
+          subject: 'docs-history-immutability-forced',
+          commitSha: drill.commitSha ?? null,
+          commitDate: drill.commitDate ?? null,
+          histFiles: drill.histFiles ?? null,
+          curFiles: drill.curFiles ?? null,
+          verified: drill.verified ?? null,
+          histDigest: drill.histDigest ?? null,
+          curDigest: drill.curDigest ?? null,
+          match: drill.match ?? null,
+          drillLedgerId: drill.ledgerId ?? null,
+          reason: drill.reason ?? null,
+          adoptionRationale: 'mosaic-history-proven-across-time',
         })
       ),
     })
