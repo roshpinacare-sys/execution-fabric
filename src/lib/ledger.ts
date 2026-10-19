@@ -121,19 +121,49 @@ export function verifyChain(entries: LedgerEntry[]): VerifyResult {
 // שתי-בקשות-מקבילות היו קוראות את אותו-ראש ויוצרות מזלג (שתי-רשומות עם אותו-prev
 // → השרשרת-נשברת). כל-הכותבים בתהליך-זה עוברים דרך כאן → שרשרת-הבטחות מסדרת-אותם:
 // כל-append קורא את הראש רק אחרי שהקודם הסתיים — prev תמיד הראש-האמיתי.
-let appendQueue: Promise<unknown> = Promise.resolve()
+//
+// Task 86 (אירוע-חי 18:27:43, מזלג-ראשון מאז-#61): המנעול-המודולי-בגדר-עצמו ב-Next.js dev —
+// Turbopack בונה כל-route-handler כ-bundle נפרד, ולכל-עותק-מודול תור-משלו. שלושת-התרגילים
+// שירדו-באותו-tick מהלב (docs/history/restore-export) רצו בשלושה-עותקי-מנעול → שתי-רשומות
+// נולדו-עם אותו-prev (1044/1045). התיקון-מהשורש: התור חי על **globalThis** — מרחב-יחיד
+// בכל-התהליך, חוצה-bundles. ומעליו שתי-הגנות-עמוקות:
+//  (א) UNIQUE(prev) ברמת-המסד — מזלג בין-תהליכים (אפילו-אפליקציה-שנייה-ששרדה-רגע) נדחה-
+//      אל-האבן ולא-נכתב-שקט; המפסיד מנסה-שוב-אחרי-קריאת-ראש-טרייה (retry על P2002).
+//  (ב) appendSlot מיוצא — תיקון-שרשרת חד-פעמי יכול להחזיק-את-המנעול-הגלובלי-לכל-אורך-
+//      הכתיבה-מחדש, ואף-append לא-יוכל-להתחבר-באמצע.
+const g = globalThis as unknown as { __fabricLedgerAppendQueue?: Promise<unknown> }
+
+// ריצה-בתוך-המנעול-הגלובלי-המשותף (תור-יחיד בכל-התהליך, בכל-ה-bundles)
+export function appendSlot<T>(job: () => Promise<T>): Promise<T> {
+  const prev = g.__fabricLedgerAppendQueue ?? Promise.resolve()
+  const run = prev.then(job, job) // רץ-גם-אם-קודם-נכשל — התור-לא-קורס
+  g.__fabricLedgerAppendQueue = run.catch(() => undefined) // כישלון-הקורא-לא-מזהם-את-התור
+  return run
+}
+
+const APPEND_RETRIES = 6
 
 export function appendLedger(
   rec: Omit<LedgerRecord, 'prev'>,
   opts?: { batchId?: string }
 ): Promise<LedgerEntry> {
-  const run = async (): Promise<LedgerEntry> => {
-    const last = await db.ledgerEntry.findFirst({ orderBy: { id: 'desc' } })
-    const full: LedgerRecord = { ...rec, prev: last?.hash ?? GENESIS }
-    const hash = ledgerHash(full)
-    return db.ledgerEntry.create({ data: { ...full, hash, batchId: opts?.batchId ?? null } })
-  }
-  const p = appendQueue.then(run, run) // רץ-גם-אם-קודם-נכשל — התור-לא-קורס
-  appendQueue = p.catch(() => undefined) // הכישלון-של-הקורא-לא-מזהם-את-התור
-  return p
+  return appendSlot(async (): Promise<LedgerEntry> => {
+    // retry: בין-תהליכים UNIQUE(prev) עשוי לדחות-כותב-מאוחר (אפליקציה-שנייה-רגעית).
+    // התור-המקומי אינו-רואה-את-הזר — רק-המסד. קריאת-ראש-טרייה+חישוב-מחדש = תיקון-עצמי.
+    let lastErr: unknown = null
+    for (let attempt = 0; attempt <= APPEND_RETRIES; attempt++) {
+      try {
+        const last = await db.ledgerEntry.findFirst({ orderBy: { id: 'desc' } })
+        const full: LedgerRecord = { ...rec, prev: last?.hash ?? GENESIS }
+        const hash = ledgerHash(full)
+        return await db.ledgerEntry.create({ data: { ...full, hash, batchId: opts?.batchId ?? null } })
+      } catch (e) {
+        lastErr = e
+        const msg = e instanceof Error ? e.message : String(e)
+        if (!msg.includes('Unique constraint')) throw e // אינו-מזלג — כישלון-אמיתי, עולה
+        await new Promise((r) => setTimeout(r, 40 * (attempt + 1)))
+      }
+    }
+    throw lastErr
+  })
 }
