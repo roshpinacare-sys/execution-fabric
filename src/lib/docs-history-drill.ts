@@ -1,27 +1,29 @@
-// תרגיל-אטימות-היסטוריית-המסמכים (מחזור-חדשנות #16, Task 83): המסמכים-מהעבר-
-// מוכחים-שלא-נשכו — סגירת-הציר-הרביעי.
+// תרגיל-אטימות-היסטוריית-המסמכים — הקשת-המלאה (מחזור-חדשנות #16+#17, Tasks 83-84):
+// המסמכים-מהעבר-מוכחים-שלא-נשכו — על-כל-אורך-הזמן, לא-רק-בקצוות.
 //
-// הפער-הכן-שנסגר: תרגיל-#15 (drill:docs) חותם-מדי-30דק' את מצב-הפסיפס-הנוכחי — אך
-// איש-אינו-מוכיח-שהמסמכים-שנכתבו-אתמול-עומדים-עדיין-בלי-שינוי-אף-בית: שמסמך-שנכתב
-// ב-02:39 לפני-יומיים הוא-ביט-ביט-אותו-מסמך-היום. פסיפס-המסמכים **append-only-ובלתי-
-// ניתן-לשינוי** (sitebuild.ts כותב-קובץ-חדש-בשם-מחותמת-זמן-ומעולם-לא-משנה-קיים) —
-// ותרגיל-זה הוא-ההוכחה-הקבועה-של-התכונה: המסמך-הראשון-בהיסטוריית-הגיט מוצלב-ביט-
-// ביט-מול-הדיסק-החי. שכתוב-שקט-של-מסמך-ישן (בעץ-העבודה או-בהיסטוריה-עצמה) מתגלה.
+// הפער-הכן-שנסגר ב-#16: תרגיל-#15 (drill:docs) חותם-מדי-30דק' את מצב-הפסיפס-הנוכחי —
+// אך איש-אינו-מוכיח-שהמסמכים-שנכתבו-אתמול-עומדים-עדיין-בלי-שינוי-אף-בית. #16 צליב את
+// **הקומיט-העתיק-ביותר** ביט-ביט-מול-הדיסק-החי.
 //
-// המנגנון (4-שלבים — דפוס-#14):
-//  1. הקומיט-העתיק-ביותר-במראה-ה-bare (../fabric-mirror.git) הנוגע-ב-sovereign/site —
-//     `git rev-list --reverse main -- <prefix>` (המראה-מקבלת-fast-forward-בלבד).
-//  2. רשימת-המסמכים-בקומיט-זה: `git ls-tree -r --name-only <sha> -- <prefix>`.
-//  3. לכל-מסמך-היסטורי: `git show <sha>:<path>` → sha256Short-התוכן-אז, מול-קריאת-
-//     הקובץ-החי-על-הדיסק-עכשיו. חוסר-התאמה = docs-history-tampered-at-<path>;
-//     קובץ-שנעלם = docs-history-missing-at-<path>. זיכרון-O(1): קובץ-אחד-בכל-רגע.
-//  4. צמיחה-חד-כיוונית: מספר-המסמכים-החי >= ההיסטורי (הפסיפס-רק-גדל — הקטנה=docs-history-shrunk).
-//     החתימה: outputHash נגזר-מ-digest-קנוני-ממוין של הקבוצה-ההיסטורית (path:hash אז) 
-//     והצלבתו-מול-ה-digest-שלה-עכשיו — שניהם-נכנסים-ל-hash-החתימה.
+// הפער-הכן-שנסגר ב-#17: קצה-אחד-מוכח-אינו-קשת-מוכחת. תיאורטית, שכתוב-שקט-של-מסמך-
+// בנקודת-ביניים-בהיסטוריה (והשארת-הקצוות-תקינים) היה-חומק-מ-#16. מעתה התרגיל-דוגם
+// **5 נקודות-זמן לאורך הקשת** (עתיק · רבע · אמצע · שלושה-רבעים · אחרון-לפני-הראש)
+// ומפריך-שתי-שכבות:
+//  א. **פריכת-הקשת-התוך-גיטית** (זולה — blob-ids בלבד, אפס-קריאת-תוכן): לכל מסמך
+//     שמופיע-בנקודה קדומה, ה-blob-שלו בכל נקודה מאוחרת יותר חייב-להיות-זהה ביט-ביט
+//     (הפסיפס-append-only — sitebuild.ts מעולם-לא-משנה-קובץ-קיים). שינוי=
+//     docs-history-arc-tampered-at-<path>; היעלמות=docs-history-arc-vanished-at-<path>;
+//     ירידה-במספר-המסמכים-בין-נקודות-עוקבות=docs-history-arc-nonmonotonic.
+//  ב. **פריכת-האמת-מול-הדיסק-החי** (קנון-#16): שני **קצות-הקשת** (העתיק-ביותר והאחרון)
+//     נקראים-תוכן-תוכן (git show) ומוצלבים-ביט-ביט-מול-readFileSync-על-הדיסק — כדי-שההוכחה
+//     לא-תהיה-גיט-מעיד-על-עצמו אלא-גיט-מעיד-על-המציאות-החיה-בשני-קצוות-הזמן.
+//
+// החתימה: digest-קנוני-ממוין של `sha12:path:blobSha` לכל-נקודת-קשת, ו-digests-שני-הקצוות
+// מול-הדיסק — כולם-נכנסים-ל-outputHash. שכתוב-שקט בכל-נקודת-זמן שהיא = digest-שונה-בתרגיל-הבא = חתום.
 //
 // כנות (fail-honest): מראה-חסרה=docs-history-mirror-missing; אין-קומיט=docs-history-commit-missing;
-// git-show-נכשל=docs-history-show-failed; תיקייה-חסרה-היום=docs-dir-missing (קנון-#15);
-// כשל-כללי=docs-history-failed. כשל-חתום-לא-המצאה.
+// git-פקודה-נכשלה=docs-history-show-failed; תיקייה-חסרה-היום=docs-dir-missing (קנון-#15);
+// db-לא-מחובר=db-not-ready (לקח-#8); כשל-כללי=docs-history-failed. כשל-חתום-לא-המצאה.
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
@@ -35,6 +37,7 @@ const SITE_PREFIX = 'sovereign/site'
 const WORKER = 'drill:docs-history'
 const MIN_INTERVAL_MS = 60 * 60_000
 const GIT_TIMEOUT_MS = 60_000
+const ARC_POINTS = 5 // נקודות-הדגימה-על-הקשת: עתיק, רבע, אמצע, שלושה-רבעים, אחרון
 
 export interface DocsHistoryDrillResult {
   ok: boolean
@@ -49,6 +52,12 @@ export interface DocsHistoryDrillResult {
   histDigest?: string
   curDigest?: string
   match?: boolean
+  // שכבת-#17 — הקשת-המלאה:
+  arcPoints?: number
+  arcOldestSha?: string
+  arcYoungestSha?: string
+  arcChecks?: number // בדיקות-ה-continuity התוך-גיטיות (קובץ×נקודה-מאוחרת)
+  diskChecks?: number // קריאות-git-show-שהוצלבו-מול-הדיסק (שני-הקצוות)
   durationMs?: number
   at: string
   ledgerId?: number
@@ -68,6 +77,49 @@ function gitMirror(args: string[], timeout = GIT_TIMEOUT_MS): string {
     stdio: 'pipe',
     maxBuffer: 64 * 1024 * 1024,
   }).toString()
+}
+
+// ls-tree עם-hash-אובייקט: מחזיר מפת path→blobSha (בלי-קריאת-תוכן)
+function blobMapAt(sha: string): Map<string, string> {
+  const raw = gitMirror(['ls-tree', '-r', sha, '--', SITE_PREFIX])
+  const map = new Map<string, string>()
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue
+    const tab = line.indexOf('\t')
+    if (tab < 0) continue
+    const meta = line.slice(0, tab).split(/\s+/)
+    const p = line.slice(tab + 1).trim()
+    if (meta.length >= 3 && meta[1] === 'blob' && p.endsWith('.md')) map.set(p, meta[2])
+  }
+  return map
+}
+
+function commitDate(sha: string): string {
+  return gitMirror(['show', '-s', '--format=%cI', sha]).trim()
+}
+
+function gitShowUtf8(spec: string): string {
+  return execFileSync('git', ['--git-dir', MIRROR_DIR, 'show', spec], {
+    timeout: GIT_TIMEOUT_MS,
+    stdio: 'pipe',
+    maxBuffer: 32 * 1024 * 1024,
+    encoding: 'utf8',
+  })
+}
+
+// קנון-#16: צליבת-נקודת-קצה-מול-הדיסק-החי — תוכן-אז מול תוכן-עכשיו
+function crossCheckDisk(sha: string): { digest: string; checked: number } {
+  const paths = [...blobMapAt(sha).keys()].sort()
+  const lines: string[] = []
+  for (const p of paths) {
+    const thenHash = sha256Short(gitShowUtf8(`${sha}:${p}`))
+    const absNow = path.join(process.cwd(), p)
+    if (!existsSync(absNow)) throw new Error(`docs-history-missing-at-${p}`)
+    const nowHash = sha256Short(readFileSync(absNow, 'utf8'))
+    if (nowHash !== thenHash) throw new Error(`docs-history-tampered-at-${p}`)
+    lines.push(`${p}:${thenHash}`)
+  }
+  return { digest: sha256Short(lines.sort().join('\n')), checked: paths.length }
 }
 
 export async function lastDocsHistoryDrill(): Promise<DocsHistoryDrillBrief | null> {
@@ -101,47 +153,54 @@ export async function runDocsHistoryDrill(force = false): Promise<DocsHistoryDri
     }
 
     if (!existsSync(MIRROR_DIR)) throw new Error('docs-history-mirror-missing')
+    if (!existsSync(SITE_DIR)) throw new Error('docs-dir-missing')
 
-    // 1. הקומיט-העתיק-ביותר-הנוגע-בפסיפס-המסמכים — מההיסטוריה-של-המראה-ה-bare
+    // 1. כל-הקומיטים-הנוגעים-בפסיפס — מהמראה-ה-bare, עתיק→חדש
     const commits = gitMirror(['rev-list', '--reverse', 'main', '--', SITE_PREFIX]).trim()
     if (commits === '') throw new Error('docs-history-commit-missing')
-    const sha = commits.split('\n')[0].trim()
-    const commitDate = gitMirror(['show', '-s', '--format=%cI', sha]).trim()
+    const list = commits.split('\n').map((s) => s.trim()).filter(Boolean)
 
-    // 2. המסמכים-שהיו-אז (ls-tree — שמות-בלבד; תוכן-נקרא-קובץ-קובץ, O(1) זיכרון)
-    const histPaths = gitMirror(['ls-tree', '-r', '--name-only', sha, '--', SITE_PREFIX])
-      .split('\n').map((s) => s.trim()).filter((s) => s.endsWith('.md')).sort()
-    if (histPaths.length === 0) throw new Error('docs-history-commit-missing')
-
-    // 3. הצלבה-ביט-ביט: תוכן-אז (git show) מול-תוכן-עכשיו (דיסק-חי)
-    if (!existsSync(SITE_DIR)) throw new Error('docs-dir-missing')
-    const histLines: string[] = []
-    const curLines: string[] = []
-    for (const p of histPaths) {
-      const thenContent = execFileSync('git', ['--git-dir', MIRROR_DIR, 'show', `${sha}:${p}`], {
-        timeout: GIT_TIMEOUT_MS,
-        stdio: 'pipe',
-        maxBuffer: 32 * 1024 * 1024,
-        encoding: 'utf8',
-      })
-      const thenHash = sha256Short(thenContent)
-      const absNow = path.join(process.cwd(), p)
-      if (!existsSync(absNow)) throw new Error(`docs-history-missing-at-${p}`)
-      const nowHash = sha256Short(readFileSync(absNow, 'utf8'))
-      if (nowHash !== thenHash) throw new Error(`docs-history-tampered-at-${p}`)
-      histLines.push(`${p}:${thenHash}`)
-      curLines.push(`${p}:${nowHash}`)
+    // 2. דגימת-הקשת: 5 נקודות-ממוינות (עתיק, רבע, אמצע, שלושה-רבעים, אחרון-לפני-הראש)
+    const idxs = new Set<number>([0, list.length - 1])
+    for (let i = 1; i < ARC_POINTS - 1; i++) {
+      idxs.add(Math.round((i * (list.length - 1)) / (ARC_POINTS - 1)))
     }
+    const arcShas = [...idxs].sort((a, b) => a - b).map((i) => list[i])
+    const arc = arcShas.map((sha) => ({ sha, date: commitDate(sha), blobs: blobMapAt(sha) }))
+    if (arc[0].blobs.size === 0) throw new Error('docs-history-commit-missing')
 
-    // 4. צמיחה-חד-כיוונית — הפסיפס-רק-גדל
-    const curNames = readdirSync(SITE_DIR).filter((f) => f.endsWith('.md'))
-    if (curNames.length < histPaths.length) {
-      throw new Error(`docs-history-shrunk hist=${histPaths.length} cur=${curNames.length}`)
+    // 3. פריכת-הקשת-התוך-גיטית: append-only-בין-כל-זוג-נקודות-עוקבות (blob-id-בלבד — זול)
+    const arcLines: string[] = []
+    let arcChecks = 0
+    let prev: { sha: string; blobs: Map<string, string> } | null = null
+    for (const pt of arc) {
+      if (prev) {
+        if (pt.blobs.size < prev.blobs.size) {
+          throw new Error(`docs-history-arc-nonmonotonic ${prev.blobs.size}->${pt.blobs.size}`)
+        }
+        for (const [p, oldBlob] of prev.blobs) {
+          const newBlob = pt.blobs.get(p)
+          if (newBlob === undefined) throw new Error(`docs-history-arc-vanished-at-${p}`)
+          if (newBlob !== oldBlob) throw new Error(`docs-history-arc-tampered-at-${p}`)
+          arcChecks++
+        }
+      }
+      for (const [p, blob] of pt.blobs) arcLines.push(`${pt.sha.slice(0, 12)}:${p}:${blob}`)
+      prev = pt
     }
+    const arcDigest = sha256Short(arcLines.sort().join('\n'))
 
-    const histDigest = sha256Short(histLines.sort().join('\n'))
-    const curDigest = sha256Short(curLines.sort().join('\n'))
-    const match = histDigest === curDigest // ביט-ביט — אך-נגזר-שוב-לחתימה (הצלבה-כפולה)
+    // 4. פריכת-האמת-מול-הדיסק-החי — שני-קצות-הקשת (קנון-#16, המורחב לשני-הקצוות)
+    const oldest = arc[0]
+    const youngest = arc[arc.length - 1]
+    const oldestDisk = crossCheckDisk(oldest.sha)
+    const youngestDisk = crossCheckDisk(youngest.sha)
+
+    // 5. צמיחה-חד-כיוונית-סופית — הפסיפס-החי-רק-גדל מנקודת-הקצה-האחרונה
+    const curNames = readdirSync(SITE_DIR).filter((f) => f.endsWith('.md')).sort()
+    if (curNames.length < youngest.blobs.size) {
+      throw new Error(`docs-history-shrunk hist=${youngest.blobs.size} cur=${curNames.length}`)
+    }
 
     const durationMs = Date.now() - started
     const entry = await appendLedger({
@@ -152,19 +211,29 @@ export async function runDocsHistoryDrill(force = false): Promise<DocsHistoryDri
       attempts: 1,
       durationMs,
       errorClass: null,
-      outputHash: sha256Short(`docs-history:${sha.slice(0, 12)}:${histPaths.length}/${curNames.length}:${histDigest}:${curDigest}`),
+      outputHash: sha256Short(
+        `docs-history-arc:${arc.length}:${oldest.sha.slice(0, 12)}:${youngest.sha.slice(0, 12)}:` +
+          `${arcDigest}:${oldestDisk.digest}:${youngestDisk.digest}:${curNames.length}`
+      ),
     })
     return {
       ok: true,
       ran: true,
-      commitSha: sha,
-      commitDate,
-      histFiles: histPaths.length,
+      commitSha: oldest.sha,
+      commitDate: oldest.date,
+      histFiles: oldest.blobs.size,
       curFiles: curNames.length,
-      verified: histPaths.length,
-      histDigest,
-      curDigest,
-      match,
+      verified: oldest.blobs.size,
+      histDigest: oldestDisk.digest,
+      curDigest: youngestDisk.digest,
+      // כן: כאן-הגיעו-רק-אם-שתי-ההצלבות-מול-הדיסק-עברו (אחרת-היה-נזרק-חריג-ממוין)
+      match: true,
+      // שכבת-#17:
+      arcPoints: arc.length,
+      arcOldestSha: oldest.sha,
+      arcYoungestSha: youngest.sha,
+      arcChecks,
+      diskChecks: oldestDisk.checked + youngestDisk.checked,
       durationMs,
       at: entry.createdAt.toISOString(),
       ledgerId: entry.id,
@@ -172,7 +241,7 @@ export async function runDocsHistoryDrill(force = false): Promise<DocsHistoryDri
   } catch (e) {
     const durationMs = Date.now() - started
     const msg = e instanceof Error ? e.message : String(e)
-    // סיווג-כן-ומדויק (קנון-הסיווגים של-#11/#13/#14/#15): כל-כישלון-מדווח-על-עצמו-בשמו.
+    // סיווג-כן-ומדויק (קנון-הסיווגים של-#11/#13/#14/#15/#16): כל-כישלון-מדווח-על-עצמו-בשמו.
     const errorClass = msg.includes('not yet connected')
       ? 'db-not-ready'
       : msg === 'docs-history-mirror-missing' || msg === 'docs-history-commit-missing' || msg === 'docs-dir-missing'
@@ -181,11 +250,17 @@ export async function runDocsHistoryDrill(force = false): Promise<DocsHistoryDri
           ? 'docs-history-missing'
           : msg.startsWith('docs-history-tampered-at')
             ? 'docs-history-tampered'
-            : msg.startsWith('docs-history-shrunk')
-              ? 'docs-history-shrunk'
-              : msg.includes('does not exist') || msg.includes('fatal:')
-                ? 'docs-history-show-failed'
-                : 'docs-history-failed'
+            : msg.startsWith('docs-history-arc-tampered-at')
+              ? 'docs-history-arc-tampered'
+              : msg.startsWith('docs-history-arc-vanished-at')
+                ? 'docs-history-arc-vanished'
+                : msg.startsWith('docs-history-arc-nonmonotonic')
+                  ? 'docs-history-arc-nonmonotonic'
+                  : msg.startsWith('docs-history-shrunk')
+                    ? 'docs-history-shrunk'
+                    : msg.includes('does not exist') || msg.includes('fatal:')
+                      ? 'docs-history-show-failed'
+                      : 'docs-history-failed'
     try {
       const entry = await appendLedger({
         taskId: null,
