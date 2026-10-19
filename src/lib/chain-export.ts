@@ -170,23 +170,28 @@ export async function syncChainExport(): Promise<ChainExportResult> {
 // וחישוב-מחדש של-כל-hash (ledgerHash הקנוני). בלי-Prisma, בלי-SQLite, בלי-עותק-עבודה —
 // טקסט-בזרימה. זה-ההבדל-האמיתי-משני-המקורות-האחרים: שחזור-שרשרת-האמת-מטקסט-בלבד.
 // זריקות-בטרמינולוגיה-המאוחדת של-מחזור-#11 (copy-*) כדי-שהסיווג-בשרשרת-יישאר-קנון-אחד.
-export async function verifyExportStream(): Promise<{ verified: number; total: number; head: string }> {
-  if (!existsSync(EXPORT_PATH)) throw new Error('export-missing')
-  const rl = createInterface({ input: createReadStream(EXPORT_PATH, 'utf8'), crlfDelay: Infinity })
-  let prev = GENESIS
-  let verified = 0
-  let lineNo = 0
-  for await (const raw of rl) {
-    lineNo++
+//
+// מחזור-חדשנות #14 (Task 81): כלל-האמת-חולץ-למחלקה-קנונית אחת (ChainVerifier) — הייצוא-החי
+// וההיסטוריה-החתומה (תרגיל-האטימות) שני-צרכנים-של-אותו-כלל-בדיוק. אפס-שכפול-קוד-שעלול-
+// לסטות (הלקח-הכפול-מ-#13: מימוש-כפול-שסוטה = שתי-אמיתות).
+export class ChainVerifier {
+  private prev = GENESIS
+  private verified = 0
+  private lineNo = 0
+  constructor(private readonly label: 'export' | 'history') {}
+
+  // שורה-אחת-קנונית: parse → רצף → prev → חישוב-מחדש-של-ה-hash. זריקה = פגיעה-חתומה.
+  consume(raw: string): void {
+    this.lineNo++
     let parsed: ExportLine
     try {
       parsed = JSON.parse(raw) as ExportLine
     } catch {
-      throw new Error(`export-corrupt-line-${lineNo}`)
+      throw new Error(`${this.label}-corrupt-line-${this.lineNo}`)
     }
-    verified++
-    if (parsed.id !== verified) throw new Error(`export-gap-at-${lineNo}`)
-    if (parsed.prev !== prev) throw new Error(`copy-chain-broken-at-${parsed.id}`)
+    this.verified++
+    if (parsed.id !== this.verified) throw new Error(`${this.label}-gap-at-${this.lineNo}`)
+    if (parsed.prev !== this.prev) throw new Error(`copy-chain-broken-at-${parsed.id}`)
     const rec = {
       taskId: parsed.taskId,
       kind: parsed.kind,
@@ -199,9 +204,28 @@ export async function verifyExportStream(): Promise<{ verified: number; total: n
       prev: parsed.prev,
     }
     if (parsed.hash !== ledgerHash(rec)) throw new Error(`copy-chain-broken-at-${parsed.id}`)
-    prev = parsed.hash
+    this.prev = parsed.hash
   }
-  return { verified, total: verified, head: verified > 0 ? prev : GENESIS }
+
+  finish(): { verified: number; total: number; head: string } {
+    return { verified: this.verified, total: this.verified, head: this.verified > 0 ? this.prev : GENESIS }
+  }
+}
+
+// אימות-זרימה-על-קובץ-JSONL (הייצוא-החי או-היסטוריה-שהוקרנה-לקובץ-זמני): O(1) זיכרון.
+export async function verifyJsonlStream(
+  filePath: string,
+  label: 'export' | 'history' = 'export'
+): Promise<{ verified: number; total: number; head: string }> {
+  if (!existsSync(filePath)) throw new Error(`${label}-missing`)
+  const rl = createInterface({ input: createReadStream(filePath, 'utf8'), crlfDelay: Infinity })
+  const v = new ChainVerifier(label)
+  for await (const raw of rl) v.consume(raw)
+  return v.finish()
+}
+
+export async function verifyExportStream(): Promise<{ verified: number; total: number; head: string }> {
+  return verifyJsonlStream(EXPORT_PATH, 'export')
 }
 
 // תקציר-קובץ-זול (stat-בלבד) לשער-הקריאה-ולתצוגה — אפס-קריאת-תוכן.

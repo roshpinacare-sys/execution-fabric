@@ -53,6 +53,7 @@ import {
   BookOpenText,
   Volume2,
   ArchiveRestore,
+  History,
   ShieldPlus,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -292,6 +293,8 @@ interface CensusDto {
     snapshot: { at: string; ok: boolean; ledgerId: number; durationMs: number; errorClass: string | null } | null
     export: { at: string; ok: boolean; ledgerId: number; durationMs: number; errorClass: string | null } | null
   } | null
+  // מחזור-#14 (Task 81) — עדות-אטימות-ההיסטוריה (fail-honest; null = טרם-רץ)
+  historyDrill?: { at: string; ok: boolean; ledgerId: number; durationMs: number; errorClass: string | null } | null
   // Task 71 — הזקיפה (survival-keeper :3051): מעקב-הישרדות + מראת-גיבוי + תמונות-db (fail-honest)
   survival?: {
     up: boolean
@@ -1037,7 +1040,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/census')
       const j = await res.json()
-      if (j.ok) setCensus({ ...j.census, witness: j.witness, githubGate: j.githubGate, restoreDrill: j.restoreDrill, restoreDrillSources: j.restoreDrillSources, survival: j.survival })
+      if (j.ok) setCensus({ ...j.census, witness: j.witness, githubGate: j.githubGate, restoreDrill: j.restoreDrill, restoreDrillSources: j.restoreDrillSources, historyDrill: j.historyDrill, survival: j.survival })
     } catch {
       /* polling — שקט */
     }
@@ -3129,6 +3132,37 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                               : st === 'partial'
                                 ? `${okCount}/3 מקורות`
                                 : 'מאומת 3/3'}
+                      </Badge>
+                    )
+                  })()}
+                {census &&
+                  (() => {
+                    // מחזור-#14 (Task 81): badge-אטימות-ההיסטוריה — ההווה מוכח-שחזור;
+                    // העבר מוכח-שלא-נשכתה. fail-honest: טרם-רץ = לא-מאומת (amber).
+                    const h = census.historyDrill ?? null
+                    const ageH = h ? (Date.now() - new Date(h.at).getTime()) / 3_600_000 : null
+                    const st = !h ? 'none' : !h.ok ? 'broken' : (ageH ?? 0) > 26 ? 'stale' : 'ok'
+                    return (
+                      <Badge
+                        variant="outline"
+                        title={`תרגיל-אטימות-ההיסטוריה (מחזור-#14): הייצוא-מהקומיט-העתיק-ביותר-במראה-ה-bare נחשב-מחדש-מה-Genesis-בזיכרון (אפס-SQLite) ומוצלב-כקידומת-ביט-ביט-מול-הייצור-החי. ${h ? (h.ok ? `אטומה (${new Date(h.at).toLocaleString('he-IL')})` : `נפגעה — ${h.errorClass ?? '?'}`) : 'טרם-רץ'}`}
+                        className={`gap-1 text-[10px] ${
+                          st === 'broken'
+                            ? 'border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                            : st === 'stale' || st === 'none'
+                              ? 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                              : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                        }`}
+                      >
+                        <History className="h-2.5 w-2.5" />
+                        היסטוריה:{' '}
+                        {st === 'none'
+                          ? 'טרם-נבחנה'
+                          : st === 'broken'
+                            ? 'נפגעה'
+                            : st === 'stale'
+                              ? 'מיושנת'
+                              : 'אטומה'}
                       </Badge>
                     )
                   })()}

@@ -65,6 +65,13 @@ const EXPORT_SYNC_PULSE_MS = 10 * 60_000
 const EXPORT_SYNC_PULSE_FIRST_MS = 60_000
 const EXPORT_RESTORE_PULSE_MS = 30 * 60_000
 const EXPORT_RESTORE_PULSE_FIRST_MS = 120_000
+// מחזור-חדשנות #14 (Task 81): עורק-ט — תרגיל-אטימות-ההיסטוריה.
+// כל-שעה: POST /api/sovereign/history-drill — הייצוא-מהקומיט-העתיק-ביותר-במראה-ה-bare
+// נחשב-מחדש-מה-Genesis-בזיכרון-ומוצלב-כקידומת-ביט-ביט-מול-הייצור. שלושת-התרגילים-
+// הקיימים-מוכיחים-את-ההווה; הזה-מוכיח-שהעבר-לא-נשכתה (אף-force-push/שכתוב-שקט-לא-יעבור-בשקט).
+// 90ש' אחרי-עליית-הלב; הדילוג-הכן-המובנה (טרי-מ-30דק') קובע-את-הקצב-האמיתי.
+const HISTORY_PULSE_MS = 60 * 60_000
+const HISTORY_PULSE_FIRST_MS = 90_000
 const NARRATE_TIMEOUT_MS = 120_000 // Task 39: ירי-TTS אמיתי — מהיר, אך-נותנים-רשת
 const APP_GUARD_MS = 15_000
 const APP_GUARD_FAILS_TO_RESTART = 3
@@ -124,6 +131,10 @@ interface State {
   exportRestoreOk: boolean | null
   lastExportRestoreAt: string | null
   lastExportRestoreResult: string | null
+  historyPulses: number
+  historyOk: boolean | null
+  lastHistoryAt: string | null
+  lastHistoryResult: string | null
 }
 
 const state: State = {
@@ -181,6 +192,10 @@ const state: State = {
   exportRestoreOk: null,
   lastExportRestoreAt: null,
   lastExportRestoreResult: null,
+  historyPulses: 0,
+  historyOk: null,
+  lastHistoryAt: null,
+  lastHistoryResult: null,
 }
 
 let lastTickAttemptMs = Date.now()
@@ -725,6 +740,41 @@ async function exportRestorePulse(): Promise<void> {
   }
 }
 
+// ===== עורק-ט (מחזור-חדשנות #14): פעימת-אטימות-ההיסטוריה — העבר מוכח-שלא-נשכתה =====
+// כל-שעה: POST /api/sovereign/history-drill — הייצוא-מהקומיט-העתיק-ביותר-במראה-ה-bare
+// מחושב-מחדש-מה-Genesis-בזיכרון (מאמת-הקנון) ומוצלב-כקידומת-ביט-ביט-מול-הייצור-החי.
+// שכתוב-היסטוריה-שקט (force-push/פגיעה-במראה/תיקון-שורות-ישנות) מתגלה-תוך-≤שעה — כשל-חתום.
+async function historyPulse(): Promise<void> {
+  state.historyPulses++
+  state.lastHistoryAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/sovereign/history-drill`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(60_000),
+    })
+    const d = (await res.json()) as {
+      ok?: boolean
+      drill?: { ran?: boolean; ok?: boolean; reason?: string; verified?: number; prefixMatch?: boolean; commitSha?: string }
+    }
+    const dr = d.drill ?? {}
+    if (dr.ran === false) {
+      state.lastHistoryResult = `skipped: ${dr.reason ?? 'recent'}`
+    } else if (d.ok && dr.ok) {
+      state.historyOk = true
+      state.lastHistoryResult = `sealed: ${dr.verified} entries from ${(dr.commitSha ?? '').slice(0, 7)} · prefixMatch:${dr.prefixMatch}`
+      log(`עורק-ההיסטוריה: העבר-מאומת-שלא-נשכתה ✓ ${state.lastHistoryResult}`)
+    } else {
+      state.historyOk = false
+      state.lastHistoryResult = `FAILED: ${dr.reason ?? 'unknown'}`
+      log(`עורק-ההיסטוריה: 🚨 תרגיל-האטימות-נכשל — ${state.lastHistoryResult}`)
+    }
+  } catch (e) {
+    state.historyOk = false
+    state.lastHistoryResult = `error: ${e instanceof Error ? e.message : String(e)}`
+    log(`עורק-ההיסטוריה: כשל-רשת — ${state.lastHistoryResult}`)
+  }
+}
+
 // ===== עורק-ז: פעימת-אמת-עצמית (Task 45) — "האוטונומיה יודעת להשתמש בכלים" כהוכחה-רציפה =====
 // כל-30 דק': POST /api/sovereign/ops/selftest — הלב מריץ את כל-הכלים שלו בקריאות-אמת
 // (health/census/ops/improvements/db-reconnect/worker-tick/autonomy-tick/drill)
@@ -793,7 +843,7 @@ setInterval(() => {
 }, 60_000)
 
 log(
-  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', פעימת-אמת-עצמית כל ${SELFTEST_PULSE_MS / 60_000} דק', תרגיל-תמונה כל ${SNAPSHOT_RESTORE_PULSE_MS / 60_000} דק', סנכרון-ייצוא כל ${EXPORT_SYNC_PULSE_MS / 60_000} דק', תרגיל-ייצוא כל ${EXPORT_RESTORE_PULSE_MS / 60_000} דק', דופק על :${PORT}`
+  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', פעימת-אמת-עצמית כל ${SELFTEST_PULSE_MS / 60_000} דק', תרגיל-תמונה כל ${SNAPSHOT_RESTORE_PULSE_MS / 60_000} דק', סנכרון-ייצוא כל ${EXPORT_SYNC_PULSE_MS / 60_000} דק', תרגיל-ייצוא כל ${EXPORT_RESTORE_PULSE_MS / 60_000} דק', אטימות-היסטוריה כל ${HISTORY_PULSE_MS / 60_000} דק', דופק על :${PORT}`
 )
 
 setInterval(() => void tick(), TICK_MS)
@@ -815,6 +865,8 @@ setTimeout(() => void exportSyncPulse(), EXPORT_SYNC_PULSE_FIRST_MS) // מחזו
 setInterval(() => void exportSyncPulse(), EXPORT_SYNC_PULSE_MS)
 setTimeout(() => void exportRestorePulse(), EXPORT_RESTORE_PULSE_FIRST_MS)
 setInterval(() => void exportRestorePulse(), EXPORT_RESTORE_PULSE_MS)
+setTimeout(() => void historyPulse(), HISTORY_PULSE_FIRST_MS) // מחזור-#14: אטימות-ההיסטוריה
+setInterval(() => void historyPulse(), HISTORY_PULSE_MS)
 setInterval(() => void appGuard(), APP_GUARD_MS)
 
 void tick() // פעימה-ראשונה מיידית

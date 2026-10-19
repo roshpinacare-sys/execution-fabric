@@ -85,7 +85,8 @@ export interface LastDrillBrief {
 
 // חוסן-אתחול (מחזור-#8): הקריאה-הראשונה ל-db בתהליך-טרי עלולה-להיתקל-במנוע-שטרם-חובר.
 // ממתינים-למנוע ב-retry-קצר (עד ~8ש') — רק-על-סימן-הזיהוי המדויק; כל-שגיאה-אחרת מתעופפת-מיד.
-async function dbReady(maxAttempts = 16, delayMs = 500): Promise<void> {
+// מחזור-#14: מיוצא-גם-לתרגיל-האטימות (history-drill) — לקח-אחד, מימוש-אחד.
+export async function dbReady(maxAttempts = 16, delayMs = 500): Promise<void> {
   for (let i = 1; ; i++) {
     try {
       await db.ledgerEntry.findFirst({ select: { id: true }, orderBy: { id: 'desc' } })

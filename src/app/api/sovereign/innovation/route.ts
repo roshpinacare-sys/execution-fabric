@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { appendLedger, sha256Short } from '@/lib/ledger'
 import { runInnovationCycle, runCensusCycle, type CensusCycleMeasurement } from '@/lib/innovation'
 import { runRestoreDrill, type RestoreDrillResult } from '@/lib/restore-drill'
+import { runHistoryDrill, type HistoryDrillResult } from '@/lib/history-drill'
 import { buildMetricsStreamed } from '@/lib/metrics'
 import { buildCensus } from '@/lib/census'
 import { verifyChainStreamed } from '@/lib/ledger'
@@ -270,6 +271,49 @@ export async function POST(req: NextRequest) {
           drillLedgerId: drill.ledgerId ?? null,
           reason: drill.reason ?? null,
           adoptionRationale: 'format-diversified-text-source-proven',
+        })
+      ),
+    })
+    return NextResponse.json({ ok: true, status, drill, ledgerEntryId: entry.id })
+  }
+
+  // מחזור-#14 (Task 81): תרגיל-אטימות-ההיסטוריה — ההווה-מוכח-שחזור (תרגילי-#8/#11/#13);
+  // העבר-מוכח-מעתה-שלא-נשכתה: הייצוא-מהקומיט-העתיק-ביותר-במראה-ה-bare נחשב-מחדש-מה-Genesis
+  // (מאמת-הקנון) ומוצלב-כקידומת-ביט-ביט-מול-הייצור-החי. שכתוב-היסטוריה-שקט = כשל-חתום.
+  // אותו-קנון-אמת-של-#8/#11/#13 (ran + ok + prefixMatch = תנאי-אימוץ-מוחלט).
+  if (subject === 'history-drill') {
+    let drill: HistoryDrillResult
+    try {
+      drill = await runHistoryDrill(true) // כפייה-במסילה בלבד: המחזור-חייב-לרוץ-בפועל
+    } catch (e) {
+      return NextResponse.json(
+        { ok: false, error: 'drill-unreachable', detail: e instanceof Error ? e.message : String(e) },
+        { status: 502 }
+      )
+    }
+    const adoptionProven = drill.ran === true && drill.ok === true && drill.prefixMatch === true
+    const status = adoptionProven ? 'DONE' : 'FAILED'
+    const entry = await appendLedger({
+      taskId: null,
+      kind: 'INNOVATION',
+      status,
+      worker: 'innovation-cycle-history-drill',
+      attempts: 1,
+      durationMs: drill.durationMs ?? 0,
+      errorClass: adoptionProven ? null : (drill.errorClass ?? 'drill-not-proven'),
+      outputHash: sha256Short(
+        JSON.stringify({
+          subject: 'history-immutability-drill-forced',
+          commitSha: drill.commitSha ?? null,
+          commitDate: drill.commitDate ?? null,
+          verified: drill.verified ?? null,
+          total: drill.total ?? null,
+          historyHead: drill.historyHead ?? null,
+          prodHead: drill.prodHead ?? null,
+          prefixMatch: drill.prefixMatch ?? null,
+          drillLedgerId: drill.ledgerId ?? null,
+          reason: drill.reason ?? null,
+          adoptionRationale: 'append-only-history-proven-across-time',
         })
       ),
     })
