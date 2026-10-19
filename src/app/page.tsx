@@ -52,6 +52,7 @@ import {
   MoonStar,
   BookOpenText,
   Volume2,
+  ArchiveRestore,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 
@@ -282,6 +283,8 @@ interface CensusDto {
   witness?: { up: boolean; ok?: boolean; total?: number; head?: string; agrees?: boolean; reason?: string }
   // Task 69 — שער-הציות של GitHub (מטא-מקומי)
   githubGate?: { used: number; cap: number; backoffActive: boolean }
+  // Task 70 — עדות-תרגיל-השחזור האחרונה מהשרשרת (fail-honest; null = טרם-רץ)
+  restoreDrill?: { at: string; ok: boolean; ledgerId: number; durationMs: number; errorClass: string | null } | null
   tasks: { total: number; byStatus: Record<string, number>; stuckRunning: number; exhausted: number; queuedOrphans: number; bySource: Record<string, number> }
   handoff: { byStatus: Record<string, number>; pendingApprovals: { id: string; repo: string; path: string; auto: boolean; ageMs: number }[]; delivered: number }
   budget: { used: number; cap: number; remaining: number }
@@ -1013,7 +1016,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/census')
       const j = await res.json()
-      if (j.ok) setCensus({ ...j.census, witness: j.witness, githubGate: j.githubGate })
+      if (j.ok) setCensus({ ...j.census, witness: j.witness, githubGate: j.githubGate, restoreDrill: j.restoreDrill })
     } catch {
       /* polling — שקט */
     }
@@ -3050,6 +3053,41 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                       : `ציות ${census.githubGate.used}/${census.githubGate.cap}`}
                   </Badge>
                 )}
+                {census &&
+                  (() => {
+                    const rd = census.restoreDrill
+                    const ageH = rd ? (Date.now() - new Date(rd.at).getTime()) / 3_600_000 : null
+                    const st = !rd ? 'none' : !rd.ok ? 'failed' : (ageH ?? 0) > 26 ? 'stale' : 'ok'
+                    return (
+                      <Badge
+                        variant="outline"
+                        title={
+                          st === 'none'
+                            ? 'תרגיל-שחזור (Task 70): clone-רדוד מ-github + אימות-שרשרת עצמאי על העותק-המשוחזר — טרם-רץ; הפעימה-הראשונה בדרך מהדופק (כל 6 שעות)'
+                            : `תרגיל-שחזור (Task 70): clone-רדוד מ-github + אימות-שרשרת-עצמאי על העותק-המשוחזר והצלבת-ראש מול-הייצור. אחרון: ${new Date(rd!.at).toLocaleString('he-IL')} (${Math.round(ageH ?? 0)} שעות)${rd!.errorClass ? ` — ${rd!.errorClass}` : ''}`
+                        }
+                        className={`gap-1 text-[10px] ${
+                          st === 'failed'
+                            ? 'border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                            : st === 'stale'
+                              ? 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                              : st === 'ok'
+                                ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-700 dark:text-cyan-400'
+                                : 'border-zinc-500/30 text-zinc-500'
+                        }`}
+                      >
+                        <ArchiveRestore className="h-2.5 w-2.5" />
+                        שחזור:{' '}
+                        {st === 'none'
+                          ? 'אין-ראיה'
+                          : st === 'failed'
+                            ? 'נכשל'
+                            : st === 'stale'
+                              ? 'מיושן'
+                              : 'מאומת'}
+                      </Badge>
+                    )
+                  })()}
               </div>
 
               <div>

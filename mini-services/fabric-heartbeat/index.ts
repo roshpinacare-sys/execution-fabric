@@ -47,6 +47,8 @@ const OPS_PULSE_MS = 10 * 60_000 // Task 44: עורק-הריבונות — הל�
 const OPS_PULSE_FIRST_MS = 90_000
 const SELFTEST_PULSE_MS = 30 * 60_000 // Task 45: עורק-ז — הלב מוכיח את סרט-הכלים שלו ברציפות
 const SELFTEST_PULSE_FIRST_MS = 3 * 60_000
+const RESTORE_PULSE_MS = 6 * 60 * 60_000 // Task 70: עורק-ח — הוכחה-קבועה שהכפילות-הרחוקה מחזירה-מערכת-שלמה
+const RESTORE_PULSE_FIRST_MS = 150_000
 const NARRATE_TIMEOUT_MS = 120_000 // Task 39: ירי-TTS אמיתי — מהיר, אך-נותנים-רשת
 const APP_GUARD_MS = 15_000
 const APP_GUARD_FAILS_TO_RESTART = 3
@@ -90,6 +92,10 @@ interface State {
   lastAppGuardResult: string | null
   dbFileReplaced: number
   lastReconnectResult: string | null
+  restorePulses: number
+  restoreOk: boolean | null
+  lastRestoreAt: string | null
+  lastRestoreResult: string | null
 }
 
 const state: State = {
@@ -131,6 +137,10 @@ const state: State = {
   lastAppGuardResult: null,
   dbFileReplaced: 0,
   lastReconnectResult: null,
+  restorePulses: 0,
+  restoreOk: null,
+  lastRestoreAt: null,
+  lastRestoreResult: null,
 }
 
 let lastTickAttemptMs = Date.now()
@@ -526,6 +536,40 @@ async function opsPulse(): Promise<void> {
   }
 }
 
+// ===== עורק-ח: פעימת-שחזור (Task 70) — הוכחה-קבועה שהכפילות-הרחוקה מחזירה-מערכת-שלמה =====
+// כל-6 שעות: POST /api/sovereign/restore-drill — clone-רדוד מ-github, אימות-שרשרת
+// עצמאי על-העותק-המשוחזר, חתימת-DRILL. שחזור-שנכשל = זעקה-גלויה כאן וב-badge-בדף.
+async function restorePulse(): Promise<void> {
+  state.restorePulses++
+  state.lastRestoreAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/sovereign/restore-drill`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(300_000), // clone + אימות — נותנים-רשת
+    })
+    const d = (await res.json()) as {
+      ok?: boolean
+      drill?: { ran?: boolean; ok?: boolean; reason?: string; verified?: number; headMatch?: boolean }
+    }
+    const dr = d.drill ?? {}
+    if (dr.ran === false) {
+      state.lastRestoreResult = `skipped: ${dr.reason ?? 'recent'}`
+    } else if (d.ok && dr.ok) {
+      state.restoreOk = true
+      state.lastRestoreResult = `restored: ${dr.verified} entries · headMatch:${dr.headMatch}`
+      log(`עורק-השחזור: הכפילות-הרחוקה מאומתת ✓ ${state.lastRestoreResult}`)
+    } else {
+      state.restoreOk = false
+      state.lastRestoreResult = `FAILED: ${dr.reason ?? 'unknown'}`
+      log(`עורק-השחזור: 🚨 השחזור-נכשל — ${state.lastRestoreResult}`)
+    }
+  } catch (e) {
+    state.restoreOk = false
+    state.lastRestoreResult = `error: ${e instanceof Error ? e.message : String(e)}`
+    log(`עורק-השחזור: כשל-רשת — ${state.lastRestoreResult}`)
+  }
+}
+
 // ===== עורק-ז: פעימת-אמת-עצמית (Task 45) — "האוטונומיה יודעת להשתמש בכלים" כהוכחה-רציפה =====
 // כל-30 דק': POST /api/sovereign/ops/selftest — הלב מריץ את כל-הכלים שלו בקריאות-אמת
 // (health/census/ops/improvements/db-reconnect/worker-tick/autonomy-tick/drill)
@@ -608,6 +652,8 @@ setTimeout(() => void opsPulse(), OPS_PULSE_FIRST_MS)
 setInterval(() => void opsPulse(), OPS_PULSE_MS)
 setTimeout(() => void selftestPulse(), SELFTEST_PULSE_FIRST_MS)
 setInterval(() => void selftestPulse(), SELFTEST_PULSE_MS)
+setTimeout(() => void restorePulse(), RESTORE_PULSE_FIRST_MS)
+setInterval(() => void restorePulse(), RESTORE_PULSE_MS)
 setInterval(() => void appGuard(), APP_GUARD_MS)
 
 void tick() // פעימה-ראשונה מיידית
