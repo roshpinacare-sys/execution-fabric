@@ -278,6 +278,8 @@ interface CensusDto {
     headAgeMs: number | null
     byKind: Record<string, number>
   }
+  // Task 67 — עד-השרשרת: מוחזר מה-API בשדה נפרד אך נאחז כאן לתצוגה (fail-honest)
+  witness?: { up: boolean; ok?: boolean; total?: number; head?: string; agrees?: boolean; reason?: string }
   tasks: { total: number; byStatus: Record<string, number>; stuckRunning: number; exhausted: number; queuedOrphans: number; bySource: Record<string, number> }
   handoff: { byStatus: Record<string, number>; pendingApprovals: { id: string; repo: string; path: string; auto: boolean; ageMs: number }[]; delivered: number }
   budget: { used: number; cap: number; remaining: number }
@@ -1009,7 +1011,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/census')
       const j = await res.json()
-      if (j.ok) setCensus(j.census)
+      if (j.ok) setCensus({ ...j.census, witness: j.witness })
     } catch {
       /* polling — שקט */
     }
@@ -2994,6 +2996,41 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                   <ShieldCheck className="h-2.5 w-2.5" />
                   שרשרת: {census === null ? '—' : census.chain.verify.ok ? 'מאומתת' : 'שבורה'}
                 </Badge>
+                {census?.witness && (
+                  <Badge
+                    variant="outline"
+                    title={
+                      census.witness.up
+                        ? `עד-עצמאי על ${census.witness.total} רשומות — head ${census.witness.head?.slice(0, 8)}${census.witness.agrees ? '' : ' — חולק על הראש המדווח!'}`
+                        : `עד-לא-נגיש: ${census.witness.reason ?? '—'}`
+                    }
+                    className={`gap-1 text-[10px] ${
+                      !census.witness.up
+                        ? 'border-zinc-500/30 text-zinc-500'
+                        : census.witness.ok && census.witness.agrees
+                          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                          : 'border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                    }`}
+                  >
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        !census.witness.up
+                          ? 'bg-zinc-400'
+                          : census.witness.ok && census.witness.agrees
+                            ? 'animate-pulse bg-emerald-500'
+                            : 'animate-pulse bg-rose-500'
+                      }`}
+                    />
+                    עד:{' '}
+                    {!census.witness.up
+                      ? 'דמם'
+                      : census.witness.ok && census.witness.agrees
+                        ? `מאשר ${census.witness.total}`
+                        : census.witness.ok
+                          ? 'חולק-על-הראש'
+                          : `שבירה @${census.witness.total}`}
+                  </Badge>
+                )}
               </div>
 
               <div>
