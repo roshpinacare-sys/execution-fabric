@@ -10,8 +10,8 @@ import { runRestoreDrill, lastRestoreDrill, type DrillSource } from '@/lib/resto
 //
 // ?source=git       (ברירת-מחדל) — clone-רדוד מ-github. פעימה-אוטומטית כל-6שע' מהלב (עורק-ח).
 // ?source=snapshot  (מחזור-חדשנות #11, Task 78) — התמונה-השעתית הטרייה ביותר (VACUUM INTO,
-//                    מקור-בלתי-תלוי בגיט). פעימה-אוטומטית כל-שעה מהלב (עורק-ח-bis, מחזור-#12).
-//                    תרגיל-התמונה בן-עשרות-מילישניות — קצב-צפוף-כנה ובלי-עומס.
+//                    מקור-בלתי-תלוי בגיט). פעימת-ניטור כל-5דק' מהלב (עורק-ח-bis, מחזור-#12) —
+//                    הדילוג-אם-טרי-מ-30דק' קובע-את-הריצה-האמיתית; התרגיל בן-עשרות-מילישניות.
 
 function parseSource(req: NextRequest): DrillSource {
   const s = req.nextUrl.searchParams.get('source')
