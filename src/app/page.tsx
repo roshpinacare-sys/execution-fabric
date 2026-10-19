@@ -287,6 +287,24 @@ interface CensusDto {
   memory: { learned: { total: number }; produced: { total: number }; delivered: { total: number }; openLoops: { total: number | null } }
 }
 
+// מראת-הצי (Task 65): המרשם-הקנוני של הצי — קריאה-טהורה מ-github-raw, fail-honest
+interface FleetRepoRowDto {
+  repo: string
+  role: string
+  status: string
+  priority: string
+  extra: string
+}
+interface FleetRegistryDto {
+  registry: {
+    fetched: boolean
+    cachedAt: number | null
+    rows: FleetRepoRowDto[]
+    reason: string | null
+  }
+  fabric: { chain: { total: number; head: string; ok: boolean } }
+}
+
 // סיווג-סוגים (disktree classify) — אפס-כחול/אינדיגו, פלטה-רגועה
 const CENSUS_KIND_STYLES: Record<string, { bar: string; text: string }> = {
   execution: { bar: 'bg-emerald-500/70', text: 'text-emerald-600 dark:text-emerald-400' },
@@ -854,6 +872,7 @@ export default function Home() {
 
   // פקח-הריבונות (Task 30)
   const [census, setCensus] = useState<CensusDto | null>(null)
+  const [fleetReg, setFleetReg] = useState<FleetRegistryDto | null>(null)
 
   // קיר-הצמיחה + צי-הכלים + משמרת-לילה (Task 34)
   const [build, setBuild] = useState<BuildStatusDto | null>(null)
@@ -991,6 +1010,17 @@ export default function Home() {
       const res = await fetch('/api/census')
       const j = await res.json()
       if (j.ok) setCensus(j.census)
+    } catch {
+      /* polling — שקט */
+    }
+  }, [])
+
+  // מראת-הצי (Task 65): המרשם-הקנוני — קריאה-טהורה, cache-בצד-ה-API
+  const loadFleetReg = useCallback(async () => {
+    try {
+      const res = await fetch('/api/fleet/registry')
+      const j = await res.json()
+      if (j.ok) setFleetReg(j)
     } catch {
       /* polling — שקט */
     }
@@ -1221,15 +1251,20 @@ export default function Home() {
     const ivNight = setInterval(() => {
       loadCensus()
     }, 30000)
+    loadFleetReg()
     const ivArsenal = setInterval(() => {
       loadArsenal()
+    }, 60000)
+    const ivFleetReg = setInterval(() => {
+      loadFleetReg()
     }, 60000)
     return () => {
       clearInterval(ivBuild)
       clearInterval(ivNight)
+      clearInterval(ivFleetReg)
       clearInterval(ivArsenal)
     }
-  }, [loadBuild, loadImprovements, loadArsenal, loadCensus])
+  }, [loadBuild, loadImprovements, loadArsenal, loadCensus, loadFleetReg])
 
   // Task 39: בית-התוכן (כל 30 שניות) + הנבחר-הנגזר (ברירת-מחדל: החדש ביותר)
   useEffect(() => {
@@ -2536,6 +2571,66 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                         ))}
                       </div>
                     )}
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* מראת-הצי (Task 65): המרשם-הקנוני FLEET-REPOS-REGISTRY — מערכת-אחת-בראיה (R360) */}
+          <Card id="sec-fleet-registry" className="scroll-mt-20">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Network className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+                מפת-הצי — המרשם-הקנוני
+              </CardTitle>
+              <CardDescription>
+                ריפואי-הצי כפי-שנרשמו-מיד (חוק R343 §7: ריפו-שלא-במרשם = שימות-בלי-יורש) — נקרא-חי מ-origin/steem@saos-cockpit, קריאה-טהורה, cache-5דק, אפס-כפילות (חוק R360).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {!fleetReg ? (
+                <Skeleton className="h-40 w-full" />
+              ) : !fleetReg.registry.fetched ? (
+                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-600 dark:text-amber-400">
+                  {fleetReg.registry.reason ?? 'לא-נמדד'}
+                </p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Badge variant="outline" className="gap-1 text-[10px] border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      מרשם {fleetReg.registry.rows.length} ריפואים
+                    </Badge>
+                    <Badge variant="outline" className="gap-1 text-[10px] border-zinc-500/30 text-zinc-600 dark:text-zinc-400" dir="ltr">
+                      fabric seq {fleetReg.fabric.chain.total} {fleetReg.fabric.chain.ok ? '✓' : '✗'}
+                    </Badge>
+                  </div>
+                  <div className="max-h-96 space-y-1.5 overflow-y-auto">
+                    {fleetReg.registry.rows.map((r) => {
+                      const ours = r.repo === 'execution-fabric'
+                      return (
+                        <div key={r.repo} className={`rounded-md border p-2 ${ours ? 'border-teal-500/40 bg-teal-500/5' : ''}`}>
+                          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                            <span className="flex items-center gap-1.5 text-xs font-semibold">
+                              {r.repo}
+                              {ours ? (
+                                <Badge variant="outline" className="text-[9px] border-teal-500/40 bg-teal-500/10 text-teal-600 dark:text-teal-400">
+                                  אנחנו
+                                </Badge>
+                              ) : null}
+                            </span>
+                            {r.priority ? (
+                              <Badge variant="outline" className={`shrink-0 text-[9px] ${r.priority.includes('מרכז') ? 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400' : 'border-zinc-500/30 text-zinc-600 dark:text-zinc-400'}`}>
+                                {r.priority}
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{r.role}</p>
+                          <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground/70">{r.status}</p>
+                        </div>
+                      )
+                    })}
                   </div>
                 </>
               )}
