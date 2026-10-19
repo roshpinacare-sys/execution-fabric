@@ -376,7 +376,17 @@ async function appGuard(): Promise<void> {
   state.lastAppGuardAt = new Date().toISOString()
   try {
     const res = await fetch(`${APP_URL}/api/health`, { signal: AbortSignal.timeout(5_000) })
-    if (res.ok) {
+    // מחזור-#10 (Task 77) — לקח-העיוורון-החי: /api/health מדווח-כישלון-בגוף
+    // ({"ok":false,"db":false}) אך מחזיר-HTTP-200 — וה-guard-היסטורי-קרא-רק-את-הכותרת
+    // וראה-אפליקציה-"חיה" בזמן-שמנוע-ה-db היה מנותק. מעתה: נאמנות-לגוף בלבד.
+    let bodyOk = false
+    try {
+      const j = (await res.json()) as { ok?: boolean }
+      bodyOk = j.ok === true
+    } catch {
+      bodyOk = false
+    }
+    if (res.ok && bodyOk) {
       appGuardFails = 0
       state.lastAppGuardResult = 'ok'
       appGuardBusy = false
@@ -392,7 +402,13 @@ async function appGuard(): Promise<void> {
     log('שומר-האפליקציה: האפליקציה לא עונה — מזניק מחדש מבן-עץ-הלב')
     try {
       // ספון-בן-של-הלב: הלב חי-תחת-העץ-המתמיד של הפלטפורמה — ולכן הבן שורד גם-הוא.
-      // אם מופע-זומבי מחזיק את-הפורט — הספון ייפול EADDRINUSE בכנות והסבב-הבא ינסה שוב.
+      // מחזור-#10: לפני-הספון — הריגה-מסודרת של-שאריות-מחזיקות-פורט (next-server יתום
+      // אינו-מקבל-אות-מהוריו-המתים והיה-חוסם-את-ההזנקה-ב-EADDRINUSE לנצח).
+      Bun.spawnSync(['bash', '-c', 'pkill -f "next-server" ; pkill -f "next dev -p 3000" ; sleep 1'], {
+        cwd: PROJECT_DIR,
+        stdout: 'ignore',
+        stderr: 'ignore',
+      })
       Bun.spawn(['bun', 'run', 'dev'], {
         cwd: PROJECT_DIR,
         stdin: 'ignore',
