@@ -9,13 +9,19 @@ import { runRestoreDrill, lastRestoreDrill, type DrillSource } from '@/lib/resto
 //        fail-honest: כשל = status:FAILED + errorClass בשרשרת, אף-המצאה.
 //
 // ?source=git       (ברירת-מחדל) — clone-רדוד מ-github. פעימה-אוטומטית כל-6שע' מהלב (עורק-ח).
+// ?source=export    (מחזור-חדשנות #13, Task 80) — הייצוא-ה-JSONL-בגיט (טקסט-מחוץ-ל-SQLite):
+//                    חישוב-מחדש-מלא של-השרשרת-מה-Genesis בזיכרון. פעימת-סנכרון כל-10דק'
+//                    (עורק-ג) + פעימת-תרגיל כל-30דק' (עורק-ג-bis) מהלב.
 // ?source=snapshot  (מחזור-חדשנות #11, Task 78) — התמונה-השעתית הטרייה ביותר (VACUUM INTO,
 //                    מקור-בלתי-תלוי בגיט). פעימת-ניטור כל-5דק' מהלב (עורק-ח-bis, מחזור-#12) —
 //                    הדילוג-אם-טרי-מ-30דק' קובע-את-הריצה-האמיתית; התרגיל בן-עשרות-מילישניות.
 
 function parseSource(req: NextRequest): DrillSource {
   const s = req.nextUrl.searchParams.get('source')
-  return s === 'snapshot' ? 'snapshot' : 'git' // ערך-לא-חוקי = ברירת-המחדל-ההיסטורית (לא-שקר)
+  // מחזור-#13: 'export' — המקור-השלישי (הערה-ללקח-החי: בגרסה-הראשונה 'export' נפל-בחזרה
+  // ל-'git' — הפעימה-בדקה-בשקט-מקור-אחר-מזה-שנשלח; התגלה-רק-בפורנזיקה-של-השרשרת.
+  // הלקח: כל-מקור-חדש-חייב-להיכנס-לניתוח-כאן-וב-WORKERS-יחד — אין-ברירת-מחדל-שקטה-למקור-שלא-נבחן)
+  return s === 'snapshot' ? 'snapshot' : s === 'export' ? 'export' : 'git'
 }
 
 export async function GET(req: NextRequest) {

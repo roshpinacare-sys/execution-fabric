@@ -161,6 +161,7 @@ export async function runRestoreDrill(force = false, source: DrillSource = 'git'
     const dir = useWorkCopy ? mkdtempSync(path.join(tmpdir(), 'fabric-drill-')) : null
     try {
       // הכנת-עותק-העבודה — הנקודה-היחידה-שבה-המקורות-נבדלים; מכאן-ואילך קנון-אחד.
+      // (export מדלג-כאן-לגמרי: המקור-שלו הוא-הטקסט-בזיכרון, לא-עותק-עבודה)
       let copyDb: string | undefined
       let snapshotName: string | undefined
       let snapshotAgeMs: number | undefined
@@ -168,11 +169,11 @@ export async function runRestoreDrill(force = false, source: DrillSource = 'git'
         const helper = path.join(process.cwd(), '.zscripts', 'git-credential-pat.sh')
         execFileSync(
           'git',
-          ['clone', '--depth', '1', '--single-branch', '--branch', 'main', '-c', `credential.helper=${helper}`, REPO_URL, dir],
+          ['clone', '--depth', '1', '--single-branch', '--branch', 'main', '-c', `credential.helper=${helper}`, REPO_URL, dir as string],
           { timeout: CLONE_TIMEOUT_MS, stdio: 'pipe', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
         )
-        copyDb = path.join(dir, 'db', 'custom.db')
-      } else {
+        copyDb = path.join(dir as string, 'db', 'custom.db')
+      } else if (source === 'snapshot') {
         const snap = findLatestSnapshot()
         if (!snap) throw new Error('snapshot-missing')
         if (snap.ageMs > SNAPSHOT_MAX_AGE_MS) {
