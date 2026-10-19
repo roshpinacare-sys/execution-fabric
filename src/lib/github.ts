@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { policyGate, policyRecord, type GhMethod } from '@/lib/githubPolicy'
 
 // יעדי-ריפו אמיתיים (worklog Task 19): הרשת מבצעת על חומר-אמיתי מ-GitHub.
 // חוקי-סודיות: הטוקן נקרא בשרת-בלבד מקובץ-הסמכות-המוזרק (gitignored — המפעיל מזריק);
@@ -55,12 +56,15 @@ async function ghRes(
   accept: string,
   init?: { method?: string; body?: string }
 ): Promise<Response> {
+  const method: GhMethod = (init?.method ?? 'GET') as GhMethod
+  // Task 69 — שער-הציות: תקציב-עצמי + קצב-מוטציות + backoff (לפני-כל-קריאה)
+  await policyGate(method)
   const token = githubToken()
   if (!token) throw new Error('github-auth: קובץ-הסמכות חסר (המפעיל מזריק, gitignored)')
   let res: Response
   try {
     res = await fetch(url, {
-      method: init?.method ?? 'GET',
+      method,
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: accept,
@@ -71,10 +75,12 @@ async function ghRes(
       signal: AbortSignal.timeout(GH_TIMEOUT_MS),
     })
   } catch (e) {
+    policyRecord(method, null) // ניסיון-רשת-כושל נספר-גם-הוא (conservative)
     throw new Error(
       `github-network: ${e instanceof Error ? e.message : String(e)}`
     )
   }
+  policyRecord(method, res.status) // רישום-מיד — כולל 403/429 (מפעיל-backoff)
   if (res.status === 404) {
     throw new Error('github-notfound: HTTP 404 (repo לא קיים או אין גישה)')
   }

@@ -280,6 +280,8 @@ interface CensusDto {
   }
   // Task 67 — עד-השרשרת: מוחזר מה-API בשדה נפרד אך נאחז כאן לתצוגה (fail-honest)
   witness?: { up: boolean; ok?: boolean; total?: number; head?: string; agrees?: boolean; reason?: string }
+  // Task 69 — שער-הציות של GitHub (מטא-מקומי)
+  githubGate?: { used: number; cap: number; backoffActive: boolean }
   tasks: { total: number; byStatus: Record<string, number>; stuckRunning: number; exhausted: number; queuedOrphans: number; bySource: Record<string, number> }
   handoff: { byStatus: Record<string, number>; pendingApprovals: { id: string; repo: string; path: string; auto: boolean; ageMs: number }[]; delivered: number }
   budget: { used: number; cap: number; remaining: number }
@@ -1011,7 +1013,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/census')
       const j = await res.json()
-      if (j.ok) setCensus({ ...j.census, witness: j.witness })
+      if (j.ok) setCensus({ ...j.census, witness: j.witness, githubGate: j.githubGate })
     } catch {
       /* polling — שקט */
     }
@@ -3029,6 +3031,23 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                         : census.witness.ok
                           ? 'חולק-על-הראש'
                           : `שבירה @${census.witness.total}`}
+                  </Badge>
+                )}
+                {census?.githubGate && (
+                  <Badge
+                    variant="outline"
+                    title={`שער-הציות העצמי מול GitHub: ${census.githubGate.used}/${census.githubGate.cap} בקשות בשעה (6% מהמכסה הרשמית)${census.githubGate.backoffActive ? ' — backoff פעיל אחרי 429/403' : ''}. חוקי: אפס-יצירת-חשבונות, מרווח-מוטציות 1.2ש, קומיטים משמעותיים בלבד`}
+                    className={`gap-1 text-[10px] ${
+                      census.githubGate.backoffActive
+                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                        : 'border-teal-500/30 bg-teal-500/10 text-teal-600 dark:text-teal-400'
+                    }`}
+                  >
+                    <ShieldCheck className="h-2.5 w-2.5" />
+                    github:{' '}
+                    {census.githubGate.backoffActive
+                      ? 'backoff'
+                      : `ציות ${census.githubGate.used}/${census.githubGate.cap}`}
                   </Badge>
                 )}
               </div>

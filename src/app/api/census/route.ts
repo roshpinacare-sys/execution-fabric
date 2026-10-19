@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { buildCensus, memoryDigest } from '@/lib/census'
+import { complianceReport } from '@/lib/githubPolicy'
 
 // פקח-הריבונות (worklog Task 30) — נקודת-האינטליגנציה של הרשת.
 // עקרונות (tobi/disktree): כל-מספר נגזר-מאומת בזמן-בקשה; הפקח מסמן-ולא-מוחק;
@@ -43,5 +44,16 @@ export async function GET(req: NextRequest) {
   if (witness.up && witness.head !== undefined) {
     witness.agrees = witness.head === census.chain.verify.head
   }
-  return NextResponse.json({ ok: true, census, witness })
+  // Task 69 — שער-הציות: מטא-מקומי בלבד (אפס-קריאות-רשת) ל-badge-המשמרת
+  const gate = complianceReport()
+  return NextResponse.json({
+    ok: true,
+    census,
+    witness,
+    githubGate: {
+      used: gate.budget.used,
+      cap: gate.budget.cap,
+      backoffActive: gate.pacing.backoffActive,
+    },
+  })
 }
