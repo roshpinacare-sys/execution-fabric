@@ -75,8 +75,7 @@ export async function POST(req: NextRequest) {
       if (j.ok !== true) return 'keeper לא ok'
       if (!w?.heartbeat?.up || !w?.witness?.up)
         return `מוגנים-לא-חיים דרך-הזקיפה (לב:${!!w?.heartbeat?.up}, עד:${!!w?.witness?.up})`
-      const restarts = (w.heartbeat.restarts ?? 0) + (w.witness.restarts ?? 0)
-      return restarts > 0 ? `ok (החייאות-מתועדות: ${restarts})` : null
+      return null // החייאות-מתועדות>0 הן-ראיה-טובה, לא-בעיה (הראיה-חיה גם ב-census/badge)
     })
   )
   results.push(
