@@ -13,6 +13,61 @@ import { lastRestoreDrill } from '@/lib/restore-drill'
 // Task 67 — עד-השרשרת (chain-witness :3050): דפוס-נלמד-מהתאום
 // (SANDBOX-DISTRUST-LAW: "הבקרה-המתמדת-היא-הכלל"). הפקח מצליב-את-הראש-שהוא
 // מדווח מול-עדות-המימוש-העצמאי. fail-honest: עד-דמם = up:false, אף-המצאה.
+//
+// Task 71 — הזקיפה (survival-keeper :3051): שכבת-ההישרדות-הרביעית.
+// מעקב-חי אחרי אפליקציה/לב/עד + החייאה-עצמית של הלב-והעד + מראת-גיבוי-מקומית
+// + תמונות-db. fail-honest: זקיפה-דממה = up:false, אף-המצאה.
+
+async function probeSurvival(): Promise<Record<string, unknown> | { up: false; reason: string }> {
+  try {
+    const res = await fetch('http://127.0.0.1:3051/health', {
+      signal: AbortSignal.timeout(2500),
+      cache: 'no-store',
+    })
+    if (!res.ok) return { up: false, reason: `http-${res.status}` }
+    const k = (await res.json()) as {
+      startedAt?: string
+      uptimeMs?: number
+      watches?: Record<string, { up?: boolean; restarts?: number; lastResult?: string | null }>
+      mirror?: {
+        exists?: boolean
+        synced?: boolean | null
+        lastUpdateAt?: string | null
+        lastResult?: string | null
+        mirrorHead?: string | null
+      }
+      snapshots?: { count?: number; lastAt?: string | null; lastResult?: string | null }
+    }
+    const lite = (x?: { up?: boolean; restarts?: number; lastResult?: string | null }) =>
+      x
+        ? { up: !!x.up, restarts: x.restarts ?? 0, lastResult: x.lastResult ?? null }
+        : { up: false, restarts: 0, lastResult: null }
+    return {
+      up: true,
+      startedAt: k.startedAt,
+      uptimeMs: k.uptimeMs,
+      watches: {
+        app: lite(k.watches?.app),
+        heartbeat: lite(k.watches?.heartbeat),
+        witness: lite(k.watches?.witness),
+      },
+      mirror: k.mirror
+        ? {
+            exists: !!k.mirror.exists,
+            synced: k.mirror.synced ?? null,
+            lastUpdateAt: k.mirror.lastUpdateAt ?? null,
+            lastResult: k.mirror.lastResult ?? null,
+            mirrorHead: k.mirror.mirrorHead ?? null,
+          }
+        : null,
+      snapshots: k.snapshots
+        ? { count: k.snapshots.count ?? 0, lastAt: k.snapshots.lastAt ?? null, lastResult: k.snapshots.lastResult ?? null }
+        : null,
+    }
+  } catch (e) {
+    return { up: false, reason: `unreachable: ${(e as Error).message}` }
+  }
+}
 
 async function probeWitness(): Promise<{
   up: boolean
@@ -49,6 +104,8 @@ export async function GET(req: NextRequest) {
   const gate = complianceReport()
   // Task 70 — עדות-השחזור האחרונה מהשרשרת (אפס-רשת) ל-badge-המשמרת
   const restoreDrill = await lastRestoreDrill()
+  // Task 71 — הזקיפה: מעקב-הישרדות + מראת-גיבוי + תמונות-db (רשת-לוקאלית-בלבד)
+  const survival = await probeSurvival()
   return NextResponse.json({
     ok: true,
     census,
@@ -59,5 +116,6 @@ export async function GET(req: NextRequest) {
       backoffActive: gate.pacing.backoffActive,
     },
     restoreDrill,
+    survival,
   })
 }

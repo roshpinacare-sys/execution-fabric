@@ -53,6 +53,7 @@ import {
   BookOpenText,
   Volume2,
   ArchiveRestore,
+  ShieldPlus,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 
@@ -285,6 +286,20 @@ interface CensusDto {
   githubGate?: { used: number; cap: number; backoffActive: boolean }
   // Task 70 — עדות-תרגיל-השחזור האחרונה מהשרשרת (fail-honest; null = טרם-רץ)
   restoreDrill?: { at: string; ok: boolean; ledgerId: number; durationMs: number; errorClass: string | null } | null
+  // Task 71 — הזקיפה (survival-keeper :3051): מעקב-הישרדות + מראת-גיבוי + תמונות-db (fail-honest)
+  survival?: {
+    up: boolean
+    reason?: string
+    startedAt?: string
+    uptimeMs?: number
+    watches?: {
+      app: { up: boolean; restarts: number; lastResult: string | null }
+      heartbeat: { up: boolean; restarts: number; lastResult: string | null }
+      witness: { up: boolean; restarts: number; lastResult: string | null }
+    }
+    mirror?: { exists: boolean; synced: boolean | null; lastUpdateAt: string | null; lastResult: string | null; mirrorHead: string | null } | null
+    snapshots?: { count: number; lastAt: string | null; lastResult: string | null } | null
+  }
   tasks: { total: number; byStatus: Record<string, number>; stuckRunning: number; exhausted: number; queuedOrphans: number; bySource: Record<string, number> }
   handoff: { byStatus: Record<string, number>; pendingApprovals: { id: string; repo: string; path: string; auto: boolean; ageMs: number }[]; delivered: number }
   budget: { used: number; cap: number; remaining: number }
@@ -1016,7 +1031,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/census')
       const j = await res.json()
-      if (j.ok) setCensus({ ...j.census, witness: j.witness, githubGate: j.githubGate, restoreDrill: j.restoreDrill })
+      if (j.ok) setCensus({ ...j.census, witness: j.witness, githubGate: j.githubGate, restoreDrill: j.restoreDrill, survival: j.survival })
     } catch {
       /* polling — שקט */
     }
@@ -3085,6 +3100,32 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                             : st === 'stale'
                               ? 'מיושן'
                               : 'מאומת'}
+                      </Badge>
+                    )
+                  })()}
+                {census?.survival &&
+                  (() => {
+                    const s = census.survival
+                    const hb = s.watches?.heartbeat
+                    const wd = s.watches?.witness
+                    const st = !s.up ? 'dead' : hb?.up && wd?.up ? 'ok' : 'healing'
+                    const restarts = (hb?.restarts ?? 0) + (wd?.restarts ?? 0)
+                    return (
+                      <Badge
+                        variant="outline"
+                        title={`הזקיפה (survival-keeper :3051, Task 71): מעקב-חי אחרי אפליקציה/לב/עד כל 10ש; החייאה-אוטומטית ללב-ולעד אחרי 3 כשלים-רצופים (backoff 2דק'). מראת-גיבוי-מקומית מחוץ-לעץ כל 30דק' (synced: ${s.mirror?.synced ?? '?'}${s.mirror?.mirrorHead ? ` · head ${s.mirror.mirrorHead}` : ''}), תמונות-db שעתיות (${s.snapshots?.count ?? 0} במלאי, vacuum-into). החייאות-עד-עתה: ${restarts}${s.reason ? ` — ${s.reason}` : ''}`}
+                        className={`gap-1 text-[10px] ${
+                          st === 'dead'
+                            ? 'border-zinc-500/30 text-zinc-500'
+                            : st === 'ok'
+                              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              : 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                        }`}
+                      >
+                        <ShieldPlus className="h-2.5 w-2.5" />
+                        עתודה:{' '}
+                        {st === 'dead' ? 'דמם' : st === 'ok' ? 'זקיפה' : 'מרפאה'}
+                        {restarts > 0 ? ` ·${restarts}` : ''}
                       </Badge>
                     )
                   })()}
