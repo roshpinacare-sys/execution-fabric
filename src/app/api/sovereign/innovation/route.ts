@@ -233,6 +233,87 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, status, drill, ledgerEntryId: entry.id })
   }
 
+  // מחזור-#12 (Task 79): אוטונומיזציה של המקור-השני — פעימת-תרגיל-התמונה חיה בתוך-הלב
+  // (עורק-ח-bis, כל-שעה, 45ש' אחרי-עליית-הלב). ההוכחה — הצלבת-גופים: הלב (הפועל — מדווח
+  // snapshotRestorePulses>=1 ו-ok) מול-השרשרת (הראיה — רשומת-DRILL-טרייה של
+  // drill:restore-snapshot, DONE, שזמנה תואם-לפעימה ±2דק'). שני-הגופים-חייבים-להסכים;
+  // סתירה = FAILED-חתום (fail-closed) — בדיוק-הלקח-מ-#10 (נאמנות-לגוף) ומ-#8 (תרגיל-כהוכחה).
+  if (subject === 'snapshot-pulse') {
+    let heart: { ok?: boolean; snapshotRestorePulses?: number; snapshotRestoreOk?: boolean | null; lastSnapshotRestoreAt?: string | null; lastSnapshotRestoreResult?: string | null; startedAt?: string }
+    try {
+      const res = await fetch('http://127.0.0.1:3031/health', {
+        signal: AbortSignal.timeout(15_000),
+        cache: 'no-store',
+      })
+      heart = (await res.json()) as typeof heart
+    } catch (e) {
+      return NextResponse.json(
+        { ok: false, error: 'heartbeat-unreachable', detail: e instanceof Error ? e.message : String(e) },
+        { status: 502 }
+      )
+    }
+    const pulse = await db.ledgerEntry.findFirst({
+      where: { kind: 'DRILL', worker: 'drill:restore-snapshot' },
+      orderBy: { id: 'desc' },
+    })
+    // הצלבה-מדויקת: לשני-הגופים אותו-סיפור על הפעימה-החיה
+    const heartLive = heart.snapshotRestorePulses !== undefined && heart.snapshotRestorePulses >= 1
+    const heartOk = heart.snapshotRestoreOk === true
+    const chainLive = pulse !== null && pulse.status === 'DONE'
+    const timeMatch =
+      pulse !== null &&
+      heart.lastSnapshotRestoreAt !== null &&
+      heart.lastSnapshotRestoreAt !== undefined &&
+      Math.abs(new Date(pulse.createdAt).getTime() - new Date(heart.lastSnapshotRestoreAt).getTime()) <= 2 * 60_000
+
+    const equivalenceProven = heartLive && heartOk && chainLive && timeMatch
+    const status = equivalenceProven ? 'DONE' : 'FAILED'
+    const entry = await appendLedger({
+      taskId: null,
+      kind: 'INNOVATION',
+      status,
+      worker: 'innovation-cycle-snapshot-pulse',
+      attempts: 1,
+      durationMs: pulse?.durationMs ?? 0,
+      errorClass: equivalenceProven
+        ? null
+        : !heartLive
+          ? 'heartbeat-pulse-missing'
+          : !heartOk
+            ? 'heartbeat-pulse-failed'
+            : !chainLive
+              ? 'chain-drill-missing'
+              : 'heartbeat-chain-divergence',
+      outputHash: sha256Short(
+        JSON.stringify({
+          subject: 'snapshot-pulse-autonomous',
+          heartPulses: heart.snapshotRestorePulses ?? null,
+          heartOk: heart.snapshotRestoreOk ?? null,
+          heartResult: heart.lastSnapshotRestoreResult ?? null,
+          heartStartedAt: heart.startedAt ?? null,
+          chainDrillId: pulse?.id ?? null,
+          chainDrillStatus: pulse?.status ?? null,
+          chainDrillAt: pulse?.createdAt.toISOString() ?? null,
+          timeMatch,
+          equivalenceProven,
+          adoptionRationale: 'second-source-proven-by-machine',
+        })
+      ),
+    })
+    return NextResponse.json({
+      ok: true,
+      status,
+      equivalenceProven,
+      heart: {
+        pulses: heart.snapshotRestorePulses ?? null,
+        ok: heart.snapshotRestoreOk ?? null,
+        result: heart.lastSnapshotRestoreResult ?? null,
+      },
+      chain: pulse ? { id: pulse.id, status: pulse.status, at: pulse.createdAt.toISOString() } : null,
+      ledgerEntryId: entry.id,
+    })
+  }
+
   // מחזור-#9 (Task 76): הזרמת-מסלולי-הקריאה-הציבוריים. ההוכחה — הצלבה-דו-מימושית:
   // buildMetricsStreamed (האגרגציות-החדשות-ב-SQL) מול buildCensus (מ-#7) — שני-מימושים-
   // בלתי-תלויים, שתי-קבוצות-שאילתות-שונות, שחייבים-להסכים-על-כל-הפלטים-המשותפים.

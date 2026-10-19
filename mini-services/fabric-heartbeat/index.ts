@@ -49,6 +49,11 @@ const SELFTEST_PULSE_MS = 30 * 60_000 // Task 45: עורק-ז — הלב מוכ�
 const SELFTEST_PULSE_FIRST_MS = 3 * 60_000
 const RESTORE_PULSE_MS = 6 * 60 * 60_000 // Task 70: עורק-ח — הוכחה-קבועה שהכפילות-הרחוקה מחזירה-מערכת-שלמה
 const RESTORE_PULSE_FIRST_MS = 150_000
+// מחזור-חדשנות #12 (Task 79): עורק-ח-bis — תרגיל-התמונה-השעתית (מקור-שני, בלתי-תלוי בגיט).
+// כל-שעה (התרגיל בן-עשרות-מילישניות) — גילוי-מוקדם של תמונה-חסרה/ישנה/שבורה, 45ש' אחרי-עליית-הלב
+// (הקדמה-מכוונת לדילוג-עם-מנעול-הריצה של runRestoreDrill — שני-התרגילים לעולם לא במקביל).
+const SNAPSHOT_RESTORE_PULSE_MS = 60 * 60_000
+const SNAPSHOT_RESTORE_PULSE_FIRST_MS = 45_000
 const NARRATE_TIMEOUT_MS = 120_000 // Task 39: ירי-TTS אמיתי — מהיר, אך-נותנים-רשת
 const APP_GUARD_MS = 15_000
 const APP_GUARD_FAILS_TO_RESTART = 3
@@ -96,6 +101,10 @@ interface State {
   restoreOk: boolean | null
   lastRestoreAt: string | null
   lastRestoreResult: string | null
+  snapshotRestorePulses: number
+  snapshotRestoreOk: boolean | null
+  lastSnapshotRestoreAt: string | null
+  lastSnapshotRestoreResult: string | null
 }
 
 const state: State = {
@@ -141,6 +150,10 @@ const state: State = {
   restoreOk: null,
   lastRestoreAt: null,
   lastRestoreResult: null,
+  snapshotRestorePulses: 0,
+  snapshotRestoreOk: null,
+  lastSnapshotRestoreAt: null,
+  lastSnapshotRestoreResult: null,
 }
 
 let lastTickAttemptMs = Date.now()
@@ -586,6 +599,41 @@ async function restorePulse(): Promise<void> {
   }
 }
 
+// ===== עורק-ח-bis (מחזור-חדשנות #12): פעימת-תרגיל-התמונה — המקור-השני הופך מהוכחה-ידנית למכונה =====
+// כל-שעה: POST /api/sovereign/restore-drill?source=snapshot — העתקת-התמונה-השעתית הטרייה
+// (VACUUM INTO של-הזקיפה), אימות-עצמאי-בזרימה על-העותק, הצלבת-קידומת-מול-הייצור, חתימת-DRILL
+// ב-worker משלו (drill:restore-snapshot). אם-הגיט-עצמו נפגע — המקור-השני נבחן-ומאומת בכל-שעה בכל-זאת.
+async function snapshotRestorePulse(): Promise<void> {
+  state.snapshotRestorePulses++
+  state.lastSnapshotRestoreAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/sovereign/restore-drill?source=snapshot`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(60_000), // התרגיל בן-מילישניות — נותנים-רשת-ומנוע
+    })
+    const d = (await res.json()) as {
+      ok?: boolean
+      drill?: { ran?: boolean; ok?: boolean; reason?: string; verified?: number; prefixMatch?: boolean; snapshotName?: string }
+    }
+    const dr = d.drill ?? {}
+    if (dr.ran === false) {
+      state.lastSnapshotRestoreResult = `skipped: ${dr.reason ?? 'recent'}`
+    } else if (d.ok && dr.ok) {
+      state.snapshotRestoreOk = true
+      state.lastSnapshotRestoreResult = `restored: ${dr.verified} entries · prefixMatch:${dr.prefixMatch}`
+      log(`עורק-התמונה: המקור-השני מאומת ✓ ${state.lastSnapshotRestoreResult}`)
+    } else {
+      state.snapshotRestoreOk = false
+      state.lastSnapshotRestoreResult = `FAILED: ${dr.reason ?? 'unknown'}`
+      log(`עורק-התמונה: 🚨 תרגיל-המקור-השני נכשל — ${state.lastSnapshotRestoreResult}`)
+    }
+  } catch (e) {
+    state.snapshotRestoreOk = false
+    state.lastSnapshotRestoreResult = `error: ${e instanceof Error ? e.message : String(e)}`
+    log(`עורק-התמונה: כשל-רשת — ${state.lastSnapshotRestoreResult}`)
+  }
+}
+
 // ===== עורק-ז: פעימת-אמת-עצמית (Task 45) — "האוטונומיה יודעת להשתמש בכלים" כהוכחה-רציפה =====
 // כל-30 דק': POST /api/sovereign/ops/selftest — הלב מריץ את כל-הכלים שלו בקריאות-אמת
 // (health/census/ops/improvements/db-reconnect/worker-tick/autonomy-tick/drill)
@@ -654,7 +702,7 @@ setInterval(() => {
 }, 60_000)
 
 log(
-  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', פעימת-אמת-עצמית כל ${SELFTEST_PULSE_MS / 60_000} דק', דופק על :${PORT}`
+  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', פעימת-אמת-עצמית כל ${SELFTEST_PULSE_MS / 60_000} דק', תרגיל-תמונה כל ${SNAPSHOT_RESTORE_PULSE_MS / 60_000} דק', דופק על :${PORT}`
 )
 
 setInterval(() => void tick(), TICK_MS)
@@ -670,6 +718,8 @@ setTimeout(() => void selftestPulse(), SELFTEST_PULSE_FIRST_MS)
 setInterval(() => void selftestPulse(), SELFTEST_PULSE_MS)
 setTimeout(() => void restorePulse(), RESTORE_PULSE_FIRST_MS)
 setInterval(() => void restorePulse(), RESTORE_PULSE_MS)
+setTimeout(() => void snapshotRestorePulse(), SNAPSHOT_RESTORE_PULSE_FIRST_MS)
+setInterval(() => void snapshotRestorePulse(), SNAPSHOT_RESTORE_PULSE_MS)
 setInterval(() => void appGuard(), APP_GUARD_MS)
 
 void tick() // פעימה-ראשונה מיידית

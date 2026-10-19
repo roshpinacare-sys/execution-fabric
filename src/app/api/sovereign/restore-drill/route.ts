@@ -1,19 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { runRestoreDrill, lastRestoreDrill } from '@/lib/restore-drill'
-
+import { runRestoreDrill, lastRestoreDrill, type DrillSource } from '@/lib/restore-drill'
 // תרגיל-שחזור (Task 70) — הוכחה-חיה שהכפילות-הרחוקה (GitHub) מחזירה-מערכת-שלמה-מאומתת.
 //
-// GET  → עדות-התרגיל-האחרונה מהשרשרת (kind=DRILL, taskId=restore-drill) — אפס-רשת.
-// POST → הרצה: clone-רדוד מ-github → אימות-שרשרת-עצמאי על עותק-ה-db המשוחזר
-//        (prisma-חד-פעמי, אפס-נגיעה ב-db-הייצור) → הצלבת-ראש מול-הייצור → חתימת-DRILL.
+// GET  → עדות-התרגיל-האחרונה מהשרשרת (kind=DRILL) — אפס-רשת.
+// POST → הרצה: עותק-עבודה מהמקור → אימות-שרשרת-עצמאי על העותק
+//        (prisma-חד-פעמי, אפס-נגיעה ב-db-הייצור) → הצלבת-קידומת מול-הייצור → חתימת-DRILL.
 //        הגינות: דילוג-אם-תרגיל-טרי-מ-30דק' + מנעול-ריצה-בודדת; עותקי-/tmp נמחקים-תמיד.
 //        fail-honest: כשל = status:FAILED + errorClass בשרשרת, אף-המצאה.
 //
-// פעימה-אוטומטית כל-6שע' מ-fabric-heartbeat (עורק-ז).
+// ?source=git       (ברירת-מחדל) — clone-רדוד מ-github. פעימה-אוטומטית כל-6שע' מהלב (עורק-ח).
+// ?source=snapshot  (מחזור-חדשנות #11, Task 78) — התמונה-השעתית הטרייה ביותר (VACUUM INTO,
+//                    מקור-בלתי-תלוי בגיט). פעימה-אוטומטית כל-שעה מהלב (עורק-ח-bis, מחזור-#12).
+//                    תרגיל-התמונה בן-עשרות-מילישניות — קצב-צפוף-כנה ובלי-עומס.
 
-export async function GET() {
+function parseSource(req: NextRequest): DrillSource {
+  const s = req.nextUrl.searchParams.get('source')
+  return s === 'snapshot' ? 'snapshot' : 'git' // ערך-לא-חוקי = ברירת-המחדל-ההיסטורית (לא-שקר)
+}
+
+export async function GET(req: NextRequest) {
   try {
-    return NextResponse.json({ ok: true, drill: await lastRestoreDrill() })
+    return NextResponse.json({ ok: true, drill: await lastRestoreDrill(parseSource(req)) })
   } catch (e) {
     return NextResponse.json({ ok: false, reason: (e as Error).message }, { status: 500 })
   }
@@ -22,6 +29,6 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   // ?force=1 — מניפולציית-בדיקה בלבד: מדלג-על-מגבלת-ה-30דק' (בשימוש-מסודר-נדיר)
   const force = req.nextUrl.searchParams.get('force') === '1'
-  const drill = await runRestoreDrill(force)
+  const drill = await runRestoreDrill(force, parseSource(req))
   return NextResponse.json({ ok: drill.ok, drill })
 }
