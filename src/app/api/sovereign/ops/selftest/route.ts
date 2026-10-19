@@ -65,6 +65,20 @@ export async function POST(req: NextRequest) {
       return census?.chain?.verify?.ok === true ? null : 'chain verify לא אמת'
     })
   )
+  // Task 72 — הזקיפה (survival-keeper :3051): עדות-הישרדות חתומה-בשרשרת כל-סבב-selftest.
+  // תקינות = הזקיפה חיה ושני-המוגנים (לב+עד) מדווחים-חיים-דרכה. fail-honest: כשל = רשום-כן.
+  results.push(
+    await probe('keeper', 'GET survival-keeper :3051/health', 'http://127.0.0.1:3051/health', 'GET', (j) => {
+      const w = j.watches as
+        | Record<string, { up?: boolean; restarts?: number }>
+        | undefined
+      if (j.ok !== true) return 'keeper לא ok'
+      if (!w?.heartbeat?.up || !w?.witness?.up)
+        return `מוגנים-לא-חיים דרך-הזקיפה (לב:${!!w?.heartbeat?.up}, עד:${!!w?.witness?.up})`
+      const restarts = (w.heartbeat.restarts ?? 0) + (w.witness.restarts ?? 0)
+      return restarts > 0 ? `ok (החייאות-מתועדות: ${restarts})` : null
+    })
+  )
   results.push(
     await probe('ops-snapshot', 'GET /api/sovereign/ops', `${origin}/api/sovereign/ops`, 'GET', (j) =>
       j.ok === true ? null : 'ops לא ok'

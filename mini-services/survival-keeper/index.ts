@@ -1,4 +1,4 @@
-// survival-keeper — הזקיפה (Task 71)
+// survival-keeper — הזקיפה (Task 71 + Task 72)
 // ═══════════════════════════════════════════════════════════════════════════
 // שכבת-ההישרדות-הרביעית. עד-היום: דחיפה-אוטומטית (עורק-ב) · עד-עצמאי (chain-witness)
 // · תרגיל-שחזור (עורק-ח). חסר-היה: מי מזניק מחדש את-הלב ואת-העד כשהם מתים בלילה.
@@ -16,12 +16,19 @@
 //      תיקיית-גיבוי מחוץ-לעץ; מוגבל-ל-24-אחרונות. נגזרת-מיקום-עצמי בכל-הנתיבים
 //      (חסם-הדליפות: אפס-נתיבי-מכונה-מילוליים בעץ).
 //
+// Task 72 — מצב-עמיד-להתחדשות: לקח-חי (הריצה-הראשונה): bun --hot עלול-להתחדש-בגלל
+// פעימות-הגיט-של-הלב — ואז-המונים/האירועים/ה-backoff מתאפסים (הפסד-ראיות!). מעתה:
+// כל-המצב-החי נשמר-ב-state-file מחוץ-לעץ-הפרויקט, נטען-באתחול, ונשמר-בשינוי.
+// בנוסף: כל-הטיימרים-רשומים-פעם-אחת-בלבד (הגנת-globalThis — אפס-כפילויות-הזנקה-בהתחדשות-חמה),
+// ופעימות-האתחול (מראה/תמונה) מגובלות-ברעננות — אפס-ספאם-אתחול.
+//
 // כנות: מי-משגיח-על-הזקיפה? העץ-המתמיד של הפלטפורמה (bun --hot) + כלב-השמיר
-// של הלב + badge-חי לבעלים ב-census. הזקיפה אינה-אלוהות — היא-שכבה.
+// של הלב + badge-חי לבעלים ב-census + כלי-'keeper' ב-selftest (Task 72 — עדות-חתומה
+// בשרשרת-כל-30דק'). הזקיפה אינה-אלוהות — היא-שכבה.
 // אף-סוד לא נוגע/נדפס כאן. אף-כתיבה-לגיט לא נעשית כאן (רק-קריאה-למראה).
 
 import path from 'node:path'
-import { existsSync, mkdirSync, readdirSync, copyFileSync, statSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, copyFileSync, statSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { Database } from 'bun:sqlite'
 
 const PORT = Number(process.env.SURVIVAL_PORT ?? 3051)
@@ -36,9 +43,11 @@ const SNAPSHOT_PULSE_MS = 60 * 60_000
 const SNAPSHOT_FIRST_MS = 120_000
 const SNAPSHOT_KEEP = 24
 const EVENTS_MAX = 50
+const FLUSH_MS = 60_000 // שמירת-מצב-תקופתית (וגם-בכל-אירוע-משמעותי)
 
 const MIRROR_DIR = path.resolve(PROJECT_ROOT, '..', 'fabric-mirror.git') // מחוץ-לעץ-הפרויקט
 const BACKUP_DIR = path.resolve(PROJECT_ROOT, '..', 'fabric-backups') // מחוץ-לעץ-הפרויקט
+const STATE_PATH = path.resolve(PROJECT_ROOT, '..', 'fabric-keeper-state.json') // מחוץ-לעץ-הפרויקט
 const DB_PATH = path.join(PROJECT_ROOT, 'db', 'custom.db')
 const CRED_HELPER = path.join(PROJECT_ROOT, '.zscripts', 'git-credential-pat.sh')
 
@@ -93,9 +102,51 @@ const mirror: MirrorState = {
 }
 
 const snapshots: SnapshotState = { count: 0, lastAt: null, lastResult: null, dir: BACKUP_DIR }
-const events: Event[] = []
+let events: Event[] = []
 let ticks = 0
 const startedAt = new Date().toISOString()
+
+// ── עמידות-מצב (Task 72): טעינה-באתחול, שמירה-בשינוי ──────────────────────
+function loadState(): void {
+  try {
+    if (!existsSync(STATE_PATH)) return
+    const s = JSON.parse(readFileSync(STATE_PATH, 'utf8')) as {
+      ticks?: number
+      watches?: Record<string, Partial<WatchState>>
+      mirror?: Partial<MirrorState>
+      snapshots?: Partial<SnapshotState>
+      events?: Event[]
+    }
+    if (typeof s.ticks === 'number') ticks = s.ticks
+    for (const key of ['app', 'heartbeat', 'witness'] as const) {
+      const p = s.watches?.[key]
+      if (p) Object.assign(watches[key], p, { up: false, fails: 0 }) // רעננות-חיים-מתחילה-מאפס; הראיות-נשמרות
+    }
+    Object.assign(mirror, s.mirror ?? {})
+    Object.assign(snapshots, s.snapshots ?? {}, { dir: BACKUP_DIR })
+    if (Array.isArray(s.events)) events = s.events.slice(0, EVENTS_MAX)
+    log(`מצב-נטען מהדיסק: ticks=${ticks}, החייאות app/לב/עד=${watches.app.restarts}/${watches.heartbeat.restarts}/${watches.witness.restarts}, אירועים=${events.length}`)
+  } catch (e) {
+    log(`כשל-טעינת-מצב (ממשיך-ריק-כן): ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
+let dirty = false
+function markDirty(): void {
+  dirty = true
+}
+
+function flushState(): void {
+  try {
+    writeFileSync(
+      STATE_PATH,
+      JSON.stringify({ savedAt: new Date().toISOString(), ticks, watches, mirror, snapshots, events }, null, 1),
+    )
+    dirty = false
+  } catch (e) {
+    log(`כשל-שמירת-מצב (כן): ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
 
 function log(msg: string): void {
   console.log(`[survival-keeper ${new Date().toISOString()}] ${msg}`)
@@ -104,6 +155,16 @@ function log(msg: string): void {
 function pushEvent(kind: string, msg: string): void {
   events.unshift({ at: new Date().toISOString(), kind, msg })
   if (events.length > EVENTS_MAX) events.length = EVENTS_MAX
+  markDirty()
+}
+
+// ── הגנת-טיימרים (Task 72): רישום-פעם-אחת-בלבד לכל-חיי-התהליך-על-פני-התחדשויות-חמות
+const g = globalThis as unknown as { __keeperTimers?: boolean }
+
+function onceTimers(): boolean {
+  if (g.__keeperTimers) return false
+  g.__keeperTimers = true
+  return true
 }
 
 // ── עזרי-גיט (spawnSync — פשוט, אין-ערימה) ────────────────────────────────
@@ -228,6 +289,7 @@ function mirrorPulse(): void {
     mirror.synced = head.ok && remoteMain.ok ? head.out === remoteMain.out : null
     mirror.lastResult = `updated ✓ head ${mirror.mirrorHead ?? '?'} · synced:${mirror.synced}`
     log(`מראת-גיבוי: עודכנה ✓ (סה"כ ${mirror.updates}; head ${mirror.mirrorHead ?? '?'})`)
+    markDirty()
   } catch (e) {
     mirror.lastResult = `error: ${e instanceof Error ? e.message : String(e)}`
     log(`מראת-גיבוי: כשל-כן — ${mirror.lastResult}`)
@@ -266,11 +328,12 @@ function snapshotPulse(): void {
     snapshots.lastResult = `ok (${method})`
 
     // תחזוקה: השאר-24-אחרונות בלבד
-    const files = readdirSync(BACKUP_DIR)
-      .filter((f) => f.startsWith('db-') && f.endsWith('.db'))
-      .map((f) => ({ f, m: statSync(path.join(BACKUP_DIR, f)).mtimeMs }))
-      .sort((a, b) => b.m - a.m)
-    for (const old of files.slice(SNAPSHOT_KEEP)) {
+    const dbFiles = () =>
+      readdirSync(BACKUP_DIR)
+        .filter((f) => f.startsWith('db-') && f.endsWith('.db'))
+        .map((f) => ({ f, m: statSync(path.join(BACKUP_DIR, f)).mtimeMs }))
+        .sort((a, b) => b.m - a.m)
+    for (const old of dbFiles().slice(SNAPSHOT_KEEP)) {
       rmSync(path.join(BACKUP_DIR, old.f), { force: true })
       try {
         rmSync(path.join(BACKUP_DIR, old.f) + '-wal', { force: true })
@@ -279,8 +342,9 @@ function snapshotPulse(): void {
         /* כנות — אין-מה-למחוק */
       }
     }
-    snapshots.count = Math.min(files.length + 1, SNAPSHOT_KEEP)
+    snapshots.count = dbFiles().length
     log(`תמונת-db נשמרה ✓ ${path.basename(target)} (${method}; מלאי: ${snapshots.count})`)
+    markDirty()
   } catch (e) {
     snapshots.lastResult = `error: ${e instanceof Error ? e.message : String(e)}`
     log(`🚨 תמונת-db נכשלה — ${snapshots.lastResult}`)
@@ -320,19 +384,34 @@ async function check(): Promise<void> {
   await Promise.all([watchApp(), watchService('heartbeat', HEARTBEAT_URL), watchService('witness', WITNESS_URL)])
 }
 
+// ── אתחול ────────────────────────────────────────────────────────────────────
+loadState()
 log(
-  `הזקיפה חיה — מעקב כל ${CHECK_MS / 1000}s על אפליקציה/לב/עד (החייאה אחרי ${FAILS_TO_RESPAWN} כשלים, backoff ${RESPAWN_BACKOFF_MS / 1000}s); מראת-גיבוי כל ${MIRROR_PULSE_MS / 60_000} דק'; תמונות-db כל ${SNAPSHOT_PULSE_MS / 60_000} דק' (מלאי ${SNAPSHOT_KEEP}); דופק על :${PORT}`,
+  `הזקיפה חיה — מעקב כל ${CHECK_MS / 1000}s על אפליקציה/לב/עד (החייאה אחרי ${FAILS_TO_RESPAWN} כשלים, backoff ${RESPAWN_BACKOFF_MS / 1000}s); מראת-גיבוי כל ${MIRROR_PULSE_MS / 60_000} דק'; תמונות-db כל ${SNAPSHOT_PULSE_MS / 60_000} דק' (מלאי ${SNAPSHOT_KEEP}); מצב-עמיד: ${STATE_PATH}; דופק על :${PORT}`,
 )
 
 void check()
-void mirrorPulse()
-void snapshotPulse()
-setInterval(() => void check(), CHECK_MS)
-setTimeout(() => {
-  void mirrorPulse()
-  setInterval(() => void mirrorPulse(), MIRROR_PULSE_MS)
-}, MIRROR_FIRST_MS)
-setTimeout(() => {
-  void snapshotPulse()
-  setInterval(() => void snapshotPulse(), SNAPSHOT_PULSE_MS)
-}, SNAPSHOT_FIRST_MS)
+// פעימות-אתחול מגובלות-ברעננות (Task 72): התחדשות-חמה/אתחול-מחדש לא יזרוק-תמונה/עדכון-מראה
+// אם-הקודמת-טרייה — אפס-ספאם-אתחול, המרווחים-הקבועים-ממשיכים-לתזמן.
+const mirrorStale =
+  !mirror.lastUpdateAt || Date.now() - new Date(mirror.lastUpdateAt).getTime() > MIRROR_PULSE_MS - 5 * 60_000
+const snapStale =
+  !snapshots.lastAt || Date.now() - new Date(snapshots.lastAt).getTime() > SNAPSHOT_PULSE_MS - 5 * 60_000
+if (mirrorStale) void mirrorPulse()
+if (snapStale) void snapshotPulse()
+
+if (onceTimers()) {
+  setInterval(() => void check(), CHECK_MS)
+  setTimeout(() => {
+    void mirrorPulse()
+    setInterval(() => void mirrorPulse(), MIRROR_PULSE_MS)
+  }, MIRROR_FIRST_MS)
+  setTimeout(() => {
+    void snapshotPulse()
+    setInterval(() => void snapshotPulse(), SNAPSHOT_PULSE_MS)
+  }, SNAPSHOT_FIRST_MS)
+  setInterval(() => {
+    if (dirty) flushState()
+  }, FLUSH_MS)
+  setInterval(flushState, 15 * 60_000) // עיגון-תקופתי-גם-בלי-dirty (אחריות-עמידות)
+}
