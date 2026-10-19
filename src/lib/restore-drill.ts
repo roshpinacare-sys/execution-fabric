@@ -24,6 +24,14 @@
 // קידומת-מול-הייצור → חתימה-ב-worker-משלו (drill:restore-snapshot). שני-מקורות-בלתי-תלויים,
 // אותו-קנון-אמת. כנות: תמונה-חסרה = snapshot-missing; תמונה-ישנה-מ-90דק' = snapshot-stale —
 // כשל-חתום, לא-המצאה. הנתיב-נגזר-מ-cwd (לא-קשה-מקודד) — עקבי-עם-חוק-ה-workpath.
+//
+// מחזור-חדשנות #13 (Task 80): מקור-שחזור-שלישי מגוון-פורמט — ייצוא-JSONL-של-השרשרת-בגיט
+// (sovereign/chain-export/ledger.jsonl, append-only). הפער: שני-המקורות-הקיימים נגזרים-שניהם-
+// מאותו-ארטיפקט-פיזי (קובץ-SQLite) — פגיעה-לוגית-בקובץ-הייתה-מועתקת-נאמנה לשניהם. source='export'
+// מאמת-את-הטקסט-בזיכרון: חישוב-מחדש של כל-שרשרת-ה-hash מה-Genesis — בלי-Prisma, בלי-SQLite,
+// בלי-עותק-עבודה (אפס-mkdtemp) — ואז אותה-הצלבת-קידומת-מול-הייצור. יתרון-היסטוריית-הגיט:
+// הייצוא-שנחתם-אתמול אינו-נשחק-על-ידי-פגיעה-בקובץ-היום. כנות: קובץ-חסר=export-missing,
+// שורה-פגומה=export-corrupt-line-N, פער-רצף=export-gap-at-N — כשלים-חתומים, לא-המצאות.
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
@@ -31,10 +39,15 @@ import path from 'node:path'
 import { PrismaClient } from '@prisma/client'
 import { db } from '@/lib/db'
 import { appendLedger, sha256Short, ledgerHash, GENESIS } from '@/lib/ledger'
+import { verifyExportStream } from '@/lib/chain-export'
 
 const REPO_URL = 'https://github.com/roshpinacare-sys/execution-fabric.git'
 const DRILL_TASK = 'restore-drill' // זהות-לוגית בלבד — בשרשרת היא ב-worker (taskId = מפתח-זר ל-Task אמיתית, קונבנציית drill:*)
-const WORKERS: Record<DrillSource, string> = { git: 'drill:restore', snapshot: 'drill:restore-snapshot' }
+const WORKERS: Record<DrillSource, string> = {
+  git: 'drill:restore',
+  snapshot: 'drill:restore-snapshot',
+  export: 'drill:restore-export',
+}
 const MIN_INTERVAL_MS = 30 * 60_000
 const CLONE_TIMEOUT_MS = 120_000
 // מקור-התמונות-השעתיות — נגזר-מ-cwd, מחוץ-לעץ-הפרויקט (כמו המראה ה-bare של הזקיפה)
@@ -42,7 +55,7 @@ const SNAPSHOT_DIR = path.join(process.cwd(), '..', 'fabric-backups')
 const SNAPSHOT_NAME = /^db-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.db$/
 const SNAPSHOT_MAX_AGE_MS = 90 * 60_000 // מעבר-לזה: המכונה-השעתית-עצמה-פסקה → כשל-כן
 
-export type DrillSource = 'git' | 'snapshot'
+export type DrillSource = 'git' | 'snapshot' | 'export'
 
 export interface RestoreDrillResult {
   ok: boolean
@@ -143,10 +156,12 @@ export async function runRestoreDrill(force = false, source: DrillSource = 'git'
       }
     }
 
-    const dir = mkdtempSync(path.join(tmpdir(), 'fabric-drill-'))
+    // המקור-השלישי (#13) טקסט-בזיכרון — בלי-עותק-עבודה-כלל (אפס-mkdtemp, אפס-מגע-בדיסק-חוץ)
+    const useWorkCopy = source !== 'export'
+    const dir = useWorkCopy ? mkdtempSync(path.join(tmpdir(), 'fabric-drill-')) : null
     try {
       // הכנת-עותק-העבודה — הנקודה-היחידה-שבה-המקורות-נבדלים; מכאן-ואילך קנון-אחד.
-      let copyDb: string
+      let copyDb: string | undefined
       let snapshotName: string | undefined
       let snapshotAgeMs: number | undefined
       if (source === 'git') {
@@ -168,20 +183,26 @@ export async function runRestoreDrill(force = false, source: DrillSource = 'git'
         snapshotName = snap.name
         snapshotAgeMs = snap.ageMs
       }
-      if (!existsSync(copyDb)) throw new Error(source === 'git' ? 'clone-db-missing' : 'snapshot-copy-missing')
+      if (copyDb !== undefined && !existsSync(copyDb))
+        throw new Error(source === 'git' ? 'clone-db-missing' : 'snapshot-copy-missing')
 
       const prodRec = await db.ledgerEntry.findFirst({ orderBy: { id: 'desc' } })
       const prodHead = prodRec?.hash ?? GENESIS
       const prodTotal = prodRec?.id ?? 0
 
-      // קורא-חד-פעמי על-עותק-השחזור — ה-db-הייצור-שלי לא נוגע-כלל.
-      // מחזור-#10 (Task 77): האימות-על-העותק-בזרימה (cursor-pagination) — הטעינה-המלאה
-      // של-העותק-מוסרת; אותו-דגם-אמונים: מה-Genesis, בלי-דלתא, בלי-checkpoint.
-      const reader = new PrismaClient({ datasources: { db: { url: `file:${copyDb}` } } })
       let verified: number
       let total: number
       let copyHead: string
-      try {
+      if (source === 'export') {
+        // מקור-שלישי (#13): אימות-הטקסט-בזיכרון — חישוב-מחדש-מלא מה-Genesis, בלי-מנוע-DB.
+        // ההבדל-המהותי: כאן-המקור-עצמו הוא-הטקסט-החתום (כבר-בגיט), לא-קובץ-SQLite.
+        ;({ verified, total, head: copyHead } = await verifyExportStream())
+      } else {
+        // קורא-חד-פעמי על-עותק-השחזור — ה-db-הייצור-שלי לא נוגע-כלל.
+        // מחזור-#10 (Task 77): האימות-על-העותק-בזרימה (cursor-pagination) — הטעינה-המלאה
+        // של-העותק-מוסרת; אותו-דגם-אמונים: מה-Genesis, בלי-דלתא, בלי-checkpoint.
+        const reader = new PrismaClient({ datasources: { db: { url: `file:${copyDb as string}` } } })
+        try {
         total = await reader.ledgerEntry.count()
         let prev = GENESIS
         let brokenAt: number | null = null
@@ -214,6 +235,7 @@ export async function runRestoreDrill(force = false, source: DrillSource = 'git'
         copyHead = verified > 0 ? prev : GENESIS
       } finally {
         await reader.$disconnect()
+      }
       }
 
       // הצלבה-נכונה למערכת-חיה (לקח-הרצה-ראשונה, Task 70): הייצור גדל-בין-דחיפות —
@@ -254,7 +276,7 @@ export async function runRestoreDrill(force = false, source: DrillSource = 'git'
         ledgerId: entry.id,
       }
     } finally {
-      rmSync(dir, { recursive: true, force: true }) // העותק-נולד-ומת — לעולם-לא-מצטבר
+      if (dir) rmSync(dir, { recursive: true, force: true }) // העותק-נולד-ומת — לעולם-לא-מצטבר
     }
   } catch (e) {
     const durationMs = Date.now() - started
@@ -262,7 +284,10 @@ export async function runRestoreDrill(force = false, source: DrillSource = 'git'
     // סיווג-כן-ומדויק: כל-מקור-מדווח-על-כישלונו-בשמו; אין-שקר-מטפורי-בשרשרת.
     const chainBroken = msg.startsWith('copy-chain-broken')
     const notPrefix = msg.startsWith('copy-not-a-prefix') || msg.startsWith('copy-ahead')
-    const missing = msg === 'clone-db-missing' || msg === 'snapshot-copy-missing' || msg === 'snapshot-missing'
+    const exportCorrupt =
+      msg.startsWith('export-corrupt-line') || msg.startsWith('export-gap') || msg.startsWith('export-diverges')
+    const missing =
+      msg === 'clone-db-missing' || msg === 'snapshot-copy-missing' || msg === 'snapshot-missing' || msg === 'export-missing'
     const stale = msg.startsWith('snapshot-stale')
     const errorClass = msg.includes('not yet connected')
       ? 'db-not-ready'
@@ -272,13 +297,19 @@ export async function runRestoreDrill(force = false, source: DrillSource = 'git'
           ? 'copy-not-prefix'
           : stale
             ? 'snapshot-stale'
-            : missing
-              ? source === 'git'
-                ? 'clone-db-missing'
-                : 'snapshot-missing'
-              : source === 'git'
-                ? 'clone-failed'
-                : 'snapshot-failed'
+            : exportCorrupt
+              ? 'export-corrupt'
+              : missing
+                ? source === 'git'
+                  ? 'clone-db-missing'
+                  : source === 'snapshot'
+                    ? 'snapshot-missing'
+                    : 'export-missing'
+                : source === 'git'
+                  ? 'clone-failed'
+                  : source === 'snapshot'
+                    ? 'snapshot-failed'
+                    : 'export-failed'
     try {
       const entry = await appendLedger({
         taskId: null,

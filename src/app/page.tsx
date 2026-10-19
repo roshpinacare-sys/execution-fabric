@@ -286,6 +286,12 @@ interface CensusDto {
   githubGate?: { used: number; cap: number; backoffActive: boolean }
   // Task 70 — עדות-תרגיל-השחזור האחרונה מהשרשרת (fail-honest; null = טרם-רץ)
   restoreDrill?: { at: string; ok: boolean; ledgerId: number; durationMs: number; errorClass: string | null } | null
+  // מחזור-#13 (Task 80) — עדות-לשלושת-מקורות-השחזור (fail-honest; null = טרם-רץ-למקור-זה)
+  restoreDrillSources?: {
+    git: { at: string; ok: boolean; ledgerId: number; durationMs: number; errorClass: string | null } | null
+    snapshot: { at: string; ok: boolean; ledgerId: number; durationMs: number; errorClass: string | null } | null
+    export: { at: string; ok: boolean; ledgerId: number; durationMs: number; errorClass: string | null } | null
+  } | null
   // Task 71 — הזקיפה (survival-keeper :3051): מעקב-הישרדות + מראת-גיבוי + תמונות-db (fail-honest)
   survival?: {
     up: boolean
@@ -1031,7 +1037,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/census')
       const j = await res.json()
-      if (j.ok) setCensus({ ...j.census, witness: j.witness, githubGate: j.githubGate, restoreDrill: j.restoreDrill, survival: j.survival })
+      if (j.ok) setCensus({ ...j.census, witness: j.witness, githubGate: j.githubGate, restoreDrill: j.restoreDrill, restoreDrillSources: j.restoreDrillSources, survival: j.survival })
     } catch {
       /* polling — שקט */
     }
@@ -3070,21 +3076,42 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                 )}
                 {census &&
                   (() => {
-                    const rd = census.restoreDrill
-                    const ageH = rd ? (Date.now() - new Date(rd.at).getTime()) / 3_600_000 : null
-                    const st = !rd ? 'none' : !rd.ok ? 'failed' : (ageH ?? 0) > 26 ? 'stale' : 'ok'
+                    // מחזור-#13 (Task 80): ה-badge-התלת-מקורי — גיט (clone-רחוק), תמונה-שעתית
+                    // (VACUUM), ייצוא-JSONL (טקסט-בגיט). fail-honest: מקור-שטרם-רץ נספר-כלא-מאומת.
+                    const s = census.restoreDrillSources
+                    const list = s
+                      ? [s.git, s.snapshot, s.export]
+                      : [census.restoreDrill ?? null, null, null]
+                    const names = ['git', 'snapshot', 'export-jsonl'] as const
+                    const okCount = list.filter((d) => d?.ok === true).length
+                    const failedSrc = list
+                      .map((d, i) => (d && !d.ok ? names[i] : null))
+                      .filter(Boolean)
+                    const newest = list
+                      .filter((d): d is NonNullable<typeof d> => !!d)
+                      .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())[0]
+                    const ageH = newest ? (Date.now() - new Date(newest.at).getTime()) / 3_600_000 : null
+                    const st =
+                      okCount === 0
+                        ? 'none'
+                        : failedSrc.length > 0
+                          ? 'failed'
+                          : okCount < 3
+                            ? 'partial'
+                            : (ageH ?? 0) > 26
+                              ? 'stale'
+                              : 'ok'
+                    const srcLine = list
+                      .map((d, i) => `${names[i]}: ${!d ? 'טרם-רץ' : d.ok ? `מאומת (${new Date(d.at).toLocaleString('he-IL')})` : `נכשל — ${d.errorClass ?? '?'}`}`)
+                      .join(' · ')
                     return (
                       <Badge
                         variant="outline"
-                        title={
-                          st === 'none'
-                            ? 'תרגיל-שחזור (Task 70): clone-רדוד מ-github + אימות-שרשרת עצמאי על העותק-המשוחזר — טרם-רץ; הפעימה-הראשונה בדרך מהדופק (כל 6 שעות)'
-                            : `תרגיל-שחזור (Task 70): clone-רדוד מ-github + אימות-שרשרת-עצמאי על העותק-המשוחזר והצלבת-ראש מול-הייצור. אחרון: ${new Date(rd!.at).toLocaleString('he-IL')} (${Math.round(ageH ?? 0)} שעות)${rd!.errorClass ? ` — ${rd!.errorClass}` : ''}`
-                        }
+                        title={`מקורות-השחזור (Task 70 + מחזור-#13): שלושה-מקורות-בלתי-תלויים — clone-גיט, תמונה-שעתית (VACUUM), ייצוא-JSONL-בגיט (טקסט-מחוץ-ל-SQLite). ${srcLine}`}
                         className={`gap-1 text-[10px] ${
                           st === 'failed'
                             ? 'border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400'
-                            : st === 'stale'
+                            : st === 'stale' || st === 'partial'
                               ? 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400'
                               : st === 'ok'
                                 ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-700 dark:text-cyan-400'
@@ -3096,10 +3123,12 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
                         {st === 'none'
                           ? 'אין-ראיה'
                           : st === 'failed'
-                            ? 'נכשל'
+                            ? `נכשל ${okCount}/3`
                             : st === 'stale'
-                              ? 'מיושן'
-                              : 'מאומת'}
+                              ? `מיושן ${okCount}/3`
+                              : st === 'partial'
+                                ? `${okCount}/3 מקורות`
+                                : 'מאומת 3/3'}
                       </Badge>
                     )
                   })()}

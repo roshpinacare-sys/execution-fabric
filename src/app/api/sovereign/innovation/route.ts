@@ -233,6 +233,49 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, status, drill, ledgerEntryId: entry.id })
   }
 
+  // מחזור-#13 (Task 80): תרגיל-שחזור-מהמקור-השלישי-מגוון-הפורמט — ייצוא-JSONL-בגיט.
+  // אותו-קנון-אמת של-#8/#11 (ran + ok + prefixMatch = תנאי-אימוץ-מוחלט), אך-המקור-שונה-
+  // מהותית: טקסט-חתום-מחוץ-ל-SQLite — התרגיל-מחשב-מחדש את-כל-שרשרת-ה-hash מה-Genesis
+  // בזיכרון-טהור. פגיעה-לוגית-בקובץ-SQLite (האיום-שלא-היה-מכוסה — שני-המקורות-הקיימים
+  // נגזרים-ממנו) כבר-אינה-משתקת-את-יכולת-השחזור. קובץ-חסר/פגום = כשל-כן-חתום.
+  if (subject === 'chain-export-drill') {
+    let drill: RestoreDrillResult
+    try {
+      drill = await runRestoreDrill(true, 'export') // כפייה-במסילה בלבד: המחזור-חייב-לרוץ-בפועל
+    } catch (e) {
+      return NextResponse.json(
+        { ok: false, error: 'drill-unreachable', detail: e instanceof Error ? e.message : String(e) },
+        { status: 502 }
+      )
+    }
+    const adoptionProven = drill.ran === true && drill.ok === true && drill.prefixMatch === true
+    const status = adoptionProven ? 'DONE' : 'FAILED'
+    const entry = await appendLedger({
+      taskId: null,
+      kind: 'INNOVATION',
+      status,
+      worker: 'innovation-cycle-chain-export-drill',
+      attempts: 1,
+      durationMs: drill.durationMs ?? 0,
+      errorClass: adoptionProven ? null : (drill.errorClass ?? 'drill-not-proven'),
+      outputHash: sha256Short(
+        JSON.stringify({
+          subject: 'chain-export-restore-drill-forced',
+          source: drill.source ?? 'export',
+          verified: drill.verified ?? null,
+          total: drill.total ?? null,
+          copyHead: drill.cloneHead ?? null,
+          prodHead: drill.prodHead ?? null,
+          prefixMatch: drill.prefixMatch ?? null,
+          drillLedgerId: drill.ledgerId ?? null,
+          reason: drill.reason ?? null,
+          adoptionRationale: 'format-diversified-text-source-proven',
+        })
+      ),
+    })
+    return NextResponse.json({ ok: true, status, drill, ledgerEntryId: entry.id })
+  }
+
   // מחזור-#12 (Task 79): אוטונומיזציה של המקור-השני — פעימת-תרגיל-התמונה חיה בתוך-הלב
   // (עורק-ח-bis, כל-שעה, 45ש' אחרי-עליית-הלב). ההוכחה — הצלבת-גופים: הלב (הפועל — מדווח
   // snapshotRestorePulses>=1 ו-ok) מול-השרשרת (הראיה — רשומת-DRILL-טרייה של

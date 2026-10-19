@@ -104,6 +104,11 @@ export async function GET(req: NextRequest) {
   const gate = complianceReport()
   // Task 70 — עדות-השחזור האחרונה מהשרשרת (אפס-רשת) ל-badge-המשמרת
   const restoreDrill = await lastRestoreDrill()
+  // מחזור-#13 (Task 80) — עדות-לשלושת-מקורות-השחזור (גיט / תמונה-שעתית / ייצוא-JSONL) ל-badge
+  const [restoreDrillSnapshot, restoreDrillExport] = await Promise.all([
+    lastRestoreDrill('snapshot'),
+    lastRestoreDrill('export'),
+  ])
   // Task 71 — הזקיפה: מעקב-הישרדות + מראת-גיבוי + תמונות-db (רשת-לוקאלית-בלבד)
   const survival = await probeSurvival()
   return NextResponse.json({
@@ -116,6 +121,11 @@ export async function GET(req: NextRequest) {
       backoffActive: gate.pacing.backoffActive,
     },
     restoreDrill,
+    restoreDrillSources: {
+      git: restoreDrill,
+      snapshot: restoreDrillSnapshot,
+      export: restoreDrillExport,
+    },
     survival,
   })
 }
