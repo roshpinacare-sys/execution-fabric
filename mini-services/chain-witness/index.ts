@@ -21,8 +21,10 @@ import fs from 'node:fs'
 
 // WITNESS_DB/WITNESS_PORT — override לתרגילי-אש בלבד (עותק-db-פגום ב-/tmp);
 // בייצור, ברירת-המחדל נשארת קשיחה: הייצור-האמיתי.
+// ברירת-המחדל נגזרת-ממיקום-הסקריפט (mini-services/chain-witness → שורש-המיזם) —
+// אפס-נתיבי-מכונה-גולמיים בעץ (חוק-ה-workpath של leak-scan, Task 69-b).
 const PORT = Number(process.env.WITNESS_PORT || 3050)
-const DB_PATH = process.env.WITNESS_DB || '/home/z/my-project/db/custom.db'
+const DB_PATH = process.env.WITNESS_DB || `${import.meta.dir}/../../db/custom.db`
 const LOG = '/tmp/chain-witness.log'
 const POLL_MS = 60_000
 const GENESIS = 'GENESIS'

@@ -7,6 +7,9 @@
  *   · -z + core.quotepath=off — שמות-קבצים-בעברית לא-מודלים
  * דפוסי-איסור: נתיבי-מכונה-אישיים · WIF/base58 · טוקני-GitHub · URL-עם-אישור ·
  * x-access-token · **ומצב --passfile**: זרע-בייטי-הסיסמה (זיכרון-בלבד) מול-כל-קובץ.
+ * חריג-מתועד (Task 69-b): db/custom.db = היסטוריית-האמת (append-only) — נתיבי-מכונה
+ * שנרשמו-בפעולות-חיות אינם-ניתנים-לתיקון-בלי-זיוף-היסטוריה; workpath מדולג-עבורה
+ * בלבד. כל-דפוסי-הטוקנים/מפתחות/כתובות-מאומתות נאכפים-עליה במלואם. fail-closed-נשמר.
  * מדווח: סוג + קובץ + שורה — מעולם-לא-את-התוכן-המותאם. יציאה: 0=נקי · 1=אסור.
  *
  * שימוש:  node engine/leak-scan.mjs --staged [--passfile <path>]
@@ -114,10 +117,14 @@ for (const t of targets()) {
     });
   }
 
-  // 2) דפוסי-איסור
+  // 2) דפוסי-איסור — עם-החריג-המתועד-לעיל ל-db-האמת (workpath בלבד)
+  const isTruthDb = t === "db/custom.db" || abs.endsWith("/db/custom.db");
+  const activePatterns = isTruthDb
+    ? PATTERNS.filter((p) => p.kind !== "workpath")
+    : PATTERNS;
   const text = buf.toString("utf8");
   const lines = text.split("\n");
-  for (const { kind, re } of PATTERNS) {
+  for (const { kind, re } of activePatterns) {
     lines.forEach((line, i) => {
       re.lastIndex = 0;
       if (re.test(line)) hit(kind, t, i + 1);
