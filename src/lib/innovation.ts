@@ -1,7 +1,7 @@
 import type { LedgerEntry } from '@prisma/client'
 import { createHash } from 'crypto'
 import { db } from '@/lib/db'
-import { GENESIS, verifyChain, ledgerHash, type VerifyResult } from '@/lib/ledger'
+import { GENESIS, verifyChain, verifyChainStreamed, ledgerHash, type VerifyResult } from '@/lib/ledger'
 
 // מסילת-החדשנות (Task 60 — הוראת-בעלים: "בחן תכנן ישם בצע דחוף")
 //
@@ -237,4 +237,136 @@ export function memoizedVerdict(
 
 export function verdictCacheSize(): number {
   return verdictCache.size
+}
+
+// ===== מחזור-חדשנות #7 (Task 74): הזרמה-במפקח-הריבוני =====
+// קו-הבסיס: המימוש-ההיסטורי (Task 30) — findMany-מלא של-כל-השרשרת + כל-האגרגציות-ב-JS.
+// הנתיב-המאומץ: verifyChainStreamed (אותו-אימות-מלא-מה-Genesis, קריאה-בדפים) +
+// groupBy/count/findFirst-ב-SQL. שקילות = כל-8-הפלטים מסכימים ביט-ביט.
+// כנות: אפילו-אם-הזרימה-איטית-יותר-בקנה-המידה-הנוכחי — המדידה-נרשמת-כפי-שהיא;
+// האימוץ-על-בסיס-חסימות-הזיכרון (O(דף)+O(קרדינליות) במקום O(n)-שורות-שנטענות-כל-30ש-לנצח).
+export interface CensusCycleMeasurement {
+  at: string
+  chainEntries: number
+  runs: number
+  baseline: { minMs: number; avgMs: number }
+  streamed: { minMs: number; avgMs: number; pages: number }
+  speedupStreamed: number
+  equivalenceProven: boolean
+  mismatch: string | null
+  adoptionScope: string
+}
+
+// קו-הבסיס — העתק-נאמן-של-המימוש-ההיסטורי (לא-נוגעים-בו; הוא-הבסיס-להשוואה-לנצח)
+async function censusBaselineOnce() {
+  const entries = await db.ledgerEntry.findMany({ orderBy: { id: 'asc' } })
+  const verify = verifyChain(entries)
+  const byKind: Record<string, number> = {}
+  for (const e of entries) byKind[e.kind] = (byKind[e.kind] ?? 0) + 1
+  const entryByStatus: Record<string, number> = {}
+  for (const e of entries) entryByStatus[e.status] = (entryByStatus[e.status] ?? 0) + 1
+  const errorClasses: Record<string, number> = {}
+  for (const e of entries) if (e.errorClass) errorClasses[e.errorClass] = (errorClasses[e.errorClass] ?? 0) + 1
+  const head = entries.at(-1)?.hash ?? null
+  return {
+    verify: { ok: verify.ok, head: verify.head, brokenAt: verify.brokenAt, verified: verify.verified },
+    total: entries.length,
+    done: entryByStatus['DONE'] ?? 0,
+    failed: entryByStatus['FAILED'] ?? 0,
+    byKind,
+    errorClasses,
+    head,
+  }
+}
+
+// הנתיב-המאומץ — זהה-לוגיקה-שה-buildCensus משתמש-בו מעתה
+async function censusStreamedOnce() {
+  const verify = await verifyChainStreamed()
+  const [headEntry, kindRows, statusRows, errorRows] = await Promise.all([
+    db.ledgerEntry.findFirst({ orderBy: { id: 'desc' }, select: { hash: true } }),
+    db.ledgerEntry.groupBy({ by: ['kind'], _count: { _all: true } }),
+    db.ledgerEntry.groupBy({ by: ['status'], _count: { _all: true } }),
+    db.ledgerEntry.groupBy({ by: ['errorClass'], _count: { _all: true }, where: { errorClass: { not: null } } }),
+  ])
+  const byKind: Record<string, number> = {}
+  for (const r of kindRows) byKind[r.kind] = r._count._all
+  const entryByStatus: Record<string, number> = {}
+  for (const r of statusRows) entryByStatus[r.status] = r._count._all
+  const errorClasses: Record<string, number> = {}
+  for (const r of errorRows) if (r.errorClass) errorClasses[r.errorClass] = r._count._all
+  return {
+    verify: { ok: verify.ok, head: verify.head, brokenAt: verify.brokenAt, verified: verify.verified },
+    total: verify.total,
+    done: entryByStatus['DONE'] ?? 0,
+    failed: entryByStatus['FAILED'] ?? 0,
+    byKind,
+    errorClasses,
+    head: headEntry?.hash ?? null,
+    pages: verify.pages,
+  }
+}
+
+const CENSUS_RUNS = 9
+
+export async function runCensusCycle(): Promise<CensusCycleMeasurement> {
+  const baseTimes: number[] = []
+  const streamTimes: number[] = []
+  let baseline: Awaited<ReturnType<typeof censusBaselineOnce>> | null = null
+  let streamed: Awaited<ReturnType<typeof censusStreamedOnce>> | null = null
+  let mismatch: string | null = null
+  // השוואה-קנונית-ממוינת (לקח-המחזור-הראשון, חתום-כ-FAILED-רשומה 775): JSON.stringify
+  // רגיש-לסדר-מפתחות — groupBy-SQL מחזיר-בסדר-אחר-מסדר-ההיתקלות; שוויון-ערכים = מה-שנמדד.
+  const canon = (o: Record<string, number>) =>
+    JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]]))
+  const firstDiff = (b: Record<string, number>, s: Record<string, number>) => {
+    const keys = new Set([...Object.keys(b), ...Object.keys(s)])
+    for (const k of [...keys].sort()) if ((b[k] ?? 0) !== (s[k] ?? 0)) return k
+    return null
+  }
+  for (let i = 0; i < CENSUS_RUNS; i++) {
+    // מדידה-מתחלפת (בסיס ← זרימה ← בסיס...) — הוגנות-תרמית/מטמון-בין-המימושים
+    let t0 = performance.now()
+    const b = await censusBaselineOnce()
+    baseTimes.push(performance.now() - t0)
+    t0 = performance.now()
+    const s = await censusStreamedOnce()
+    streamTimes.push(performance.now() - t0)
+    baseline = b
+    streamed = s
+    if (mismatch === null) {
+      const eqBase =
+        b.verify.ok === s.verify.ok &&
+        b.verify.head === s.verify.head &&
+        b.verify.brokenAt === s.verify.brokenAt &&
+        b.verify.verified === s.verify.verified &&
+        b.total === s.total &&
+        b.done === s.done &&
+        b.failed === s.failed &&
+        b.head === s.head &&
+        canon(b.byKind) === canon(s.byKind) &&
+        canon(b.errorClasses) === canon(s.errorClasses)
+      if (!eqBase) {
+        const kindDiff = firstDiff(b.byKind, s.byKind)
+        const errDiff = firstDiff(b.errorClasses, s.errorClasses)
+        mismatch =
+          `baseline{ok:${b.verify.ok},total:${b.total},done:${b.done},failed:${b.failed},verified:${b.verify.verified},kindDiff:${kindDiff ?? '-'},errDiff:${errDiff ?? '-'}} != ` +
+          `streamed{ok:${s.verify.ok},total:${s.total},done:${s.done},failed:${s.failed},verified:${s.verify.verified}}`
+      }
+    }
+  }
+  const r3 = (x: number) => Math.round(x * 1000) / 1000
+  const min = (xs: number[]) => r3(Math.min(...xs))
+  const avg = (xs: number[]) => r3(xs.reduce((s, x) => s + x, 0) / xs.length)
+  return {
+    at: new Date().toISOString(),
+    chainEntries: streamed?.total ?? 0,
+    runs: CENSUS_RUNS,
+    baseline: { minMs: min(baseTimes), avgMs: avg(baseTimes) },
+    streamed: { minMs: min(streamTimes), avgMs: avg(streamTimes), pages: streamed?.pages ?? 0 },
+    speedupStreamed: r3(min(baseTimes) / Math.max(min(streamTimes), 1e-9)),
+    equivalenceProven: mismatch === null,
+    mismatch,
+    adoptionScope:
+      'census-stays-full-forever (streaming=full-verification, not delta); memory O(page)+O(cardinality) instead of O(all-rows)',
+  }
 }

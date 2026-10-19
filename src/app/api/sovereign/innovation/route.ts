@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { appendLedger, sha256Short } from '@/lib/ledger'
-import { runInnovationCycle } from '@/lib/innovation'
+import { runInnovationCycle, runCensusCycle, type CensusCycleMeasurement } from '@/lib/innovation'
 
 // מסילת-החדשנות (Task 60): POST מריץ מחזור-חדשנות אמיתי —
 // מדידת קו-בסיס → אופטימיזציה → הוכחת-שקילות → מדידה → חתימת INNOVATION בשרשרת.
@@ -46,6 +46,37 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const subject = req.nextUrl.searchParams.get('subject') ?? 'verifyChain'
+
+  // מסלול-#7 (Task 74): מדידת-ה-census — הזרמה-במפקח-הריבוני מול-המימוש-ההיסטורי.
+  // שקילות-כל-8-הפלטים = תנאי-אימוץ-מוחלט; מהירות = רישום-כן; האימוץ-מנומק-בחסימות-זיכרון.
+  if (subject === 'census') {
+    const m: CensusCycleMeasurement = await runCensusCycle()
+    const status = m.equivalenceProven ? 'DONE' : 'FAILED'
+    const entry = await appendLedger({
+      taskId: null,
+      kind: 'INNOVATION',
+      status,
+      worker: 'innovation-cycle-census',
+      attempts: 1,
+      durationMs: Math.round((m.baseline.avgMs + m.streamed.avgMs) * 1000),
+      errorClass: m.equivalenceProven ? null : 'equivalence-mismatch',
+      outputHash: sha256Short(
+        JSON.stringify({
+          subject: 'census-streamed-vs-baseline',
+          runs: m.runs,
+          chainEntries: m.chainEntries,
+          baselineMinMs: m.baseline.minMs,
+          streamedMinMs: m.streamed.minMs,
+          streamedPages: m.streamed.pages,
+          speedupStreamed: m.speedupStreamed,
+          equivalenceProven: m.equivalenceProven,
+          mismatch: m.mismatch,
+          adoptionScope: m.adoptionScope,
+        })
+      ),
+    })
+    return NextResponse.json({ ok: true, status, measurement: m, ledgerEntryId: entry.id })
+  }
 
   // מסלול-#6 (Task 73): מדידת-העד-החי — האמת-על-ביצועי-העד מקורה-בעד-עצמו, לא-בהערכה.
   if (subject === 'witness') {

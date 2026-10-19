@@ -49,6 +49,49 @@ export interface VerifyResult {
   verified: number
 }
 
+// מחזור-חדשנות #7 (Task 74): אימות-מלא-בזרימה.
+// זה-אינו-דלתא ואינו-checkpoint: כל-רשומה נאותת מה-Genesis בכל-קריאה — דגם-האמונים
+// של verifyChain נשמר-שלם. השינוי-הוא-אך-ורק דפוס-הקריאה: cursor pagination
+// (WHERE id > cursor LIMIT n) → זיכרון-חסום-ב-O(מנת-דף) במקום O(n) — קריטי-במפקח
+// הריבוני שרץ-לנצח-עם-שרשרת-צומחת.
+export interface StreamedVerifyResult extends VerifyResult {
+  pages: number // כמה-דפים-נקראו (מדידה-כנה של העלות)
+  total: number // סך-הרשומות בטבלה (COUNT)
+}
+
+export async function verifyChainStreamed(pageSize = 500): Promise<StreamedVerifyResult> {
+  let prev = GENESIS
+  let brokenAt: number | null = null
+  let verified = 0
+  let pages = 0
+  let cursorId: number | undefined
+  while (brokenAt === null) {
+    const page = await db.ledgerEntry.findMany({
+      orderBy: { id: 'asc' },
+      take: pageSize,
+      ...(cursorId !== undefined ? { cursor: { id: cursorId }, skip: 1 } : {}),
+    })
+    if (page.length === 0) break
+    pages++
+    for (const e of page) {
+      if (e.prev !== prev) {
+        brokenAt = e.id
+        break
+      }
+      if (e.hash !== ledgerHash(e)) {
+        brokenAt = e.id
+        break
+      }
+      prev = e.hash
+      verified++
+    }
+    if (page.length < pageSize) break
+    cursorId = page[page.length - 1].id
+  }
+  const total = await db.ledgerEntry.count()
+  return { ok: brokenAt === null, head: verified > 0 ? prev : GENESIS, brokenAt, verified, pages, total }
+}
+
 // אימות מקצה-לקצה: קישוריות prev + חישוב-מחדש של כל-hash. fail-closed.
 export function verifyChain(entries: LedgerEntry[]): VerifyResult {
   let prev = GENESIS

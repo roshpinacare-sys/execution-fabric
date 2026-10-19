@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { db } from '@/lib/db'
-import { verifyChain, type VerifyResult } from '@/lib/ledger'
+import { verifyChainStreamed, type VerifyResult } from '@/lib/ledger'
 import { railsReport } from '@/lib/providers'
 import { EVOLUTION_BUDGET_PER_HOUR, evolutionBudgetUsed, findUnaddressedHighFindings, type HighFinding } from '@/lib/evolution'
 
@@ -329,8 +329,15 @@ function worklogTasks(): { taskIdsSeen: number; lastTaskId: string | null } {
 }
 
 export async function buildCensus(): Promise<Census> {
-  const [entries, tasks, handoffs, budgetUsed, heart, memory, highOpen] = await Promise.all([
-    db.ledgerEntry.findMany({ orderBy: { id: 'asc' } }),
+  // מחזור-חדשנות #7 (Task 74): אפס-טעינת-שורות-שרשרת. כל-האגרגציות נגזרות-ב-SQL
+  // (groupBy/count/findFirst) והאימות-המלא-רץ-בזרימה — אותן-תוצאות בדיוק, זיכרון-חסום.
+  // המפקח-נשאר-מפקח-מלא: כל-רשומה נאותת מה-Genesis בכל-קריאה (בלי-דלתא, בלי-checkpoint).
+  const [verify, headEntry, kindRows, statusRows, errorRows, tasks, handoffs, budgetUsed, heart, memory, highOpen] = await Promise.all([
+    verifyChainStreamed(),
+    db.ledgerEntry.findFirst({ orderBy: { id: 'desc' }, select: { hash: true, createdAt: true } }),
+    db.ledgerEntry.groupBy({ by: ['kind'], _count: { _all: true } }),
+    db.ledgerEntry.groupBy({ by: ['status'], _count: { _all: true } }),
+    db.ledgerEntry.groupBy({ by: ['errorClass'], _count: { _all: true }, where: { errorClass: { not: null } } }),
     db.task.findMany({
       select: {
         id: true, title: true, kind: true, status: true, source: true, worker: true,
@@ -345,9 +352,18 @@ export async function buildCensus(): Promise<Census> {
     findUnaddressedHighFindings().catch(() => null),
   ])
 
-  const verify = verifyChain(entries)
-  const head = entries.at(-1)?.hash ?? null
-  const headAgeMs = head ? Date.now() - (entries.at(-1)?.createdAt.getTime() ?? 0) : null
+  // DTO-האימות נשאר-מדויק-כמו-קודם (ok/head/brokenAt/verified) — השדות-הנוספים
+  // (pages/total) של-הזרימה אינם-מודלפים החוצה.
+  const verifyOut: VerifyResult = { ok: verify.ok, head: verify.head, brokenAt: verify.brokenAt, verified: verify.verified }
+  const head = headEntry?.hash ?? null
+  const headAgeMs = head ? Date.now() - (headEntry?.createdAt.getTime() ?? 0) : null
+
+  const byKind: Record<string, number> = {}
+  for (const r of kindRows) byKind[r.kind] = r._count._all
+  const entryByStatus: Record<string, number> = {}
+  for (const r of statusRows) entryByStatus[r.status] = r._count._all
+  const errorClasses: Record<string, number> = {}
+  for (const r of errorRows) if (r.errorClass) errorClasses[r.errorClass] = r._count._all
 
   const byStatus = groupCount(tasks, (t) => t.status)
   const stuck = tasks.filter(
@@ -373,7 +389,7 @@ export async function buildCensus(): Promise<Census> {
   const handoffByStatus = groupCount(handoffs, (h) => h.status)
 
   // פסיפס-האחזות (disktree treemap) — גודל=מדידת-אמת, סוג=סיווג
-  const byKind = groupCount(entries, (e) => e.kind)
+  // (byKind נגזר-מעתה מ-groupBy-SQL — ראה-ראשית-buildCensus, מחזור-חדשנות #7)
   const executionCount = (byKind.CODE ?? 0) + (byKind.AUDIT ?? 0) + (byKind.PLAN ?? 0)
   const opsCount = (byKind.DRILL ?? 0) + (byKind.BATCH ?? 0) + (byKind.FLEET ?? 0)
   const deliveryCount = byKind.HANDOFF ?? 0
@@ -413,14 +429,14 @@ export async function buildCensus(): Promise<Census> {
   return {
     generatedAt: new Date().toISOString(),
     chain: {
-      total: entries.length,
-      done: entries.filter((e) => e.status === 'DONE').length,
-      failed: entries.filter((e) => e.status === 'FAILED').length,
-      verify,
+      total: verify.total,
+      done: entryByStatus['DONE'] ?? 0,
+      failed: entryByStatus['FAILED'] ?? 0,
+      verify: verifyOut,
       head,
       headAgeMs,
       byKind,
-      errorClasses: groupCount(entries.filter((e) => e.errorClass), (e) => e.errorClass as string),
+      errorClasses,
     },
     tasks: {
       total: tasks.length,
