@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   lint-build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # ubuntu-latest מתחיל-לנדוד-ל-26 ב-2026-10-19 — מצהירים-סביבה-קבועה
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

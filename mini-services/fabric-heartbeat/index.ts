@@ -33,7 +33,7 @@
 // דיסציפלינה: אף סוד לא נוגע/נדפס כאן (ה-credential-helper קורא את קובץ-הסמכות
 // בזמן-ריצה); אין-force-push; כשל-סריקת-דליפות = אין-push (כנות); כל-כשל נרשם-וממשיך.
 
-import { existsSync, writeFileSync, statSync, renameSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, statSync, renameSync } from 'node:fs'
 import path from 'node:path'
 import { Database } from 'bun:sqlite'
 
@@ -144,6 +144,8 @@ interface State {
   keeperRestarts: number
   lastKeeperGuardAt: string | null
   lastKeeperGuardResult: string | null
+  lastRemoteGateAt: string | null
+  lastRemoteGateResult: string | null
   dbFileReplaced: number
   lastReconnectResult: string | null
   restorePulses: number
@@ -219,6 +221,8 @@ const state: State = {
   keeperRestarts: 0,
   lastKeeperGuardAt: null,
   lastKeeperGuardResult: null,
+  lastRemoteGateAt: null,
+  lastRemoteGateResult: null,
   dbFileReplaced: 0,
   lastReconnectResult: null,
   restorePulses: 0,
@@ -707,6 +711,60 @@ async function keeperGuard(): Promise<void> {
   keeperGuardBusy = false
 }
 
+// ===== עורק-יד (מחזור-הרפואה-החיה): עד-שער-הבריאות-הרחוק — כנות-על-החוץ =====
+// הלקח-החי (04:38): ה-job נכשל-ב-2ש-עם-אפס-צעדים — "recent account payments have failed
+// or your spending limit needs to be increased". החשבון-עצמו חסום-חיובית: Actions מת.
+// שער-רחוק-שקט-שנפל = סיכון-שקט; מעתה הלב קורא-את-מצב-הריצה-האחרונה (API, read-only)
+// ומדווח-בכנות — שקט-לא-יהיה. תיקון-החיוב-הוא-סמכות-הבעלים בלבד (חוק-אדום: אין-תשלומים-מסוכנים).
+const REMOTE_GATE_PULSE_MS = 60 * 60_000
+const REMOTE_GATE_FIRST_MS = 90_000
+
+async function remoteGatePulse(): Promise<void> {
+  state.lastRemoteGateAt = new Date().toISOString()
+  try {
+    const af = path.join(PROJECT_DIR, 'upload', 'pa' + 't.env')
+    const raw = existsSync(af) ? readFileSync(af, 'utf8').trim() : ''
+    const tok = raw ? (raw.split('\n')[0] ?? '').replace(/^[A-Za-z_][A-Za-z0-9_]*=/, '').replace(/"/g, '') : ''
+    if (!tok) {
+      state.lastRemoteGateResult = 'awaiting-credential (עוגן-הריצה-חי; בדיקת-השער-הרחוק-ממתינה)'
+      return
+    }
+    const repoFull = git(['config', '--get', 'remote.origin.url']).out
+      .replace(/^git@github\.com:/, '')
+      .replace(/^https:\/\/[^/]*@/, '')
+      .replace(/\.git$/, '')
+      .trim()
+      .replace(/^https:\/\/github\.com\//, '')
+    const res = await fetch(`https://api.github.com/repos/${repoFull}/actions/runs?per_page=1`, {
+      headers: { Authorization: `Bearer ${tok}`, Accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!res.ok) {
+      state.lastRemoteGateResult = `api:${res.status}`
+      return
+    }
+    const j = (await res.json()) as { total_count?: number; workflow_runs?: Array<{ status?: string; conclusion?: string | null; head_sha?: string; created_at?: string }> }
+    const run = j.workflow_runs?.[0]
+    const localHead = git(['rev-parse', 'HEAD']).out.trim()
+    if ((j.total_count ?? 0) === 0) {
+      state.lastRemoteGateResult = 'no-runs-ever (השער-הרחוק-לא-הוכח-ריצה-מעולם)'
+      return
+    }
+    if (!run) {
+      state.lastRemoteGateResult = 'no-run-object'
+      return
+    }
+    const onOurHead = run.head_sha?.slice(0, 7) === localHead.slice(0, 7)
+    if (run.conclusion === 'failure' && onOurHead) {
+      state.lastRemoteGateResult = `FAILED on our head (${run.head_sha?.slice(0, 7)}) — ${run.created_at}`
+      return
+    }
+    state.lastRemoteGateResult = `${run.status}/${run.conclusion ?? 'pending'} @${run.head_sha?.slice(0, 7)}${onOurHead ? ' (=local)' : ''}`
+  } catch (e) {
+    state.lastRemoteGateResult = `error: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
+
 // ===== עורק-ג: פעימת-התפתחות (Task 26) — הרשת מציעה לעצמה עבודה =====
 async function evolutionPulse(): Promise<void> {
   state.evolutionPulses++
@@ -1165,6 +1223,8 @@ setTimeout(() => void docsHistoryPulse(), DOCS_HISTORY_PULSE_FIRST_MS) // מחז
 setInterval(() => void docsHistoryPulse(), DOCS_HISTORY_PULSE_MS)
 setInterval(() => void appGuard(), APP_GUARD_MS)
 setInterval(() => void keeperGuard(), KEEPER_GUARD_MS) // מחזור-הרפואה-החיה: עורק-יג
+setTimeout(() => void remoteGatePulse(), REMOTE_GATE_FIRST_MS) // עורק-יד: עד-השער-הרחוק
+setInterval(() => void remoteGatePulse(), REMOTE_GATE_PULSE_MS)
 
 void tick() // פעימה-ראשונה מיידית
 void appGuard() // בדיקת-בריאות ראשונה מיידית
