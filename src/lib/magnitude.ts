@@ -81,6 +81,7 @@ const HUMAN = {
   healingNoticeSeconds: 1800, // 30 דק' — מודיע-ומטפל
   workUnitsPerDay: 10,
   selfAuditPerQuarter: true, // אחת-ל-90 יום
+  lostWorkdayRebuildSeconds: 28800, // 480 דק' — יום-עבודה-שמרני לבניית-מצב-עבודה-מאומת-מחדש אחרי-אובדן-סביבה-מלא
 }
 
 function errMsg(e: unknown): string {
@@ -131,13 +132,44 @@ interface KeeperJson {
   ticks: number
 }
 
-// ===== ממד 1: זמינות — 24/7 רצוף מול בעלים-ער 16 שעות/יום =====
-function measureAvailability(h: HeartJson | null): Pick<MagnitudeDimension, 'multiplier' | 'systemEvidence'> {
-  const evidence = h
-    ? `לב-חי: ${h.ticks} פעימות-5ש' רצופות מאז ${new Date(h.startedAt).toISOString().slice(0, 16)}Z — ריצה-רציפה-ללא-שינה`
-    : 'הלב לא-נגיש — אין-ראיית-רציפות'
-  const mult = 24 / HUMAN.dutyHoursPerDay // 1.5 — חשוף: זה הממד-הקרוב-ביותר-לאדם
-  return { multiplier: h ? mult : null, systemEvidence: evidence }
+// ===== ממד 1: זמינות — מורכבת-משתי-שכבות-נמדדות (Task 94 — לקח-המד-הקשיח) =====
+// הלקח: עד-Task-93 הממד-היה-מקודד 24/16=1.5x — תקרה-מלאכותית שהתעלמה משכבת-ההישרדות
+// האמיתית שהמערכת כבר-מוכיחה-חתומות. מעתה: זמינות-אפקטיבית = כיסוי-תפעול × מהירות-שחזור-אמת.
+//   · כיסוי: 24/7 מול-16שע' ער — 1.5x (ללא-שינוי)
+//   · שחזור-אמת: חציון-תרגילי drill:restore (גיט — המקור-האיטי-ביותר-והשלם-ביותר: clone-רשת
+//     + אימות-שרשרת-ביט-ביט + הצלבת-ראש) ב-48שע' מול-בסיס-אנושי-שמרני: יום-עבודה-שלם
+//     (480 דק') לבניית-מצב-עבודה-מאומת-מחדש אחרי-אובדן-סביבה-מלא.
+// כנות: מוכפל-רק-מה-שנמדד; אין-תרגילים-טריים = נופל-בכנות-לכיסוי-בלבד (1.5x), לא-ממציאים-שחזור.
+async function measureAvailability(h: HeartJson | null): Promise<Pick<MagnitudeDimension, 'multiplier' | 'systemEvidence'>> {
+  if (!h) return { multiplier: null, systemEvidence: 'הלב לא-נגיש — אין-ראיית-כיסוי-ואין-מדידה' }
+  const duty = 24 / HUMAN.dutyHoursPerDay
+  const dutyTxt = `כיסוי-24/7 (${duty}x) — לב-חי: ${h.ticks} פעימות-5ש' רצופות מאז ${new Date(h.startedAt).toISOString().slice(0, 16)}Z`
+  try {
+    const since = new Date(Date.now() - 48 * 3600 * 1000)
+    const drills = await db.ledgerEntry.findMany({
+      where: { kind: 'DRILL', status: 'DONE', worker: { startsWith: 'drill:restore' }, durationMs: { gt: 0 }, createdAt: { gte: since } },
+      select: { worker: true, durationMs: true },
+      orderBy: { createdAt: 'desc' },
+      take: 300,
+    })
+    const gitMs = drills.filter((d) => d.worker === 'drill:restore').map((d) => d.durationMs).sort((a, b) => a - b)
+    const allMs = drills.map((d) => d.durationMs).sort((a, b) => a - b)
+    // כנות-שמרנית: מעדיפים-את-המקור-האיטי-ביותר (גיט); אין-מספיק-גיט — ממוצע-כל-המקורות
+    const samples = gitMs.length >= 2 ? gitMs : allMs
+    if (samples.length < 2) {
+      return { multiplier: duty, systemEvidence: `${dutyTxt} · שחזור-אמת-לא-נמדד-טרי (אין-2-תרגילים-48שע') — לא-מוסיפים-מכפיל-בהמצאה` }
+    }
+    const medianMs = samples[Math.floor(samples.length / 2)]
+    const medianSec = Math.max(0.001, medianMs / 1000)
+    const recovery = HUMAN.lostWorkdayRebuildSeconds / medianSec
+    const srcTxt = gitMs.length >= 2 ? 'מקור-גיט-מלא (clone+אימות-ביט-ביט+הצלבה)' : 'כל-המקורות-הבלתי-תלויים'
+    return {
+      multiplier: duty * recovery,
+      systemEvidence: `זמינות-מורכבת = ${dutyTxt} × שחזור-אמת (${recovery.toFixed(0)}x): חציון-${samples.length}-תרגילי-${srcTxt}-48שע' = ${medianSec.toFixed(2)}שנ' לשחזור-מצב-מאומת-ממקור-בלתי-תלוי, מול-יום-עבודה-אנושי-שלם (${HUMAN.lostWorkdayRebuildSeconds / 60} דק') לבניית-מצב-עבודה-אחרי-אובדן-מלא`,
+    }
+  } catch (e) {
+    return { multiplier: duty, systemEvidence: `${dutyTxt} · מדידת-שחזור-נכשלה-בכנות: ${errMsg(e)} — לא-מוסיפים-מכפיל` }
+  }
 }
 
 // ===== ממד 2: זמן-הכרעה — חציון-משך-הכרעות אמיתיות (PLAN/DRILL) 48שע' =====
@@ -302,8 +334,8 @@ export async function collectMagnitude(): Promise<MagnitudeReport> {
     })
   }
 
-  push('availability', 'זמינות-רציפה', '24/7-רצוף (פעימות-לב) מול-שעות-ערות-אנושיות', '16 שעות/יום',
-    measureAvailability(heart))
+  push('availability', 'זמינות-רציפה', 'כיסוי-24/7 (פעימות-לב) × מהירות-שחזור-אמת-חתומה (drill:restore) מול-בעלים-ער-שנזקק-ליום-עבודה-לשחזור', '16 שעות/יום + 480 דק\'-שחזור-אחרי-אובדן',
+    await measureAvailability(heart))
   push('decision-latency', 'זמן-הכרעה', 'חציון-משך-PLAN/DRILL-אמיתי-48שע\' מול-15 דק\' אנושיות', '15 דקות/הכרעה',
     await measureDecisionLatency().catch((e) => ({ multiplier: null, systemEvidence: `מדידה-נכשלה-בכנות: ${errMsg(e)}` })))
   push('parallelism', 'מקביליות', 'עורקים-יורים+שומרים+שירותים מול-שרשור-אנושי', 'משימה-אחת-בו-זמנית',
