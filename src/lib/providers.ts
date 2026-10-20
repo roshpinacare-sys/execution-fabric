@@ -100,7 +100,9 @@ async function nvidiaChatOnce(
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    max_tokens: 4096,
+    // Task 103: 4096→16384 — נמדד-חי: תשובות-CODE-גדולות נחתכו באמצע-JSON
+    // ("Unterminated string at position ~14K" ≈ תקרת-4096-טוקנים). ראש-מרווח-4x.
+    max_tokens: 16384,
     temperature: 0.2,
     // מודלי-nemotron הם מודלי-הסקה: הפלט-הממשי ב-content רק כש-thinking כבוי
     chat_template_kwargs: { enable_thinking: false },

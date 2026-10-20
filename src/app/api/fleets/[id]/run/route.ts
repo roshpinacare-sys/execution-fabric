@@ -4,8 +4,10 @@ import { appendLedger, sha256Short } from '@/lib/ledger'
 import {
   runContractChain,
   runTaskChain,
+  type ChainCandidate,
   callLlm,
   type TaskKind,
+  withContractFeedback,
 } from '@/lib/llm-chain'
 import { nvidiaChat, nvidiaConfigured } from '@/lib/providers'
 import {
@@ -217,18 +219,18 @@ export async function POST(
 
   // סינתזת-הקונסנזוס: מנהל-הצי בלבד, חומר מאומת בלבד — סולם רב-ספקי כמו המשימות
   const synthesisUserMsg = buildSynthesisUserPrompt(root.prompt, workerResults)
-  const synthesisCandidates: { name: string; call: () => Promise<string> }[] = [
-    { name: 'zai-synthesis', call: () => callLlm(FLEET_SYNTHESIS_SYSTEM, synthesisUserMsg) },
+  const synthesisCandidates: ChainCandidate[] = [
+    { name: 'zai-synthesis', call: (fb) => callLlm(FLEET_SYNTHESIS_SYSTEM, withContractFeedback(synthesisUserMsg, fb)) },
   ]
   if (nvidiaConfigured()) {
     synthesisCandidates.push({
       name: 'nvidia-synthesis',
-      call: () => nvidiaChat(FLEET_SYNTHESIS_SYSTEM, synthesisUserMsg),
+      call: (fb) => nvidiaChat(FLEET_SYNTHESIS_SYSTEM, withContractFeedback(synthesisUserMsg, fb)),
     })
   }
   synthesisCandidates.push({
     name: 'zai-synthesis-compact-retry',
-    call: () => callLlm(FLEET_SYNTHESIS_COMPACT, synthesisUserMsg),
+    call: (fb) => callLlm(FLEET_SYNTHESIS_COMPACT, withContractFeedback(synthesisUserMsg, fb)),
   })
   const synthesis = await runContractChain(
     synthesisUserMsg,

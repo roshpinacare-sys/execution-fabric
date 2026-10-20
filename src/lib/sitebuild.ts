@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { db } from '@/lib/db'
-import { runContractChain, callLlm, type ErrorClass } from '@/lib/llm-chain'
+import { runContractChain, callLlm, type ChainCandidate, type ErrorClass, withContractFeedback } from '@/lib/llm-chain'
 import { nvidiaChat, nvidiaConfigured } from '@/lib/providers'
 import { buildCensus } from '@/lib/census'
 import { appendLedger } from '@/lib/ledger'
@@ -285,13 +285,13 @@ export async function runSiteBuildCycle(feedback?: SiteBuildFeedback, depth = 1)
     ? `${contextUserPrompt(ctx)}\n\n${feedbackLines.join('\n')}`
     : contextUserPrompt(ctx)
 
-  const candidates: { name: string; call: () => Promise<string> }[] = [
-    { name: 'zai-primary', call: () => callLlm(BUILD_PRIMARY, userMsg) },
+  const candidates: ChainCandidate[] = [
+    { name: 'zai-primary', call: (fb) => callLlm(BUILD_PRIMARY, withContractFeedback(userMsg, fb)) },
   ]
   if (nvidiaConfigured()) {
-    candidates.push({ name: 'nvidia-nim', call: () => nvidiaChat(BUILD_PRIMARY, userMsg) })
+    candidates.push({ name: 'nvidia-nim', call: (fb) => nvidiaChat(BUILD_PRIMARY, withContractFeedback(userMsg, fb)) })
   }
-  candidates.push({ name: 'zai-compact-retry', call: () => callLlm(BUILD_COMPACT, userMsg) })
+  candidates.push({ name: 'zai-compact-retry', call: (fb) => callLlm(BUILD_COMPACT, withContractFeedback(userMsg, fb)) })
 
   const result = await runContractChain(userMsg, candidates, siteBuildSchema)
   if (!result.ok) {

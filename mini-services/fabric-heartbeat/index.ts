@@ -227,6 +227,9 @@ interface State {
   dispatchHarvested: number
   lastDispatchAt: string | null
   lastDispatchResult: string | null
+  starvedTicks: number // Task 103: ספירת-טיקי-רעב (תור-ריק)
+  starveSupplies: number // Task 103: כמה-פעמים-האספקה-המונעת-רעב-ירתה
+  lastStarveSupplyAt: string | null
   treasuryPulses: number
   treasuryOk: boolean | null
   treasuryAuth: boolean | null
@@ -339,6 +342,9 @@ const state: State = {
   dispatchHarvested: 0,
   lastDispatchAt: null,
   lastDispatchResult: null,
+  starvedTicks: 0,
+  starveSupplies: 0,
+  lastStarveSupplyAt: null,
   treasuryPulses: 0,
   treasuryOk: null,
   treasuryAuth: null,
@@ -377,6 +383,11 @@ async function tick(): Promise<void> {
       const done = typeof d.executed === 'number' ? d.executed : d.executed ? 1 : 0
       state.executed += done
       log(`tick: נקלטו ${d.picked} (lanes) → בוצעו ${done} (סה"כ בוצעו: ${state.executed})`)
+    } else {
+      // Task 103 — אספקה-מונעת-רעב: תור-ריק אינו-עוד-מנוחה-עד-הפעימה-המתוכננת-בעוד-עד-15 דק'.
+      // רעב-מזוהה-חי (picked=0) → ירי-עורקי-אספקה-מיידי-עם-צינון-5דק' (מנע-סערה-על-עורקים-עם-צינון-עצמי).
+      state.starvedTicks++
+      void maybeStarveSupply()
     }
   } catch (e) {
     state.lastTickError = e instanceof Error ? e.message : String(e)
@@ -927,6 +938,22 @@ async function buildPulse(): Promise<void> {
 // משימות-FAILED-ממחלקות-חולפות (rate-limit/provider/timeout/network) אינן-פסול-עבודה —
 // הן-כוונה-תקפה. ה-route כופה-את-החוק (מחלקות-חולפות-בלבד, attempts≤5, צינון-30דק',
 // תקרה-8, claim-אטומי) וחותם-REPAIR כשפעל; הלב רק-יורה-את-הקצב.
+// ===== עורקי-האספקה (recovery/dispatch) — המשאבות =====
+
+// Task 103 — אספקה-מונעת-רעב: טיק-עם-picked=0 מראה-תור-ריק; אם-חלף-צינון-5דק'
+// מאז-האספקה-האחרונה-על-רעב — יורים-מיידית את-שני-העורקים (Promise.allSettled —
+// כשל-אחד-לא-מפיל-את-השני). עורקים-עם-צינון-עצמי (recovery-30דק'/dispatch-24שע'-להצעה)
+// שומרים-על-ההגנות-שלהם — הצינון-כאן-מונע-הצפה-בלבד.
+const STARVE_SUPPLY_COOLDOWN_MS = 5 * 60_000
+async function maybeStarveSupply(): Promise<void> {
+  const last = state.lastStarveSupplyAt ? new Date(state.lastStarveSupplyAt).getTime() : 0
+  if (Date.now() - last < STARVE_SUPPLY_COOLDOWN_MS) return
+  state.lastStarveSupplyAt = new Date().toISOString()
+  state.starveSupplies++
+  log(`רעב-תור (picked=0) — אספקה-מונעת-רעב יורה מיידית (סה"כ: ${state.starveSupplies})`)
+  await Promise.allSettled([recoveryPulse(), dispatchPulse()])
+}
+
 async function recoveryPulse(): Promise<void> {
   state.recoveryPulses++
   state.lastRecoveryAt = new Date().toISOString()

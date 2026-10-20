@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
     },
   })
 
-  const children = []
+  const children: Awaited<ReturnType<typeof db.task.create>>[] = []
   for (const lens of lenses) {
     children.push(
       await db.task.create({

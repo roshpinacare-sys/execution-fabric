@@ -67,6 +67,7 @@ export type ChainResult =
       attempts: number
       durationMs: number
       outputHash: string
+      repaired?: boolean // Task 103: הפלט-נרפא-מקטיעה (נחתם-בכנות)
       trail?: ChainTrailStep[]
     }
   | {
@@ -86,6 +87,7 @@ export interface ChainTrailStep {
   ok: boolean
   errorClass?: ErrorClass
   error?: string
+  repaired?: boolean // Task 103: הפלט-של-המועמד-הזה נרפא-מקטיעה
 }
 
 // משפחות-ספק: מועמדים-מאותו-משפחה חולקים-מכסה — rate-limit-על-אחד ממית-את-כולם.
@@ -161,18 +163,73 @@ export async function callLlm(system: string, user: string): Promise<string> {
   return content
 }
 
-// חילוץ JSON: מסיר גדרות-markdown, לוקח מה-{ הראשון עד ה-} האחרון
-export function extractJson(text: string): unknown {
+// חילוץ JSON: מסיר גדרות-markdown, לוקח מה-{ הראשון עד ה-} האחרון.
+// Task 103 — רפואת-קטיעה: תשובה-שנחתכה באמצע-JSON (מגבלת-max_tokens אצל-ספק — נמדד:
+// "Unterminated string in JSON at position ~14K" על-4096-טוקנים) אינה-עוד-מוות-ודאי:
+// סוגרים-בכנות את-מה-שנותר-פתוח (מחרוזת/מערך/אובייקט) והחוזה-מאמת-אחר-כך —
+// תיקון-שלא-עובר-חוזה = כשל-כן-רגיל; הדגל repaired נחתם-בשרשרת (אפס-הסתרה).
+export function extractJsonMeta(text: string): { data: unknown; repaired: boolean } {
   let t = text.trim()
   if (t.startsWith('```')) {
     t = t.replace(/^```[a-zA-Z0-9_-]*\s*/, '').replace(/```\s*$/, '')
   }
   const start = t.indexOf('{')
-  const end = t.lastIndexOf('}')
-  if (start === -1 || end <= start) {
+  if (start === -1) {
     throw new Error('no-json-object: no JSON object found in output')
   }
-  return JSON.parse(t.slice(start, end + 1))
+  const body = t.slice(start)
+  const end = body.lastIndexOf('}')
+  if (end > 0) {
+    try {
+      return { data: JSON.parse(body.slice(0, end + 1)), repaired: false }
+    } catch {
+      /* נחתך-בתוך-אובייקט-מקונן — עוברים-לתיקון */
+    }
+  }
+  const repairedStr = repairTruncatedJson(body)
+  if (repairedStr === null) {
+    throw new Error('no-json-object: no JSON object found in output (unrepairable truncation)')
+  }
+  return { data: JSON.parse(repairedStr), repaired: true } // יזרוק-כן אם-עדיין-שבור
+}
+
+// סגירת-קצה-כנה: הליכה-על-התווים עם-מעקב-מחרוזת (כולל-בריחות) ומחסנית-סוגריים;
+// סוגרים-את-הפתוחים-בסדר-הפוך. מחזיר-null-אם-התוצאה-לא-JSON-תקף (כשל-כן).
+function repairTruncatedJson(body: string): string | null {
+  const stack: string[] = []
+  let inString = false
+  let escaped = false
+  for (const ch of body) {
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') inString = true
+    else if (ch === '{' || ch === '[') stack.push(ch)
+    else if (ch === '}' || ch === ']') stack.pop()
+  }
+  let s = body
+  if (inString) {
+    // בריח-תלוי-בקצה ("...\) — מורידים-אותו-כדי-שהסגירה-לא-תברח
+    if (escaped) s = s.slice(0, -1)
+    s += '"'
+  }
+  s = s.replace(/[\s,]+$/, '') // פסיק/רווח-תלוי-לפני-סגירה
+  while (stack.length) {
+    s += stack.pop() === '{' ? '}' : ']'
+  }
+  try {
+    JSON.parse(s)
+    return s
+  } catch {
+    return null
+  }
+}
+
+export function extractJson(text: string): unknown {
+  return extractJsonMeta(text).data
 }
 
 function validateWith(
@@ -196,14 +253,14 @@ const CONTRACTS: Record<TaskKind, { schema: z.ZodTypeAny; primary: string; compa
     primary:
       'אתה מהנדס-תוכנה בכיר ברשת-ביצוע. הפלט שלך חייב להיות אובייקט JSON תקף בלבד — בלי markdown, בלי טקסט-עוטף. הסכימה המדויקת: {"language":"<שם-השפה>","code":"<קוד מלא ועובד>","explanation":"<הסבר הנדסי קצר>"}. אין המצאות: אם המשימה לא ברורה מספיק, החזר JSON תקין שבו explanation מציין במדויק מה חסר.',
     compact:
-      'ענה ב-JSON תקף בלבד, ללא טקסט אחר: {"language":string,"code":string,"explanation":string}. הקוד חייב להיות מלא ורץ.',
+      'ענה ב-JSON תקף בלבד, ללא טקסט אחר: {"language":string-עד-40-תווים,"code":string-מלא-ורץ,"explanation":string-עד-4000-תווים}. הקוד חייב להיות מלא ורץ.',
   },
   AUDIT: {
     schema: auditOutputSchema,
     primary:
-      'אתה בודק-קוד/אבטחה בכיר ברשת-ביצוע. הפלט שלך חייב להיות אובייקט JSON תקף בלבד — בלי markdown, בלי טקסט-עוטף. הסכימה המדויקת: {"verdict":"<מסקנה כוללת קצרה>","findings":[{"severity":"HIGH"|"MEDIUM"|"LOW","title":"<כותרת>","detail":"<הסבר>"}]}. אין המצאות: ממצא בלי בסיס בקלט — לא נכתב.',
+      'אתה בודק-קוד/אבטחה בכיר ברשת-ביצוע. הפלט שלך חייב להיות אובייקט JSON תקף בלבד — בלי markdown, בלי טקסט-עוטף. הסכימה המדויקת והמגבלות-מחייבות: {"verdict":"<מסקנה-כוללת-קצרה, עד 300 תווים בדיוק>","findings":[{"severity":"HIGH"|"MEDIUM"|"LOW","title":"<עד 200 תווים>","detail":"<עד 2000 תווים>"}]} עד 20 ממצאים. אין המצאות: ממצא בלי בסיס בקלט — לא נכתב. תו-מעבר-ל-300-ב-verdict = פסילה-ודאית.',
     compact:
-      'ענה ב-JSON תקף בלבד, ללא טקסט אחר: {"verdict":string,"findings":[{"severity":"HIGH"|"MEDIUM"|"LOW","title":string,"detail":string}]}. ממצאים מבוססים-קלט בלבד.',
+      'ענה ב-JSON תקף בלבד, ללא טקסט אחר: {"verdict":string-עד-300-תווים,"findings":[{"severity":"HIGH"|"MEDIUM"|"LOW","title":string-עד-200,"detail":string-עד-2000}]}. ממצאים מבוססי-קלט בלבד, 1-20 ממצאים.',
   },
   PLAN: {
     schema: planOutputSchema,
@@ -216,10 +273,20 @@ const CONTRACTS: Record<TaskKind, { schema: z.ZodTypeAny; primary: string; compa
 
 // הסולם הגנרי: candidates קריאים בטור, חוזה-zod אחד, honest exhaustion.
 // runTaskChain הוא עטיפה דקה מעליו; סינתזת-הצי משתמשת בו ישירות.
+// Task 103 — המועמד-מקבל-אזהרת-חוזה: כשמועמד-נפסל-על-'invalid', המועמד-הבא-בסולם
+// מקבל-את-הפסילה-המדויקת (דפוס-Task-96-מורם-לגנרי). החתימה-תואמת-אחורה: `() =>`
+// עדיין-מתקמפל — אתרים-שלא-מנוצלים-שומרים-על-התנהגותם.
 export interface ChainCandidate {
   name: string
-  call: () => Promise<string>
+  call: (invalidFeedback: string | null) => Promise<string>
   family?: RailFamily
+}
+
+// עוזר-משותף: תוספת-אזהרת-חוזה-להודעת-המשתמש (מנוצל-בכל-אתרי-הסולם)
+export function withContractFeedback(userMsg: string, fb: string | null): string {
+  return fb
+    ? `${userMsg}\n\n⚠️ אזהרת-חוזה-חיה: הניסיון-הקודם-בסולם-נפסל: ${fb}\nהחזר-JSON-תקף-העומד-במלוא-החוזה-והמגבלות.`
+    : userMsg
 }
 
 export async function runContractChain(
@@ -231,6 +298,7 @@ export async function runContractChain(
   const seenOutputs: string[] = []
   let lastError = 'unknown'
   let lastErrorClass: ErrorClass = 'unknown'
+  let invalidFeedback: string | null = null // Task 103: פסילת-המועמד-האחרון-להעברה-לבא-בתור
   let attempt = 0
   const trail: ChainTrailStep[] = []
 
@@ -248,18 +316,18 @@ export async function runContractChain(
     }
     attempt++
     try {
-      const raw = await c.call()
+      const raw = await c.call(invalidFeedback)
       if (seenOutputs.includes(raw.trim())) {
         throw new Error(
           'duplicate: identical to an earlier candidate output in this chain'
         )
       }
-      const parsed = extractJson(raw)
-      const validated = validateWith(schema, parsed)
+      const { data, repaired } = extractJsonMeta(raw)
+      const validated = validateWith(schema, data)
       seenOutputs.push(raw.trim())
       const outputStr = JSON.stringify(validated)
-      console.error(`saos.llm_chain.selected candidate=${c.name}`)
-      trail.push({ name: c.name, ok: true })
+      console.error(`saos.llm_chain.selected candidate=${c.name}${repaired ? ' repaired=true' : ''}`)
+      trail.push({ name: c.name, ok: true, ...(repaired ? { repaired: true } : {}) })
       return {
         ok: true,
         worker: c.name,
@@ -267,12 +335,15 @@ export async function runContractChain(
         attempts: attempt,
         durationMs: Date.now() - t0,
         outputHash: sha256Short(outputStr),
+        ...(repaired ? { repaired: true } : {}),
         trail,
       }
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e)
       lastErrorClass = classify(e)
       trail.push({ name: c.name, ok: false, errorClass: lastErrorClass, error: lastError.slice(0, 300) })
+      // Task 103: פסילת-חוזה → המועמד-הבא-יורש-את-הפסילה-המדויקת (סולם-פידבק-גנרי)
+      invalidFeedback = lastErrorClass === 'invalid' ? lastError.slice(0, 240) : null
       // המצערה-המשפחתית: rate-limit על-משפחה = כל-אחיה-מתים-ל-10 דק׳ — כולל-הבאים-בתור.
       if (lastErrorClass === 'rate-limit' && c.family) markThrottled(c.family)
       console.error(
@@ -311,20 +382,21 @@ export async function runTaskChain(
   // כל מועמד מקבל את אותו חוזה-מערכת (או עדשה) — הספק משתנה, החוזה קבוע.
   // מחזור-הרפואה-החיה: משפחות-מוצהרות (מצערה-משפחתית) + סידור-מודע-מצערה —
   // משפחה-חיה-ראשונה; מוצערת-אחרונה (ואם-היא-עוד-מוצערת-בריצה — מדולגת-בכנות).
+  // Task 103: כל-מועמד-מקבל-אזהרת-החוזה-שפסלה-את-קודמו (סולם-פידבק-גנרי).
   const base: ChainCandidate[] = [
-    { name: 'zai-primary', family: 'zai', call: () => callLlm(primarySystem, userMsg) },
+    { name: 'zai-primary', family: 'zai', call: (fb) => callLlm(primarySystem, withContractFeedback(userMsg, fb)) },
   ]
   if (nvidiaConfigured()) {
     base.push({
       name: 'nvidia-nim',
       family: 'nvidia',
-      call: () => nvidiaChat(primarySystem, userMsg),
+      call: (fb) => nvidiaChat(primarySystem, withContractFeedback(userMsg, fb)),
     })
   }
   base.push({
     name: 'zai-compact-retry',
     family: 'zai',
-    call: () => callLlm(contract.compact, userMsg),
+    call: (fb) => callLlm(contract.compact, withContractFeedback(userMsg, fb)),
   })
   const candidates = [...base.filter((c) => !c.family || !familyThrottled(c.family)), ...base.filter((c) => c.family && familyThrottled(c.family))]
   return runContractChain(userMsg, candidates, contract.schema)
@@ -342,7 +414,7 @@ export async function runDrill(): Promise<{
 }> {
   const t0 = Date.now()
   let attempts = 0
-  let last: { ok: false; ms: number; attempts: number; errorClass?: ErrorClass; error?: string } | undefined
+  let last: { ok: boolean; ms: number; attempts: number; errorClass?: ErrorClass; error?: string } | undefined
   // Task 99: עד-2-ניסיונות — חוזר-בכנות רק-על-מחלקות-חולפות (rate-limit/timeout/network)
   while (attempts < 2) {
     attempts++

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { db } from '@/lib/db'
-import { runContractChain, classify, callLlm, TASK_KINDS, type TaskKind, type ChainCandidate, familyThrottled } from '@/lib/llm-chain'
+import { runContractChain, classify, callLlm, TASK_KINDS, type TaskKind, type ChainCandidate, familyThrottled , withContractFeedback }from '@/lib/llm-chain'
 import { nvidiaChat, nvidiaConfigured } from '@/lib/providers'
 import { KNOWN_REPOS, verifyRepo, ghErrorClass, ghErrorMessage } from '@/lib/github'
 
@@ -191,12 +191,12 @@ export async function proposeAndQueueEvolutionTask(
     : `${contextUserPrompt(ctx)}${avoidBlock}${invalidBlock}`
 
   const base: ChainCandidate[] = [
-    { name: 'zai-primary', family: 'zai', call: () => callLlm(EVOLUTION_PRIMARY, userMsg) },
+    { name: 'zai-primary', family: 'zai', call: (fb) => callLlm(EVOLUTION_PRIMARY, withContractFeedback(userMsg, fb)) },
   ]
   if (nvidiaConfigured()) {
-    base.push({ name: 'nvidia-nim', family: 'nvidia', call: () => nvidiaChat(EVOLUTION_PRIMARY, userMsg) })
+    base.push({ name: 'nvidia-nim', family: 'nvidia', call: (fb) => nvidiaChat(EVOLUTION_PRIMARY, withContractFeedback(userMsg, fb)) })
   }
-  base.push({ name: 'zai-compact-retry', family: 'zai', call: () => callLlm(EVOLUTION_COMPACT, userMsg) })
+  base.push({ name: 'zai-compact-retry', family: 'zai', call: (fb) => callLlm(EVOLUTION_COMPACT, withContractFeedback(userMsg, fb)) })
   const candidates = [...base.filter((c) => !c.family || !familyThrottled(c.family)), ...base.filter((c) => c.family && familyThrottled(c.family))]
 
   const result = await runContractChain(userMsg, candidates, evolutionProposalSchema)
