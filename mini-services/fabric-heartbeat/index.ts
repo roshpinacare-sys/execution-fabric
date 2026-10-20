@@ -59,12 +59,13 @@ const MAGNITUDE_PULSE_MS = 30 * 60_000 // Task 93: עורק-יח — מד-העו
 const MAGNITUDE_PULSE_FIRST_MS = 3 * 60_000
 const SELFTEST_PULSE_FIRST_MS = 3 * 60_000
 // Task 97: עורק-הזדמנות-שנייה — משימות-FAILED-ממחלקות-חולפות (rate-limit/provider/...)
-// חוזרות-לתור כל-30דק' (ה-route-עצמו כופה-צינון-30דק' ותקרה-8; כאן-הקצב-התואם-בלבד).
-const RECOVERY_PULSE_MS = 30 * 60_000
+// חוזרות-לתור כל-15דק' (Task 98: קצב-מוגבר — ה-route כופה-צינון-30דק' ותקרה-8; כאן-הקצב-התואם-בלבד).
+const RECOVERY_PULSE_MS = 15 * 60_000
 const RECOVERY_PULSE_FIRST_MS = 5 * 60_000
 // Task 97: עורק-ההשלמה — גשר-סגירת-הלולאה של קיר-הצמיחה: הצעות-PROPOSED הופכות
 // למשימות-CODE-אמיתיות (זריעה) ומשימות-יישום-שהושלמו מכתירות-הצעה-APPLIED (קציר).
-const DISPATCH_PULSE_MS = 30 * 60_000
+// Task 98: 15דק' × זריעה-כפולה — איטרציית-מועמדים במקום-רעב-צינון.
+const DISPATCH_PULSE_MS = 15 * 60_000
 const DISPATCH_PULSE_FIRST_MS = 7 * 60_000
 const RESTORE_PULSE_MS = 6 * 60 * 60_000 // Task 70: עורק-ח — הוכחה-קבועה שהכפילות-הרחוקה מחזירה-מערכת-שלמה
 const RESTORE_PULSE_FIRST_MS = 150_000
@@ -348,8 +349,8 @@ async function tick(): Promise<void> {
   lastTickAttemptMs = Date.now()
   try {
     // timeout חוזי: ירי-אמת יכול לקחת דקות; אבל לעולם לא תלייה-אינסופית (לקח-10:34)
-    // Task 97: lanes=2 — תור-נגוס (סוואף-התאוששות) מתרוקן-במקביל; ה-claim-האטומי מוכח.
-    const res = await fetch(`${APP_URL}/api/worker/tick?lanes=2`, {
+    // Task 97+98: lanes=3 — תקרת-התור-הנגוס מנוצלת-מלאה; ה-claim-האטומי מוכח.
+    const res = await fetch(`${APP_URL}/api/worker/tick?lanes=3`, {
       method: 'POST',
       signal: AbortSignal.timeout(180_000),
     })
@@ -954,14 +955,15 @@ async function dispatchPulse(): Promise<void> {
     })
     const d = (await res.json().catch(() => ({}))) as {
       harvested?: number
-      dispatched?: { taskId?: string; proposalId?: number } | null
+      dispatched?: Array<{ taskId?: string; proposalId?: number }> | null
       reason?: string
     }
     if (res.status === 200 && typeof d.harvested === 'number') {
       state.dispatchHarvested += d.harvested
-      if (d.dispatched?.taskId) {
-        state.dispatchSown++
-        state.lastDispatchResult = `זרעה: הצעה-#${d.dispatched.proposalId} → משימת-יישום (taskId=${d.dispatched.taskId}) · נקצרו-עד-כה: ${state.dispatchHarvested}`
+      const sown = (d.dispatched ?? []).filter((x) => x.taskId)
+      if (sown.length > 0) {
+        state.dispatchSown += sown.length
+        state.lastDispatchResult = `זרעה: ${sown.map((x) => `הצעה-#${x.proposalId}→${x.taskId}`).join(', ')} · נקצרו-עד-כה: ${state.dispatchHarvested}`
         log(`עורק-ההשלמה: ${state.lastDispatchResult}`)
       } else if (d.harvested > 0) {
         state.lastDispatchResult = `קציר: ${d.harvested} הצעות-הוכתרו-APPLIED (סה"כ: ${state.dispatchHarvested})`
@@ -1523,7 +1525,7 @@ setInterval(() => {
 }, 60_000)
 
 log(
-  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s (lanes=2), פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', עורק-הזדמנות-שנייה כל ${RECOVERY_PULSE_MS / 60_000} דק', עורק-ההשלמה כל ${DISPATCH_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', פעימת-אמת-עצמית כל ${SELFTEST_PULSE_MS / 60_000} דק', תרגיל-תמונה כל ${SNAPSHOT_RESTORE_PULSE_MS / 60_000} דק', סנכרון-ייצוא כל ${EXPORT_SYNC_PULSE_MS / 60_000} דק', תרגיל-ייצוא כל ${EXPORT_RESTORE_PULSE_MS / 60_000} דק', תרגיל-מראה-מקומית כל ${MIRROR_RESTORE_PULSE_MS / 60_000} דק', אטימות-היסטוריה כל ${HISTORY_PULSE_MS / 60_000} דק', אטימות-מסמכים כל ${DOCS_PULSE_MS / 60_000} דק', היסטוריית-מסמכים כל ${DOCS_HISTORY_PULSE_MS / 60_000} דק', דופק על :${PORT}`
+  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s (lanes=3), פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', עורק-הזדמנות-שנייה כל ${RECOVERY_PULSE_MS / 60_000} דק', עורק-ההשלמה כל ${DISPATCH_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', פעימת-אמת-עצמית כל ${SELFTEST_PULSE_MS / 60_000} דק', תרגיל-תמונה כל ${SNAPSHOT_RESTORE_PULSE_MS / 60_000} דק', סנכרון-ייצוא כל ${EXPORT_SYNC_PULSE_MS / 60_000} דק', תרגיל-ייצוא כל ${EXPORT_RESTORE_PULSE_MS / 60_000} דק', תרגיל-מראה-מקומית כל ${MIRROR_RESTORE_PULSE_MS / 60_000} דק', אטימות-היסטוריה כל ${HISTORY_PULSE_MS / 60_000} דק', אטימות-מסמכים כל ${DOCS_PULSE_MS / 60_000} דק', היסטוריית-מסמכים כל ${DOCS_HISTORY_PULSE_MS / 60_000} דק', דופק על :${PORT}`
 )
 
 setInterval(() => void tick(), TICK_MS)

@@ -1,0 +1,12 @@
+import { PrismaClient } from '@prisma/client'
+const db = new PrismaClient()
+const total = async (w) => await db.task.count({ where: w })
+console.log('QUEUED:', await total({ status: 'QUEUED' }))
+console.log('RUNNING:', await total({ status: 'RUNNING' }))
+console.log('FAILED total:', await total({ status: 'FAILED' }))
+const recovered = await db.task.findMany({ where: { attempts: { gt: 1 }, status: { in: ['QUEUED','RUNNING','DONE'] } }, orderBy: { updatedAt: 'desc' }, take: 5, select: { id: true, status: true, attempts: true, kind: true, title: true, updatedAt: true } })
+console.log('--- בכיוון-החיים (attempts>1, לא-FAILED):')
+recovered.forEach(t => console.log(` #${t.id} [${t.status}] attempts=${t.attempts} kind=${t.kind} ${t.title.slice(0,50)}`))
+const recentDone = await db.task.count({ where: { status: 'DONE', updatedAt: { gte: new Date(Date.now() - 60*60_000) } } })
+console.log('DONE בשעה-האחרונה:', recentDone)
+await db.$disconnect()

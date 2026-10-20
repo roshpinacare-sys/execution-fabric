@@ -8,14 +8,17 @@ import { appendLedger, sha256Short } from '@/lib/ledger'
 //          הסולם, הוולידציה וה-handoff-האוטומטי הקיימים עושים-את-השאר (אפס-קיצורי-דרך).
 //   קציר: משימת-יישום ש-DONE וההצעה עדיין-PROPOSED → PROPOSED→APPLIED (אטומי)
 //          + חתימת SITEBUILD worker=proposal-completion (הדפוס של apply).
-// כנות-וגבולות:
-//   · זריעה: הצעה-אחת לסוואף · צינון-24שע' מהניסיון-הקודם לאותה-הצעה · אין-זריעה-על-משימה-בעלת-חיים
+// כנות-וגבולות (Task 98 — תיקון-רעב): הסוואף מאיטרט-על-מועמדות-במקום-להיבלם-על-הצעה-אחת —
+//   צינון/in-flight-על-הצעה-מסוימת מדלג-עליה-וממשיך-לבאה (עד-10-מועמדות) — עד-2-זריעות-לסוואף.
+//   · צינון-24שע' מהניסיון-הקודם לאותה-הצעה · אין-זריעה-על-משימה-בעלת-חיים · אפס-כפילות
 //   · אין-הצעות = 404 כן (nothing-to-complete) — לא מומצאת-עבודה
 
 export const dynamic = 'force-dynamic'
 
 const DISPATCH_PREFIX = 'יישום-הצעה #'
 const COOLDOWN_MS = 24 * 60 * 60_000
+const SOW_PER_SWEEP = 2
+const CANDIDATE_SCAN = 10
 
 function taskTitleFor(proposalId: number, title: string): string {
   return `${DISPATCH_PREFIX}${proposalId}: ${title}`.slice(0, 180)
@@ -75,56 +78,65 @@ export async function POST() {
     }
   }
 
-  // ===== זריעה: ההצעה-הוותיקה-ביותר-שממתינה → משימת-יישום-אמיתית =====
-  const oldest = await db.improvement.findFirst({
+  // ===== זריעה: איטרציית-מועמדים — עד-2-הצעות-הופכות-לעבודה-אמיתית-בכל-סוואף =====
+  const candidates = await db.improvement.findMany({
     where: { status: 'PROPOSED' },
     orderBy: { id: 'asc' },
+    take: CANDIDATE_SCAN,
+    select: { id: true, title: true, summary: true, body: true },
   })
-  if (!oldest) {
+  if (candidates.length === 0) {
     return NextResponse.json({
       ok: true,
       harvested,
-      dispatched: null,
+      dispatched: [],
       reason: 'nothing-to-complete: אין-הצעות-PROPOSED-ממתינות — כנות, לא המצאת-עבודה',
     })
   }
 
-  const prefixForOldest = `${DISPATCH_PREFIX}${oldest.id}:`
-  const prior = await db.task.findFirst({
-    where: { title: { startsWith: prefixForOldest } },
-    orderBy: { createdAt: 'desc' },
-    select: { id: true, status: true, createdAt: true },
-  })
-  if (prior && (prior.status === 'QUEUED' || prior.status === 'RUNNING')) {
-    return NextResponse.json({
-      ok: true,
-      harvested,
-      dispatched: null,
-      reason: `in-flight: להצעה #${oldest.id} יש-משימת-יישום-חיה (${prior.status}) — אפס-כפילות`,
+  const dispatched: Array<{ taskId: string; proposalId: number; title: string }> = []
+  const skipped: string[] = []
+  for (const cand of candidates) {
+    if (dispatched.length >= SOW_PER_SWEEP) break
+    const prefix = `${DISPATCH_PREFIX}${cand.id}:`
+    const prior = await db.task.findFirst({
+      where: { title: { startsWith: prefix } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, status: true, createdAt: true },
     })
-  }
-  if (prior && Date.now() - prior.createdAt.getTime() < COOLDOWN_MS) {
-    return NextResponse.json({
-      ok: true,
-      harvested,
-      dispatched: null,
-      reason: `cooldown: להצעה #${oldest.id} היה-ניסיון-יישום-ב-24שע' האחרונות (${prior.status}) — ממתין-בכנות`,
+    if (prior && (prior.status === 'QUEUED' || prior.status === 'RUNNING')) {
+      skipped.push(`#${cand.id}:in-flight(${prior.status})`)
+      continue
+    }
+    if (prior && Date.now() - prior.createdAt.getTime() < COOLDOWN_MS) {
+      skipped.push(`#${cand.id}:cooldown(${prior.status})`)
+      continue
+    }
+    const task = await db.task.create({
+      data: {
+        title: taskTitleFor(cand.id, cand.title),
+        kind: 'CODE',
+        prompt: buildPrompt(cand.title, cand.summary, cand.body),
+      },
     })
+    dispatched.push({ taskId: task.id, proposalId: cand.id, title: task.title })
   }
 
-  const task = await db.task.create({
-    data: {
-      title: taskTitleFor(oldest.id, oldest.title),
-      kind: 'CODE',
-      prompt: buildPrompt(oldest.title, oldest.summary, oldest.body),
-    },
-  })
+  if (dispatched.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      harvested,
+      dispatched: [],
+      reason: `all-blocked: כל-${candidates.length}-המועמדות-חסומות-בכנות (${skipped.slice(0, 4).join(' · ')})`,
+    })
+  }
 
   return NextResponse.json({
     ok: true,
     harvested,
-    dispatched: { taskId: task.id, proposalId: oldest.id, title: task.title },
-    note: 'ההצעה-הפכה-לעבודה-אמיתית-בתור — ה-executor והסולם-הקיימים יבצעו-ויחתמו',
+    dispatched,
+    skipped: skipped.slice(0, 6),
+    note: 'ההצעות-הפכו-לעבודה-אמיתית-בתור — ה-executor והסולם-הקיימים יבצעו-ויחתמו',
   })
 }
 
@@ -139,6 +151,6 @@ export async function GET() {
     proposedPending: proposed,
     dispatchTasksInFlight: inFlight,
     dispatchTasksDone: doneDispatches,
-    policy: { cooldownHours: COOLDOWN_MS / 3_600_000, sowPerSweep: 1, harvestPerSweep: 20 },
+    policy: { cooldownHours: COOLDOWN_MS / 3_600_000, sowPerSweep: SOW_PER_SWEEP, candidateScan: CANDIDATE_SCAN, harvestPerSweep: 20 },
   })
 }
