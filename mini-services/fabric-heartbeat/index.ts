@@ -215,6 +215,15 @@ interface State {
   docsHistoryOk: boolean | null
   lastDocsHistoryAt: string | null
   lastDocsHistoryResult: string | null
+  recoveryPulses: number
+  recoveredTasks: number
+  lastRecoveryAt: string | null
+  lastRecoveryResult: string | null
+  dispatchPulses: number
+  dispatchSown: number
+  dispatchHarvested: number
+  lastDispatchAt: string | null
+  lastDispatchResult: string | null
 }
 
 const state: State = {
@@ -313,6 +322,15 @@ const state: State = {
   docsHistoryOk: null,
   lastDocsHistoryAt: null,
   lastDocsHistoryResult: null,
+  recoveryPulses: 0,
+  recoveredTasks: 0,
+  lastRecoveryAt: null,
+  lastRecoveryResult: null,
+  dispatchPulses: 0,
+  dispatchSown: 0,
+  dispatchHarvested: 0,
+  lastDispatchAt: null,
+  lastDispatchResult: null,
 }
 
 let lastTickAttemptMs = Date.now()
@@ -330,7 +348,8 @@ async function tick(): Promise<void> {
   lastTickAttemptMs = Date.now()
   try {
     // timeout חוזי: ירי-אמת יכול לקחת דקות; אבל לעולם לא תלייה-אינסופית (לקח-10:34)
-    const res = await fetch(`${APP_URL}/api/worker/tick`, {
+    // Task 97: lanes=2 — תור-נגוס (סוואף-התאוששות) מתרוקן-במקביל; ה-claim-האטומי מוכח.
+    const res = await fetch(`${APP_URL}/api/worker/tick?lanes=2`, {
       method: 'POST',
       signal: AbortSignal.timeout(180_000),
     })
@@ -338,13 +357,13 @@ async function tick(): Promise<void> {
       state.lastTickError = `HTTP ${res.status}`
       return
     }
-    const d = (await res.json()) as { picked?: number; executed?: boolean; status?: string }
+    const d = (await res.json()) as { picked?: number; executed?: boolean | number; status?: string }
     state.lastTickError = null
     if (d.picked) {
       state.picked++
-      log(`tick: משימה נקלטה → מבצע... (סה"כ נקלטו ${state.picked})`)
-      if (d.executed) state.executed++
-      log(`tick: הסתיים status=${d.status ?? '?'} (בוצעו בהצלחה: ${state.executed})`)
+      const done = typeof d.executed === 'number' ? d.executed : d.executed ? 1 : 0
+      state.executed += done
+      log(`tick: נקלטו ${d.picked} (lanes) → בוצעו ${done} (סה"כ בוצעו: ${state.executed})`)
     }
   } catch (e) {
     state.lastTickError = e instanceof Error ? e.message : String(e)
@@ -888,6 +907,75 @@ async function buildPulse(): Promise<void> {
   } catch (e) {
     state.lastBuildResult = e instanceof Error ? e.message : String(e)
     log(`פעימת-בנייה: כשל-רשת — ${state.lastBuildResult}`)
+  }
+}
+
+// ===== עורק-הזדמנות-שנייה (Task 97) — כוונת-עבודה שאבדה-למזל-ספק חוזרת-לחיים =====
+// משימות-FAILED-ממחלקות-חולפות (rate-limit/provider/timeout/network) אינן-פסול-עבודה —
+// הן-כוונה-תקפה. ה-route כופה-את-החוק (מחלקות-חולפות-בלבד, attempts≤5, צינון-30דק',
+// תקרה-8, claim-אטומי) וחותם-REPAIR כשפעל; הלב רק-יורה-את-הקצב.
+async function recoveryPulse(): Promise<void> {
+  state.recoveryPulses++
+  state.lastRecoveryAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/sovereign/recovery`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(30_000),
+    })
+    const d = (await res.json().catch(() => ({}))) as { requeued?: number; reason?: string }
+    if (res.status === 200 && typeof d.requeued === 'number') {
+      state.recoveredTasks += d.requeued
+      state.lastRecoveryResult =
+        d.requeued > 0
+          ? `requeued: ${d.requeued} (סה"כ הוחזרו-לחיים: ${state.recoveredTasks})`
+          : `skipped: ${d.reason?.slice(0, 80) ?? 'none'}`
+      if (d.requeued > 0) log(`עורק-הזדמנות-שנייה: ${state.lastRecoveryResult}`)
+    } else {
+      state.lastRecoveryResult = `failed: HTTP ${res.status}`
+      log(`עורק-הזדמנות-שנייה: כשל-כן — ${state.lastRecoveryResult}`)
+    }
+  } catch (e) {
+    state.lastRecoveryResult = e instanceof Error ? e.message : String(e)
+    log(`עורק-הזדמנות-שנייה: כשל-רשת — ${state.lastRecoveryResult}`)
+  }
+}
+
+// ===== עורק-ההשלמה (Task 97) — גשר-סגירת-הלולאה של קיר-הצמיחה =====
+// הצעות-PROPOSED אינן-קישוט — הן-תור-עבודה. זריעה: הצעה→משימת-CODE-אמיתית בתור.
+// קציר: משימת-יישום-שהושלמה מכתירה-הצעה-APPLIED (חתום). ה-route כופה-צינון-24שע'
+// ואין-זריעה-על-משימה-חיה; 404-כן כשאין-הצעות (לא-ממציא-עבודה).
+async function dispatchPulse(): Promise<void> {
+  state.dispatchPulses++
+  state.lastDispatchAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/sovereign/improvements/dispatch`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(30_000),
+    })
+    const d = (await res.json().catch(() => ({}))) as {
+      harvested?: number
+      dispatched?: { taskId?: string; proposalId?: number } | null
+      reason?: string
+    }
+    if (res.status === 200 && typeof d.harvested === 'number') {
+      state.dispatchHarvested += d.harvested
+      if (d.dispatched?.taskId) {
+        state.dispatchSown++
+        state.lastDispatchResult = `זרעה: הצעה-#${d.dispatched.proposalId} → משימת-יישום (taskId=${d.dispatched.taskId}) · נקצרו-עד-כה: ${state.dispatchHarvested}`
+        log(`עורק-ההשלמה: ${state.lastDispatchResult}`)
+      } else if (d.harvested > 0) {
+        state.lastDispatchResult = `קציר: ${d.harvested} הצעות-הוכתרו-APPLIED (סה"כ: ${state.dispatchHarvested})`
+        log(`עורק-ההשלמה: ${state.lastDispatchResult}`)
+      } else {
+        state.lastDispatchResult = `skipped: ${d.reason?.slice(0, 80) ?? 'none'}`
+      }
+    } else {
+      state.lastDispatchResult = `failed: HTTP ${res.status}`
+      log(`עורק-ההשלמה: כשל-כן — ${state.lastDispatchResult}`)
+    }
+  } catch (e) {
+    state.lastDispatchResult = e instanceof Error ? e.message : String(e)
+    log(`עורק-ההשלמה: כשל-רשת — ${state.lastDispatchResult}`)
   }
 }
 
@@ -1435,7 +1523,7 @@ setInterval(() => {
 }, 60_000)
 
 log(
-  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', פעימת-אמת-עצמית כל ${SELFTEST_PULSE_MS / 60_000} דק', תרגיל-תמונה כל ${SNAPSHOT_RESTORE_PULSE_MS / 60_000} דק', סנכרון-ייצוא כל ${EXPORT_SYNC_PULSE_MS / 60_000} דק', תרגיל-ייצוא כל ${EXPORT_RESTORE_PULSE_MS / 60_000} דק', תרגיל-מראה-מקומית כל ${MIRROR_RESTORE_PULSE_MS / 60_000} דק', אטימות-היסטוריה כל ${HISTORY_PULSE_MS / 60_000} דק', אטימות-מסמכים כל ${DOCS_PULSE_MS / 60_000} דק', היסטוריית-מסמכים כל ${DOCS_HISTORY_PULSE_MS / 60_000} דק', דופק על :${PORT}`
+  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s (lanes=2), פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', עורק-הזדמנות-שנייה כל ${RECOVERY_PULSE_MS / 60_000} דק', עורק-ההשלמה כל ${DISPATCH_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', פעימת-אמת-עצמית כל ${SELFTEST_PULSE_MS / 60_000} דק', תרגיל-תמונה כל ${SNAPSHOT_RESTORE_PULSE_MS / 60_000} דק', סנכרון-ייצוא כל ${EXPORT_SYNC_PULSE_MS / 60_000} דק', תרגיל-ייצוא כל ${EXPORT_RESTORE_PULSE_MS / 60_000} דק', תרגיל-מראה-מקומית כל ${MIRROR_RESTORE_PULSE_MS / 60_000} דק', אטימות-היסטוריה כל ${HISTORY_PULSE_MS / 60_000} דק', אטימות-מסמכים כל ${DOCS_PULSE_MS / 60_000} דק', היסטוריית-מסמכים כל ${DOCS_HISTORY_PULSE_MS / 60_000} דק', דופק על :${PORT}`
 )
 
 setInterval(() => void tick(), TICK_MS)
@@ -1445,6 +1533,10 @@ setTimeout(() => void evolutionPulse(), EVOLUTION_PULSE_FIRST_MS)
 setInterval(() => void evolutionPulse(), EVOLUTION_PULSE_MS)
 setTimeout(() => void buildPulse(), BUILD_PULSE_FIRST_MS)
 setInterval(() => void buildPulse(), BUILD_PULSE_MS)
+setTimeout(() => void recoveryPulse(), RECOVERY_PULSE_FIRST_MS) // Task 97: עורק-הזדמנות-שנייה
+setInterval(() => void recoveryPulse(), RECOVERY_PULSE_MS)
+setTimeout(() => void dispatchPulse(), DISPATCH_PULSE_FIRST_MS) // Task 97: עורק-ההשלמה
+setInterval(() => void dispatchPulse(), DISPATCH_PULSE_MS)
 setTimeout(() => void opsPulse(), OPS_PULSE_FIRST_MS)
 setInterval(() => void opsPulse(), OPS_PULSE_MS)
 setTimeout(() => void selftestPulse(), SELFTEST_PULSE_FIRST_MS)
