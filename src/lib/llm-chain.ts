@@ -67,6 +67,7 @@ export type ChainResult =
       attempts: number
       durationMs: number
       outputHash: string
+      trail?: ChainTrailStep[]
     }
   | {
       ok: false
@@ -75,7 +76,32 @@ export type ChainResult =
       errorClass: ErrorClass
       attempts: number
       durationMs: number
+      trail?: ChainTrailStep[]
     }
+
+// מחזור-הרפואה-החיה: מסלול-אמת-לסולם — הכישלון-של-כל-מועמד נשמר (לפני-כן: רק-האחרון
+// שרד — כישלון-nvidia היה-נמחק-על-ידי-rate-limit-של-zai-compact והאמת-אבדה).
+export interface ChainTrailStep {
+  name: string
+  ok: boolean
+  errorClass?: ErrorClass
+  error?: string
+}
+
+// משפחות-ספק: מועמדים-מאותו-משפחה חולקים-מכסה — rate-limit-על-אחד ממית-את-כולם.
+// זיכרון-המצערה (מודולי): מועמד-ממשפחה-מוצערת מדולג — אפס-שריפת-זמן-על-מת-וודאי.
+// (לקח-חי: zai-primary נכשל-rate-limit → zai-compact-retry הוא-אותו-חשבון — ירי-שווא-מובטח.)
+export type RailFamily = 'zai' | 'nvidia'
+const THROTTLE_MS = 10 * 60_000
+const throttleUntil = new Map<RailFamily, number>()
+
+function markThrottled(family: RailFamily): void {
+  throttleUntil.set(family, Date.now() + THROTTLE_MS)
+}
+
+export function familyThrottled(family: RailFamily): boolean {
+  return (throttleUntil.get(family) ?? 0) > Date.now()
+}
 
 export function classify(e: unknown): ErrorClass {
   const msg = e instanceof Error ? e.message : String(e)
@@ -190,9 +216,15 @@ const CONTRACTS: Record<TaskKind, { schema: z.ZodTypeAny; primary: string; compa
 
 // הסולם הגנרי: candidates קריאים בטור, חוזה-zod אחד, honest exhaustion.
 // runTaskChain הוא עטיפה דקה מעליו; סינתזת-הצי משתמשת בו ישירות.
+export interface ChainCandidate {
+  name: string
+  call: () => Promise<string>
+  family?: RailFamily
+}
+
 export async function runContractChain(
   userMsg: string,
-  candidates: { name: string; call: () => Promise<string> }[],
+  candidates: ChainCandidate[],
   schema: z.ZodTypeAny
 ): Promise<ChainResult> {
   const t0 = Date.now()
@@ -200,8 +232,14 @@ export async function runContractChain(
   let lastError = 'unknown'
   let lastErrorClass: ErrorClass = 'unknown'
   let attempt = 0
+  const trail: ChainTrailStep[] = []
 
   for (const c of candidates) {
+    // דילוג-כן: משפחה-מוצערת (בריצה-זו או-בקודמת) — מת-וודאי; הכנות-נרשמת-במסלול.
+    if (c.family && familyThrottled(c.family)) {
+      trail.push({ name: `${c.name} (skipped: family throttled)`, ok: false, errorClass: 'rate-limit' })
+      continue
+    }
     attempt++
     try {
       const raw = await c.call()
@@ -215,6 +253,7 @@ export async function runContractChain(
       seenOutputs.push(raw.trim())
       const outputStr = JSON.stringify(validated)
       console.error(`saos.llm_chain.selected candidate=${c.name}`)
+      trail.push({ name: c.name, ok: true })
       return {
         ok: true,
         worker: c.name,
@@ -222,10 +261,14 @@ export async function runContractChain(
         attempts: attempt,
         durationMs: Date.now() - t0,
         outputHash: sha256Short(outputStr),
+        trail,
       }
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e)
       lastErrorClass = classify(e)
+      trail.push({ name: c.name, ok: false, errorClass: lastErrorClass, error: lastError.slice(0, 300) })
+      // המצערה-המשפחתית: rate-limit על-משפחה = כל-אחיה-מתים-ל-10 דק׳ — כולל-הבאים-בתור.
+      if (lastErrorClass === 'rate-limit' && c.family) markThrottled(c.family)
       console.error(
         `saos.llm_chain.candidate_failed name=${c.name} class=${lastErrorClass}`
       )
@@ -240,6 +283,7 @@ export async function runContractChain(
     errorClass: lastErrorClass,
     attempts: attempt,
     durationMs: Date.now() - t0,
+    trail,
   }
 }
 
@@ -259,19 +303,24 @@ export async function runTaskChain(
     : contract.primary
   // סולם רב-ספקי באותו-תור: zai → nvidia-nim → zai-compact-retry.
   // כל מועמד מקבל את אותו חוזה-מערכת (או עדשה) — הספק משתנה, החוזה קבוע.
-  const candidates: { name: string; call: () => Promise<string> }[] = [
-    { name: 'zai-primary', call: () => callLlm(primarySystem, userMsg) },
+  // מחזור-הרפואה-החיה: משפחות-מוצהרות (מצערה-משפחתית) + סידור-מודע-מצערה —
+  // משפחה-חיה-ראשונה; מוצערת-אחרונה (ואם-היא-עוד-מוצערת-בריצה — מדולגת-בכנות).
+  const base: ChainCandidate[] = [
+    { name: 'zai-primary', family: 'zai', call: () => callLlm(primarySystem, userMsg) },
   ]
   if (nvidiaConfigured()) {
-    candidates.push({
+    base.push({
       name: 'nvidia-nim',
+      family: 'nvidia',
       call: () => nvidiaChat(primarySystem, userMsg),
     })
   }
-  candidates.push({
+  base.push({
     name: 'zai-compact-retry',
+    family: 'zai',
     call: () => callLlm(contract.compact, userMsg),
   })
+  const candidates = [...base.filter((c) => !c.family || !familyThrottled(c.family)), ...base.filter((c) => c.family && familyThrottled(c.family))]
   return runContractChain(userMsg, candidates, contract.schema)
 }
 

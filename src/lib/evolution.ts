@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { db } from '@/lib/db'
-import { runContractChain, classify, callLlm, TASK_KINDS, type TaskKind } from '@/lib/llm-chain'
+import { runContractChain, classify, callLlm, TASK_KINDS, type TaskKind, type ChainCandidate, familyThrottled } from '@/lib/llm-chain'
 import { nvidiaChat, nvidiaConfigured } from '@/lib/providers'
 import { KNOWN_REPOS, verifyRepo, ghErrorClass, ghErrorMessage } from '@/lib/github'
 
@@ -168,13 +168,14 @@ export async function proposeAndQueueEvolutionTask(): Promise<EvolutionResult> {
   const ctx = await gatherEvolutionContext()
   const userMsg = contextUserPrompt(ctx)
 
-  const candidates: { name: string; call: () => Promise<string> }[] = [
-    { name: 'zai-primary', call: () => callLlm(EVOLUTION_PRIMARY, userMsg) },
+  const base: ChainCandidate[] = [
+    { name: 'zai-primary', family: 'zai', call: () => callLlm(EVOLUTION_PRIMARY, userMsg) },
   ]
   if (nvidiaConfigured()) {
-    candidates.push({ name: 'nvidia-nim', call: () => nvidiaChat(EVOLUTION_PRIMARY, userMsg) })
+    base.push({ name: 'nvidia-nim', family: 'nvidia', call: () => nvidiaChat(EVOLUTION_PRIMARY, userMsg) })
   }
-  candidates.push({ name: 'zai-compact-retry', call: () => callLlm(EVOLUTION_COMPACT, userMsg) })
+  base.push({ name: 'zai-compact-retry', family: 'zai', call: () => callLlm(EVOLUTION_COMPACT, userMsg) })
+  const candidates = [...base.filter((c) => !c.family || !familyThrottled(c.family)), ...base.filter((c) => c.family && familyThrottled(c.family))]
 
   const result = await runContractChain(userMsg, candidates, evolutionProposalSchema)
 
@@ -366,20 +367,22 @@ export async function proposeLearningTask(finding: HighFinding): Promise<Learnin
     ctx.recentTitles.length ? ctx.recentTitles.map((t) => `- ${t}`).join('\n') : '(אין)',
   ].join('\n')
 
-  const candidates: { name: string; call: () => Promise<string> }[] = [
-    { name: 'zai-primary', call: () => callLlm(LEARNING_PRIMARY, userMsg) },
+  const base: ChainCandidate[] = [
+    { name: 'zai-primary', family: 'zai', call: () => callLlm(LEARNING_PRIMARY, userMsg) },
   ]
   if (nvidiaConfigured()) {
-    candidates.push({ name: 'nvidia-nim', call: () => nvidiaChat(LEARNING_PRIMARY, userMsg) })
+    base.push({ name: 'nvidia-nim', family: 'nvidia', call: () => nvidiaChat(LEARNING_PRIMARY, userMsg) })
   }
-  candidates.push({
+  base.push({
     name: 'zai-compact-retry',
+    family: 'zai',
     call: () =>
       callLlm(
         'ענה ב-JSON תקף בלבד, ללא טקסט אחר: {"kind":"CODE"|"AUDIT"|"PLAN","title":string,"prompt":string,"rationale":string,"repo"?:string}. הצע משימת-המשך אחת קונקרטית שמטפלת בממצא-ה-HIGH שקיבלת. חובה: התחל את ה-prompt בשורה "[ממצא: <כותרת-הממצא המדויקת>]" — מילה-במילה. אל תחזור על כותרות-קיימות.',
         userMsg
       ),
   })
+  const candidates = [...base.filter((c) => !c.family || !familyThrottled(c.family)), ...base.filter((c) => c.family && familyThrottled(c.family))]
 
   const result = await runContractChain(userMsg, candidates, evolutionProposalSchema)
   if (!result.ok) {

@@ -729,12 +729,12 @@ async function remoteGatePulse(): Promise<void> {
       state.lastRemoteGateResult = 'awaiting-credential (עוגן-הריצה-חי; בדיקת-השער-הרחוק-ממתינה)'
       return
     }
+    // לקח-זעיר-חי: פלט-git מסתיים-ב-\n — trim לפני-ניתוח, אחרת /\.git$/ לא-תופס (404-שקט)
     const repoFull = git(['config', '--get', 'remote.origin.url']).out
-      .replace(/^git@github\.com:/, '')
-      .replace(/^https:\/\/[^/]*@/, '')
-      .replace(/\.git$/, '')
       .trim()
+      .replace(/^git@github\.com:/, '')
       .replace(/^https:\/\/github\.com\//, '')
+      .replace(/\.git$/, '')
     const res = await fetch(`https://api.github.com/repos/${repoFull}/actions/runs?per_page=1`, {
       headers: { Authorization: `Bearer ${tok}`, Accept: 'application/vnd.github+json' },
       signal: AbortSignal.timeout(15_000),
