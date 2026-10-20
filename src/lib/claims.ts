@@ -187,7 +187,10 @@ async function claimBrain(h: HeartJson): Promise<{ status: ClaimStatus; evidence
 async function claimRemoteGate(h: HeartJson): Promise<{ status: ClaimStatus; evidence: string }> {
   const r = h.lastRemoteGateResult
   if (!r) return { status: 'degraded', evidence: 'טרם-נבדק מעולם' }
-  if (r === 'ok') return { status: 'active', evidence: 'הריצה-הרחוקה על-הראש-שלנו ירוקה' }
+  // ירוק-אמת (Task 91 — סגירת-שקר-ענבר): 'ok' מהלב (חוזה-החדש) או מחרוזת-הישן
+  // 'completed/success @sha (=local)' — שני-הצורות משפטות-ירוק; אין-עוד-טענה-שלא-תוכל-להיות-אקטיבית.
+  const green = r === 'ok' || (r.startsWith('completed/success') && r.includes('(=local)'))
+  if (green) return { status: 'active', evidence: 'הריצה-הרחוקה על-הראש-שלנו ירוקה' }
   return { status: 'degraded', evidence: short(r) }
 }
 

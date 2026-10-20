@@ -771,6 +771,13 @@ async function remoteGatePulse(): Promise<void> {
       state.lastRemoteGateResult = `FAILED on our head (${run.head_sha?.slice(0, 7)}) — ${run.created_at}`
       return
     }
+    // לקח-ירוק-שקר-הפוך (Task 91): עד-עכשיו הצלחה-על-הראש-שלנו נכתבה-כמחרוזת-מפורטת
+    // והצרכן-בclaims קרא-רק 'ok' — שאף-פעם-לא-נכתב → טענה-מופחתת-תמידית (שקר-ענבר-קבוע).
+    // מעתה: ירוק-על-הראש-שלנו = 'ok' (חוזה-אחד-פשוט); כל-שאר — מחרוזת-אמת-מפורטת.
+    if (run.conclusion === 'success' && onOurHead) {
+      state.lastRemoteGateResult = 'ok'
+      return
+    }
     state.lastRemoteGateResult = `${run.status}/${run.conclusion ?? 'pending'} @${run.head_sha?.slice(0, 7)}${onOurHead ? ' (=local)' : ''}`
   } catch (e) {
     state.lastRemoteGateResult = `error: ${e instanceof Error ? e.message : String(e)}`
