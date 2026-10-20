@@ -59,8 +59,10 @@ model Handoff {
   branch       String? // ענף-יעד (רשותי — ברירת-מחדל: ענף-ראשי)
   message      String // הודעת-קומיט — ייחוס כן
   field        String? // שדה-אופציונלי מהתוצר (למשל "code") — אחרת מועבר התוצר כולו
-  status       String   @default("PROPOSED") // PROPOSED | APPROVED | DONE | FAILED
+  status       String   @default("PROPOSED") // PROPOSED | APPROVED | RUNNING | DONE | FAILED | REJECTED (Task 100: פסילת-ביקורת-חוזרת-3x — סופי, כן, נראה)
   artifactHash String? // sha256 של הארטיפקט שישוגר — נאכף בביצוע (artifact-changed כן)
+  suspendedCount Int @default(0) // Task 100: מונה-השהיות-כנות (review-policy) — 3 = REJECTED
+  lastSuspendedAt DateTime? // Task 100: מתי-ההשהיה-האחרונה
   artifactSize Int?
   commitSha    String? // הקומיט האמיתי בגיט אחרי-הצלחה
   verified     Boolean? // read-back: התוכן שנשלף חזרה זהה בשרשרת? 

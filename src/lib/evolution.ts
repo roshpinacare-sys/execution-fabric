@@ -165,7 +165,14 @@ export type EvolutionResult =
 // אין שיגור בלי הצעה-תקפה — כשל הסולם חוזר כן למתקשר.
 // seed (Task 94): הזרקת-פער-נמדד-ממד-העוצמה — הרשת לא רק מודדת-את-הפערים שלה,
 // אלא פועלת-לסגירתם: מדידה→הכרעה→פעולה→חתימה. אין-זריעה = הצעה-רגילה.
-export async function proposeAndQueueEvolutionTask(seed?: string, avoidTitle?: string, depth = 1): Promise<EvolutionResult> {
+// Task 100-b: גם-'invalid' זוכה-לסולם (דפוס-Task-96): פסילת-סכימה/kind-אסור/repo-נכשל-אימות-חי
+// = ירי-חוזר-מיידי עם-פידבק-מפורש (עומק≤2) במקום מוות-עד-הפעימה-הבאה.
+export async function proposeAndQueueEvolutionTask(
+  seed?: string,
+  avoidTitle?: string,
+  depth = 1,
+  invalidNote?: string
+): Promise<EvolutionResult> {
   const t0 = Date.now()
   const ctx = await gatherEvolutionContext()
   // זריעת-פער (Task 94): הנחיה-ממוקדת מהמדידה-החיה — אין-זריעה שקרית: רק-פער-נמדד-אמיתי
@@ -176,9 +183,12 @@ export async function proposeAndQueueEvolutionTask(seed?: string, avoidTitle?: s
   const avoidBlock = avoidTitle
     ? `\n\n⚠️ דחיית-כפילות-חיה: הכותרת "${avoidTitle}" נדחתה-זה-עתה (כותרת-קיימת-ב-24שע'). אסור-להציע-כותרת-דומה-לה — הצע-זווית-הנדסית-שונה-במהותה (בדיקות/ביצועים/תצפיתיות/אבטחה/ממשק/תיעוד).`
     : ''
+  const invalidBlock = depth > 1 && invalidNote
+    ? `\n\n⚠️ פסילת-חיה מהמחזור-הקודם שלך: ${invalidNote} — החזר-JSON-תקף-בלבד-לפי-הסכימה-המדויקת.`
+    : ''
   const userMsg = seed
-    ? `${contextUserPrompt(ctx)}\n\nהנחיית-פער-נמדד (ממד-העוצמה, ראייה-חיה):\n${seed}\nהצע-משימה-מעשית-אחת-בת-ביצוע שמקדמת-בפועל את-סגירת-הפער-הזה. אסור-להמציא-פער-אחר.${avoidBlock}`
-    : `${contextUserPrompt(ctx)}${avoidBlock}`
+    ? `${contextUserPrompt(ctx)}\n\nהנחיית-פער-נמדד (ממד-העוצמה, ראייה-חיה):\n${seed}\nהצע-משימה-מעשית-אחת-בת-ביצוע שמקדמת-בפועל את-סגירת-הפער-הזה. אסור-להמציא-פער-אחר.${avoidBlock}${invalidBlock}`
+    : `${contextUserPrompt(ctx)}${avoidBlock}${invalidBlock}`
 
   const base: ChainCandidate[] = [
     { name: 'zai-primary', family: 'zai', call: () => callLlm(EVOLUTION_PRIMARY, userMsg) },
@@ -192,6 +202,10 @@ export async function proposeAndQueueEvolutionTask(seed?: string, avoidTitle?: s
   const result = await runContractChain(userMsg, candidates, evolutionProposalSchema)
 
   if (!result.ok) {
+    // Task 100-b — סולם-ההצעות-על-'invalid': פסילת-סכימה אינה קץ-הפעימה
+    if (result.errorClass === 'invalid' && depth < 2) {
+      return proposeAndQueueEvolutionTask(seed, avoidTitle, depth + 1, result.error.slice(0, 300))
+    }
     return {
       ok: false,
       error: result.error,
@@ -205,6 +219,9 @@ export async function proposeAndQueueEvolutionTask(seed?: string, avoidTitle?: s
 
   // גם סוג-המשימה חייב להיות מהמנוע-הקיים (TASK_KINDS) — הגנה-כפולה מעל ה-zod
   if (!TASK_KINDS.includes(proposal.kind as TaskKind)) {
+    if (depth < 2) {
+      return proposeAndQueueEvolutionTask(seed, avoidTitle, depth + 1, `kind=${proposal.kind} אסור — החוקיים בלבד: CODE|AUDIT|PLAN`)
+    }
     return {
       ok: false,
       error: `invalid: kind=${proposal.kind} outside TASK_KINDS`,
@@ -360,12 +377,21 @@ const LEARNING_PRIMARY = [
 export type LearningResult = EvolutionResult
 
 // מחזור-למידה אחד: ממצא-HIGH לא-מטופל → ירי-LLM אמיתי → ולידציה + כפילות + אימות-ריפו → שיגור source='learning'.
-export async function proposeLearningTask(finding: HighFinding, avoidTitle?: string, depth = 1): Promise<LearningResult> {
+// Task 100-b: גם-'invalid' זוכה-לסולם (עומק≤2) — בדיוק כמו בהצעה-הרגילה.
+export async function proposeLearningTask(
+  finding: HighFinding,
+  avoidTitle?: string,
+  depth = 1,
+  invalidNote?: string
+): Promise<LearningResult> {
   const t0 = Date.now()
   const ctx = await gatherEvolutionContext()
   // Task 96 — אותו-סולם-הצעות-ייחודיות גם-בלולאת-הלמידה (עומק-מוגבל: 2)
   const avoidLine = avoidTitle
     ? [`⚠️ דחיית-כפילות-חיה: הכותרת "${avoidTitle}" נדחתה-זה-עתה — אסור-להציע-כותרת-דומה-לה; זווית-הנדסית-שונה-במהותה.`, '']
+    : []
+  const invalidLines = depth > 1 && invalidNote
+    ? [`⚠️ פסילת-חיה מהמחזור-הקודם שלך: ${invalidNote} — החזר-JSON-תקף-בלבד-לפי-הסכימה-המדויקת.`, '']
     : []
   const userMsg = [
     'ממצא-HIGH פתוח מביקורת-עצמית של הרשת:',
@@ -386,6 +412,7 @@ export async function proposeLearningTask(finding: HighFinding, avoidTitle?: str
     'כותרות-אחרונות (חל איסור-חזרה עליהן):',
     ctx.recentTitles.length ? ctx.recentTitles.map((t) => `- ${t}`).join('\n') : '(אין)',
     ...avoidLine,
+    ...invalidLines,
   ].join('\n')
 
   const base: ChainCandidate[] = [
@@ -407,6 +434,10 @@ export async function proposeLearningTask(finding: HighFinding, avoidTitle?: str
 
   const result = await runContractChain(userMsg, candidates, evolutionProposalSchema)
   if (!result.ok) {
+    // Task 100-b — סולם-הלמידה-על-'invalid': פסילת-סכימה אינה קץ-הפעימה
+    if (result.errorClass === 'invalid' && depth < 2) {
+      return proposeLearningTask(finding, avoidTitle, depth + 1, result.error.slice(0, 300))
+    }
     return {
       ok: false,
       error: result.error,
@@ -419,6 +450,9 @@ export async function proposeLearningTask(finding: HighFinding, avoidTitle?: str
   const proposal = result.output as EvolutionProposal
 
   if (!TASK_KINDS.includes(proposal.kind as TaskKind)) {
+    if (depth < 2) {
+      return proposeLearningTask(finding, avoidTitle, depth + 1, `kind=${proposal.kind} אסור — החוקיים בלבד: CODE|AUDIT|PLAN`)
+    }
     return {
       ok: false,
       error: `invalid: kind=${proposal.kind} outside TASK_KINDS`,
@@ -444,11 +478,20 @@ export async function proposeLearningTask(finding: HighFinding, avoidTitle?: str
   }
 
   // אימות-חי של יעד-ריפו אם-הוצע (Task 28) — כנות: כשל = דחייה, לא שיגור-כללי-שקט
+  // Task 100-b: גם-כשל-אימות-ריפו זוכה-למעלה-הסולם (פידבק-מפורש, עומק≤2)
   if (proposal.repo) {
     try {
       await verifyRepo(proposal.repo)
     } catch (e) {
       const cls = ghErrorClass(e)
+      if (depth < 2) {
+        return proposeLearningTask(
+          finding,
+          avoidTitle,
+          depth + 1,
+          `repo "${proposal.repo}" נכשל אימות-חי (${cls ?? 'provider'}) — הצע רק ריפו מהרשימה-המוכרת או השמט את שדה repo`
+        )
+      }
       return {
         ok: false,
         error: `invalid: repo ${proposal.repo} failed live verification (${cls ?? 'provider'}) — ${ghErrorMessage(e)}`,

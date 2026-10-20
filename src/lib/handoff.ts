@@ -7,6 +7,7 @@ export const HANDOFF_STATUSES = [
   'RUNNING',
   'DONE',
   'FAILED',
+  'REJECTED', // Task 100: פסילת-ביקורת-חוזרת-3x — סופי, כן, נראה (אין-סריקה-אינסופית)
 ] as const
 export type HandoffStatus = (typeof HANDOFF_STATUSES)[number]
 

@@ -243,8 +243,18 @@ export type SiteBuildResult =
       durationMs: number
     }
 
+// Task 100-a — סולם-הבנייה-הייחודית (דפוס-Task-96): עד-עכשיו דחיית-כפילות/פסילה הייתה
+// מוות-של-המחזור-הנוכחי — הירי-האמיתי-התבזבז, והזיכרון-העדין סייע רק-למחזור-הבא
+// בעוד-10 דק'. מעתה: דחייה = ירי-חוזר-מיידי באותו-מחזור עם-פידבק-מפורש
+// (הכותרת-הנפסלת / מילות-הנושא-האסורות / שגיאת-הסכימה), עומק-מוגבל: 2.
+export interface SiteBuildFeedback {
+  rejectedTitle?: string
+  bannedTopicWords?: string[]
+  invalidNote?: string
+}
+
 // מחזור-בנייה אחד: מצב-אמת → ירי-LLM אמיתי → ולידציה + כפילות → ארטיפקט-קובץ + DB + שרשרת.
-export async function runSiteBuildCycle(): Promise<SiteBuildResult> {
+export async function runSiteBuildCycle(feedback?: SiteBuildFeedback, depth = 1): Promise<SiteBuildResult> {
   const t0 = Date.now()
 
   // תקציב-כן — הגנה-כפולה (הלב מדלג לפני-הירי; כאן נאכף שרת-צד)
@@ -260,7 +270,20 @@ export async function runSiteBuildCycle(): Promise<SiteBuildResult> {
   }
 
   const ctx = await gatherSiteBuildContext()
-  const userMsg = contextUserPrompt(ctx)
+  const feedbackLines: string[] = []
+  if (depth > 1 && feedback) {
+    feedbackLines.push('⚠️ דחייה-חיה מהמחזור-הקודם שלך — הפלט-הקודם נפסל:')
+    if (feedback.rejectedTitle)
+      feedbackLines.push(`- הכותרת "${feedback.rejectedTitle}" נדחתה (כותרת/נושא-קיים מ-24שע') — אסור לחזור עליה ועל דומה לה; זווית-הנדסית שונה במהותה.`)
+    if (feedback.bannedTopicWords && feedback.bannedTopicWords.length > 0)
+      feedbackLines.push(`- מילות-נושא אסורות: ${feedback.bannedTopicWords.join(', ')}`)
+    if (feedback.invalidNote)
+      feedbackLines.push(`- פסילת-סכימה: ${feedback.invalidNote} — החזר JSON תקף בלבד לפי הסכימה המדויקת.`)
+    feedbackLines.push('הפעם: שיפור אחד חדש לגמרי.')
+  }
+  const userMsg = feedbackLines.length
+    ? `${contextUserPrompt(ctx)}\n\n${feedbackLines.join('\n')}`
+    : contextUserPrompt(ctx)
 
   const candidates: { name: string; call: () => Promise<string> }[] = [
     { name: 'zai-primary', call: () => callLlm(BUILD_PRIMARY, userMsg) },
@@ -272,6 +295,10 @@ export async function runSiteBuildCycle(): Promise<SiteBuildResult> {
 
   const result = await runContractChain(userMsg, candidates, siteBuildSchema)
   if (!result.ok) {
+    // Task 100-a — סולם-הבנייה: פסילת-סכימה אינה קץ-המחזור — ירי-חוזר עם-פידבק-מפורש
+    if (result.errorClass === 'invalid' && depth < 2) {
+      return runSiteBuildCycle({ invalidNote: result.error.slice(0, 300) }, depth + 1)
+    }
     return {
       ok: false,
       error: result.error,
@@ -283,8 +310,11 @@ export async function runSiteBuildCycle(): Promise<SiteBuildResult> {
 
   const out = result.output as SiteBuildOutput
 
-  // DATA ללא-payload = חוזה-לא-נשמר (invalid כן)
+  // DATA ללא-payload = חוזה-לא-נשמר (invalid כן) — וגם-הוא זוכה למעלה-הסולם
   if (out.kind === 'DATA' && (out.payload == null || typeof out.payload !== 'object')) {
+    if (depth < 2) {
+      return runSiteBuildCycle({ invalidNote: `kind=DATA חייב שדה payload (אובייקט JSON) — הפלט שלך הגיע בלי payload תקין (כותרת: "${out.title}")` }, depth + 1)
+    }
     return {
       ok: false,
       error: 'invalid: kind=DATA requires a payload object',
@@ -298,6 +328,10 @@ export async function runSiteBuildCycle(): Promise<SiteBuildResult> {
   if (titles.has(normalizeTitle(out.title))) {
     bannedTitles.push(out.title)
     if (bannedTitles.length > 50) bannedTitles.shift()
+    // Task 100-a — סולם-הבנייה: כפילות-כותרת = ירי-חוזר מיידי עם-הכותרת-האסורה
+    if (depth < 2) {
+      return runSiteBuildCycle({ rejectedTitle: out.title }, depth + 1)
+    }
     return {
       ok: false,
       error: `duplicate: improvement title matches an existing item from the last 24h — "${out.title}"`,
@@ -317,6 +351,10 @@ export async function runSiteBuildCycle(): Promise<SiteBuildResult> {
       if (!bannedTopicWords.includes(w)) bannedTopicWords.push(w)
     }
     while (bannedTopicWords.length > 60) bannedTopicWords.shift()
+    // Task 100-a — סולם-הבנייה: סחרור-נושא = ירי-חוזר מיידי עם-מילות-הנושא-האסורות
+    if (depth < 2) {
+      return runSiteBuildCycle({ rejectedTitle: out.title, bannedTopicWords: [...topicWords] }, depth + 1)
+    }
     return {
       ok: false,
       error: `duplicate: topic spins an existing improvement from the last 24h (topic overlap) — "${out.title}"`,
