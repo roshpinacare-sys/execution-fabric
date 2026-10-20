@@ -238,6 +238,12 @@ export async function runContractChain(
     // דילוג-כן: משפחה-מוצערת (בריצה-זו או-בקודמת) — מת-וודאי; הכנות-נרשמת-במסלול.
     if (c.family && familyThrottled(c.family)) {
       trail.push({ name: `${c.name} (skipped: family throttled)`, ok: false, errorClass: 'rate-limit' })
+      // Task 99 (תיקון-סיווג — לקח-25-ה-unknown): אם-עדיין-אין-ניסיון-אמיתי, הסיבה-הכנה
+      // היא-המצערה — לא 'unknown'. ניסיון-אמיתי-מאוחר דורס-בכנות.
+      if (attempt === 0 && lastErrorClass === 'unknown') {
+        lastErrorClass = 'rate-limit'
+        lastError = 'family throttled: all candidates skipped by 10min family throttle'
+      }
       continue
     }
     attempt++
@@ -324,8 +330,35 @@ export async function runTaskChain(
   return runContractChain(userMsg, candidates, contract.schema)
 }
 
-// בדיקת-חיות: ירי אמיתי אחד, ולידציה מחמירה (DRILL-OK), כשל כן אם לא חוזר.
+// בדיקת-חיות: ירי אמיתי, ולידציה מחמירה (DRILL-OK), כשל כן אם לא חוזר.
+// Task 99 (לקח-ה-selftest-8/9): rate-limit-הוא-חולף — ניסיון-חוזר-אחד-אחרי-15ש' הוא-רפואה-כנה
+// (הניסיון-נרשם-ב-attempts; גם-אחריו-כשל = FAILED-כן, אפס-הסתרה).
 export async function runDrill(): Promise<{
+  ok: boolean
+  ms: number
+  attempts: number
+  errorClass?: ErrorClass
+  error?: string
+}> {
+  const t0 = Date.now()
+  let attempts = 0
+  let last: { ok: false; ms: number; attempts: number; errorClass?: ErrorClass; error?: string } | undefined
+  // Task 99: עד-2-ניסיונות — חוזר-בכנות רק-על-מחלקות-חולפות (rate-limit/timeout/network)
+  while (attempts < 2) {
+    attempts++
+    const r = await drillOnce()
+    if (r.ok) return { ...r, attempts }
+    last = r
+    if (r.errorClass === 'rate-limit' || r.errorClass === 'timeout' || r.errorClass === 'network') {
+      await new Promise((res) => setTimeout(res, r.errorClass === 'rate-limit' ? 60_000 : 15_000))
+      continue
+    }
+    break
+  }
+  return { ...(last as { ok: false; ms: number; attempts: number; errorClass?: ErrorClass; error?: string }), attempts }
+}
+
+async function drillOnce(): Promise<{
   ok: boolean
   ms: number
   attempts: number

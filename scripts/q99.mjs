@@ -1,0 +1,12 @@
+import { PrismaClient } from '@prisma/client'
+const db = new PrismaClient()
+const since = new Date(Date.now() - 40*60_000)
+const failed = await db.task.groupBy({ by: ['errorClass'], where: { status: 'FAILED', updatedAt: { gte: since } }, _count: true })
+const done = await db.task.count({ where: { status: 'DONE', updatedAt: { gte: since } } })
+const running = await db.task.count({ where: { status: 'RUNNING' } })
+const queued = await db.task.count({ where: { status: 'QUEUED' } })
+console.log('40דק אחרונות — DONE:', done, '| RUNNING:', running, '| QUEUED:', queued)
+console.log('FAILED-לפי-מחלקה:', JSON.stringify(failed.map(f => ({ cls: f.errorClass, n: f._count }))))
+const dispatch = await db.task.findMany({ where: { title: { startsWith: 'יישום-הצעה #' } }, orderBy: { createdAt: 'desc' }, take: 4, select: { status: true, createdAt: true, title: true } })
+dispatch.forEach(t => console.log(` [${t.status}] ${t.title.slice(0, 60)}`))
+await db.$disconnect()

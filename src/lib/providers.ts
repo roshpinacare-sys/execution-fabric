@@ -133,11 +133,35 @@ export interface RailDrill {
   rail: 'zai' | 'nvidia'
   ok: boolean
   ms: number
+  attempts?: number // Task 99: מספר-ניסיונות-אמיתי (כולל-החזר-על-חולף) — נחתם-בשרשרת
   errorClass?: string
   error?: string
 }
 
 export async function nvidiaDrill(): Promise<RailDrill> {
+  const t0 = Date.now()
+  let attempts = 0
+  let last: RailDrill | undefined
+  // Task 99: עד-2-ניסיונות — חוזר-בכנות רק-על-מחלקות-חולפות (אותו-רפואה-כמו-מסילת-zai)
+  while (attempts < 2) {
+    attempts++
+    const r = await nvidiaDrillOnce()
+    if (r.ok) return { ...r, ms: Date.now() - t0, attempts }
+    last = r
+    if (
+      r.errorClass === 'rate-limit' ||
+      r.errorClass === 'timeout' ||
+      r.errorClass === 'network'
+    ) {
+      await new Promise((res) => setTimeout(res, r.errorClass === 'rate-limit' ? 60_000 : 15_000))
+      continue
+    }
+    break
+  }
+  return { ...(last as RailDrill), ms: Date.now() - t0, attempts }
+}
+
+async function nvidiaDrillOnce(): Promise<RailDrill> {
   const t0 = Date.now()
   try {
     const raw = await nvidiaChat(
