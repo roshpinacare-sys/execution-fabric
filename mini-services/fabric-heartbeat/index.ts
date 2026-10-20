@@ -55,6 +55,8 @@ const CLAIMS_PULSE_MS = 30 * 60_000 // Task 90: עורק-ט"ו — בודק-הט
 const CLAIMS_PULSE_FIRST_MS = 90_000
 const SOVEREIGNTY_PULSE_MS = 30 * 60_000 // Task 92: עורק-י"ז — מד-הריבונות: הארכיטקטורה מודדת-את-עצמה-כבעלים, בכנות
 const SOVEREIGNTY_PULSE_FIRST_MS = 2 * 60_000
+const MAGNITUDE_PULSE_MS = 30 * 60_000 // Task 93: עורק-יח — מד-העוצמה: "פי-1000-מהבעלים" נמדד-בכנות, לא-מוצהר
+const MAGNITUDE_PULSE_FIRST_MS = 3 * 60_000
 const SELFTEST_PULSE_FIRST_MS = 3 * 60_000
 const RESTORE_PULSE_MS = 6 * 60 * 60_000 // Task 70: עורק-ח — הוכחה-קבועה שהכפילות-הרחוקה מחזירה-מערכת-שלמה
 const RESTORE_PULSE_FIRST_MS = 150_000
@@ -148,6 +150,10 @@ interface State {
   sovereigntyOverall: string
   lastSovereigntyAt: string | null
   lastSovereigntyResult: string | null
+  magnitudePulses: number
+  magnitudeCore: number | null
+  lastMagnitudeAt: string | null
+  lastMagnitudeResult: string | null
   narrations: number
   narrationFails: number
   lastNarrationAt: string | null
@@ -235,6 +241,10 @@ const state: State = {
   sovereigntyOverall: 'unmeasured',
   lastSovereigntyAt: null,
   lastSovereigntyResult: null,
+  magnitudePulses: 0,
+  magnitudeCore: null,
+  lastMagnitudeAt: null,
+  lastMagnitudeResult: null,
   narrations: 0,
   narrationFails: 0,
   lastNarrationAt: null,
@@ -1267,6 +1277,40 @@ async function sovereigntyPulse(): Promise<void> {
   }
 }
 
+// ===== עורק-יח (Task 93): פעימת-עוצמה — "פי-1000-מהבעלים" נמדד-בכנות =====
+// כל-30 דק': POST /api/magnitude?subject=magnitude-audit — מדידת-מכפלות-פר-ממד מראיות-חיות
+// (זמינות, זמן-הכרעה, מקביליות, זמן-ריפוי, קצב-ביצוע, קצב-ביקורת-עצמית) + חתימת-AUDIT.
+// הכנות: DONE = מדידה-שלמה, לא-"הושג-1000x" — המספר-הנמדד-עצמו נושא-את-האמת.
+async function magnitudePulse(): Promise<void> {
+  state.magnitudePulses++
+  state.lastMagnitudeAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/magnitude?subject=magnitude-audit`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(90_000), // מדידה כוללת-שאילתות-שרשרת — נותנים-רשת
+    })
+    if (res.status === 200) {
+      const d = (await res.json()) as {
+        measuredCore?: number | null
+        dimensionsBeyondTarget?: number
+        signed?: { id?: number; status?: string }
+        gaps?: Array<{ title?: string; current?: number; distanceToTarget?: number }>
+      }
+      state.magnitudeCore = d.measuredCore ?? null
+      const worst = d.gaps?.[0]
+      const line = `עוצמה-דיגיטלית-נמדדת: ~${d.measuredCore !== null && d.measuredCore !== undefined ? (d.measuredCore < 10 ? d.measuredCore.toFixed(1) : Math.round(d.measuredCore)) : '?'}x מול-יעד-1000x${worst ? ` · פער-הכי-גדול: ${worst.title ?? '?'} (${worst.current ?? '?'}x)` : ''}${d.dimensionsBeyondTarget ? ` · ${d.dimensionsBeyondTarget} ממדים-מעל-היעד` : ''}${d.signed?.id ? ` · נחתם #${d.signed.id} status=${d.signed.status}` : ''}`
+      state.lastMagnitudeResult = line
+      log(`מד-העוצמה: ${line}`)
+    } else {
+      state.lastMagnitudeResult = `failed: HTTP ${res.status}`
+      log(`מד-העוצמה: כשל-כן — ${state.lastMagnitudeResult}`)
+    }
+  } catch (e) {
+    state.lastMagnitudeResult = e instanceof Error ? e.message : String(e)
+    log(`מד-העוצמה: כשל-רשת — ${state.lastMagnitudeResult}`)
+  }
+}
+
 // ===== שרת-דופק (תצפית) =====
 Bun.serve({
   port: PORT,
@@ -1312,6 +1356,8 @@ setInterval(() => void claimsPulse(), CLAIMS_PULSE_MS)
 setTimeout(() => void claimsPulse(), CLAIMS_PULSE_FIRST_MS)
 setInterval(() => void sovereigntyPulse(), SOVEREIGNTY_PULSE_MS)
 setTimeout(() => void sovereigntyPulse(), SOVEREIGNTY_PULSE_FIRST_MS)
+setInterval(() => void magnitudePulse(), MAGNITUDE_PULSE_MS)
+setTimeout(() => void magnitudePulse(), MAGNITUDE_PULSE_FIRST_MS)
 setTimeout(() => void restorePulse(), RESTORE_PULSE_FIRST_MS)
 setInterval(() => void restorePulse(), RESTORE_PULSE_MS)
 setTimeout(() => void snapshotRestorePulse(), SNAPSHOT_RESTORE_PULSE_FIRST_MS)

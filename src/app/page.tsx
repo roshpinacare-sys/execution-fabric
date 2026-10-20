@@ -24,6 +24,7 @@ import { AutonomyOps } from '@/components/AutonomyOps'
 import { OperationsHub } from '@/components/OperationsHub'
 import { NetworkHub } from '@/components/NetworkHub'
 import { ClaimsAuditor } from '@/components/ClaimsAuditor'
+import { MagnitudeMeter } from '@/components/MagnitudeMeter'
 import { SovereigntyMeter } from '@/components/SovereigntyMeter'
 import { OperatorGate } from '@/components/OperatorGate'
 import {
@@ -2477,6 +2478,9 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
 
           {/* מד-הריבונות-העצמית (Task 92): הארכיטקטורה היא-הבעלים — נמדד-מראיות-חיות, לא-מהצהרות */}
           <SovereigntyMeter />
+
+          {/* מד-העוצמה (Task 93): פי-1000-מהבעלים — מכפלות-נמדדות-בכנות, פערים-מבניים-חשופים */}
+          <MagnitudeMeter />
 
           {/* בודק-הטענות (Task 90): כל-טענה-ארכיטקטונית נשפטת-על-ידי-בדיקה-חיה — לא-על-ידי-הדיווח-שלה-על-עצמה */}
           <ClaimsAuditor />
