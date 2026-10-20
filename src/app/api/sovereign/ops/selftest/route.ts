@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { writeFileSync } from 'node:fs'
+import path from 'node:path'
 import { appendLedger, sha256Short } from '@/lib/ledger'
 
 // בדיקת-סרט-כלים עצמית (Task 44): POST /api/sovereign/ops/selftest
@@ -123,10 +125,51 @@ export async function POST(req: NextRequest) {
     failures: failed.map((f) => ({ tool: f.tool, detail: f.detail })),
   }
 
+  // מחזור-הרפואה-החיה (2026-10-20): תיקון-ירוק-שקר — הלקח-החי:
+  // הזקיפה מתה 03:40, סבב-ה-selftest של 04:20 חתם "AUDIT DONE" עם-errorClass=tool-failed —
+  // כותרת-ירוקה, אמת-אדומה בהערת-שוליים. כל-צרכן-של-השרשרת (census, badges, ביקורות) קורא-סטטוס.
+  // מעתה: כישלון = status FAILED בראש-הרשומה (הקנון-של-DRILL-FAILED/PLAN-FAILED באותה-שרשרת).
+  // והדוח-המלא-נאטם-כארטיפקט-חי (sovereign/site — נכלל-באוטומט בחותמת-המסמכים) — הראיה
+  // ניתנת-לשחזור-ולקריאה, לא-רק-גיבוב-אטום. דוחות-הצלחה-אינם-נאטמים (רעש = עלות-אמת).
+  if (!allOk) {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-')
+    const failedList = failed
+      .map((f) => `| ${f.tool} | ${f.endpoint} | ${f.detail} |`)
+      .join('\n')
+    const doc = [
+      '---',
+      `title: "דוח-selftest-כושל — ${report.passed}/${report.tools} כלים עברו"`,
+      'kind: AUDIT',
+      'status: CLOSED',
+      `createdAt: ${report.at}`,
+      'worker: sovereignty-selftest',
+      `summary: "סבב-selftest נכשל: ${failed.length} כלים — ${failed.map((f) => f.tool).join(', ')}; הרשומה-בשרשרת חתומה FAILED."`,
+      '---',
+      '',
+      '# דוח-selftest-כושל',
+      '',
+      `| כלי | שער | כשל |`,
+      `|---|---|---|`,
+      failedList,
+      '',
+      `durationMs: ${report.durationMs} · outputHash: ראו-רשומת-ה-AUDIT-החתומה.`,
+      '',
+    ].join('\n')
+    try {
+      writeFileSync(
+        path.join(process.cwd(), 'sovereign', 'site', `${ts}-selftest-failure.md`),
+        doc,
+        'utf8'
+      )
+    } catch {
+      // fail-honest: אם-אטימת-הדוח-נכשלת-החתימה-עדיין-יוצאת-FAILED — האמת-לא-נגרעת
+    }
+  }
+
   await appendLedger({
     taskId: null,
     kind: 'AUDIT',
-    status: 'DONE',
+    status: allOk ? 'DONE' : 'FAILED',
     worker: 'sovereignty-selftest',
     attempts: 1,
     durationMs: report.durationMs,
