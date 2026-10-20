@@ -24,6 +24,7 @@ import { AutonomyOps } from '@/components/AutonomyOps'
 import { OperationsHub } from '@/components/OperationsHub'
 import { NetworkHub } from '@/components/NetworkHub'
 import { ClaimsAuditor } from '@/components/ClaimsAuditor'
+import { SovereigntyMeter } from '@/components/SovereigntyMeter'
 import { OperatorGate } from '@/components/OperatorGate'
 import {
   Network,
@@ -2473,6 +2474,9 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
 
           {/* רכזת-הרשת (Task 88): השרשרת-המקומית מרכז-העניינים — עוגני-חוץ סביבה, במצבם-האמיתי */}
           <NetworkHub />
+
+          {/* מד-הריבונות-העצמית (Task 92): הארכיטקטורה היא-הבעלים — נמדד-מראיות-חיות, לא-מהצהרות */}
+          <SovereigntyMeter />
 
           {/* בודק-הטענות (Task 90): כל-טענה-ארכיטקטונית נשפטת-על-ידי-בדיקה-חיה — לא-על-ידי-הדיווח-שלה-על-עצמה */}
           <ClaimsAuditor />

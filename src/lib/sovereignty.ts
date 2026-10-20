@@ -88,6 +88,7 @@ async function gitOut(args: string[], ms = 4000): Promise<string> {
 
 interface HeartJson {
   ok: boolean
+  startedAt: string
   picked: number
   executed: number
   gitPushes: number
@@ -116,6 +117,8 @@ interface HeartJson {
   lastSelftestResult: string | null
   claimsPulses: number
   lastClaimsResult: string | null
+  sovereigntyPulses: number
+  lastSovereigntyResult: string | null
   restorePulses: number
   lastRestoreResult: string | null
   snapshotRestorePulses: number
@@ -200,13 +203,26 @@ async function measureSelfHealing(h: HeartJson | null, k: KeeperJson | null): Pr
 }
 
 // ===== ממד 4: רוחב-עורקים — "לעשות הכל מהכל": כמה עורקים חיים מתוך-מה-שמחובר =====
+// הפרדה-כנה (לקח-מהמדידה-הראשונה): חיות-עורק ≠ תוצר-עורק.
+//  · חי = יורה באופן-אוטונומי (פעימות>0) — זה-מה-שמד-הריבונות בודק (האם-הארכיטקטורה מפעילה-את-עצמה)
+//  · מודגל = יורה אך-התוצר-האחרון כשל ('failed:'/'error:') — נספר-חלקית, נחשף-בראייה
+//  · מת = לא-ירה-כלל והלב כבר-בשל (uptime ≥ 6 דק' — מעבר לחלון-ההצתות-הראשונות)
+//  · מתחמם = לא-ירה אך-הלב צעיר — לא-נענש (לא-שקר: מצוין-בראייה)
 interface ArteryDef {
   name: string
   pulses: number | undefined
   result: string | null | undefined
 }
-function arteryHealth(h: HeartJson | null): { live: number; total: number; dead: string[] } {
-  if (!h) return { live: 0, total: 0, dead: ['heart-unreachable'] }
+function arteryHealth(h: HeartJson | null): {
+  live: number
+  flagged: number
+  warming: number
+  dead: number
+  total: number
+  flaggedNames: string[]
+  deadNames: string[]
+} {
+  if (!h) return { live: 0, flagged: 0, warming: 0, dead: 0, total: 0, flaggedNames: [], deadNames: ['heart-unreachable'] }
   const arteries: ArteryDef[] = [
     { name: 'git-push', pulses: h.gitPulses, result: h.lastGitPulseResult },
     { name: 'evolution', pulses: h.evolutionPulses, result: h.lastEvolutionResult },
@@ -214,6 +230,7 @@ function arteryHealth(h: HeartJson | null): { live: number; total: number; dead:
     { name: 'ops', pulses: h.opsPulses, result: h.lastOpsResult },
     { name: 'selftest', pulses: h.selftestPulses, result: h.lastSelftestResult },
     { name: 'claims', pulses: h.claimsPulses, result: h.lastClaimsResult },
+    { name: 'sovereignty', pulses: h.sovereigntyPulses ?? 0, result: h.lastSovereigntyResult },
     { name: 'restore', pulses: h.restorePulses, result: h.lastRestoreResult },
     { name: 'snapshot-restore', pulses: h.snapshotRestorePulses, result: h.lastSnapshotRestoreResult },
     { name: 'export-sync', pulses: h.exportSyncPulses, result: h.lastExportSyncResult },
@@ -225,15 +242,46 @@ function arteryHealth(h: HeartJson | null): { live: number; total: number; dead:
     { name: 'app-guard', pulses: h.lastAppGuardAt ? 1 : 0, result: h.lastAppGuardResult },
     { name: 'keeper-guard', pulses: 1, result: h.lastKeeperGuardResult },
   ]
-  const alive = arteries.filter(
-    (a) => (a.pulses ?? 0) > 0 && !(a.result ?? '').startsWith('failed:') && !(a.result ?? '').startsWith('error:')
-  )
-  return { live: alive.length, total: arteries.length, dead: arteries.filter((a) => !alive.includes(a)).map((a) => a.name) }
+  const uptimeMs = (() => {
+    try {
+      return Date.now() - Date.parse(h.startedAt as unknown as string)
+    } catch {
+      return Number.MAX_SAFE_INTEGER
+    }
+  })()
+  const mature = uptimeMs > 6 * 60_000 // מעבר לחלון-ההצתות-הראשונות של כל-העורקים
+  let live = 0
+  let flagged = 0
+  let warming = 0
+  let dead = 0
+  const flaggedNames: string[] = []
+  const deadNames: string[] = []
+  for (const a of arteries) {
+    const fired = (a.pulses ?? 0) > 0
+    const productFailed = /^(failed:|error:)/.test(a.result ?? '')
+    if (fired && productFailed) {
+      flagged++
+      flaggedNames.push(a.name)
+    } else if (fired) {
+      live++
+    } else if (!mature) {
+      warming++
+    } else {
+      dead++
+      deadNames.push(a.name)
+    }
+  }
+  return { live, flagged, warming, dead, total: arteries.length, flaggedNames, deadNames }
 }
 async function measureBreadth(h: HeartJson | null): Promise<Pick<SovereigntyDimension, 'status' | 'score' | 'evidence'>> {
-  const { live, total, dead } = arteryHealth(h)
-  const score = total > 0 ? Math.round((live / total) * 100) : 0
-  const evidence = `${live}/${total} עורקים-חיים${dead.length > 0 ? ` · שקטים-עכשיו: ${dead.slice(0, 4).join(',')}${dead.length > 4 ? '…' : ''}` : ''}`
+  const { live, flagged, warming, dead, total, flaggedNames, deadNames } = arteryHealth(h)
+  const counted = live + flagged + dead // מתחממים לא נשפטים — אין-אשמה על-צעירות
+  const score = counted > 0 ? Math.round(((live + flagged * 0.6) / counted) * 100) : 0
+  const parts = [`${live} חיים`]
+  if (flagged > 0) parts.push(`${flagged} יורים-עם-תוצר-כושל: ${flaggedNames.slice(0, 3).join(',')}`)
+  if (warming > 0) parts.push(`${warming} מתחממים (לב-צעיר)`)
+  if (dead > 0) parts.push(`${dead} מתים: ${deadNames.slice(0, 3).join(',')}`)
+  const evidence = `${total} עורקים מחוברים · ${parts.join(' · ')}`
   return { status: statusFrom(score), score, evidence }
 }
 
