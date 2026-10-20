@@ -11,6 +11,11 @@ import { appendLedger, sha256Short } from '@/lib/ledger'
 //   · attempts ≤ 5 (גבול-מאמץ-כולל-כן), גיל-כשל ≥ 30 דק' (צינון), תקרה 8 לסוואפ
 //   · claim אטומי (updateMany על FAILED בלבד) — אפס-דריסה-כפולה
 // כל-סוואפ-שפעל-נחתם REPAIR בשרשרת; סוואפ-ריק לא מזייף-חתימה — דיווח-כן בלבד.
+//
+// מצב-סערה (Task 104): הצינון-הקבוע-מעולה-ברגיעה אך-בסערת-ספק הוא-מסעדה-של-זרימה:
+// כשל-ספק-חוזר-על יוצר-מחסן-עבודה-תקפה-שממתין-30דק' בתור-המתים-גם-כשהרשת-כבר-התאוששה.
+// החוק-החדש: מחסן-חוזרים-על ≥ 5 והכישלון-הטרי-בן-פחות-מ-15דק' → צינון-מתכווץ-ל-2דק'
+// (הגבולות-האמיתיים נשארים: attempts≤5, תקרה-8, claim-אטומי). המצב-מדווח-בגוף-התשובה.
 
 export const dynamic = 'force-dynamic'
 
@@ -18,10 +23,31 @@ const RECOVERY_CLASSES = ['rate-limit', 'provider', 'timeout', 'network', 'empty
 const MAX_ATTEMPTS = 5
 const COOLDOWN_MS = 30 * 60_000
 const SWEEP_CAP = 8
+const STORM_THRESHOLD = 5
+const STORM_FRESH_MS = 15 * 60_000
+const STORM_COOLDOWN_MS = 2 * 60_000
 
 export async function POST() {
   const t0 = Date.now()
-  const staleBefore = new Date(Date.now() - COOLDOWN_MS)
+
+  // חישוב-מצב-סערה: מחסן-החוזרים-על + גיל-הכישלון-הטרי-ביותר
+  const stormPool = await db.task.findMany({
+    where: {
+      status: 'FAILED',
+      errorClass: { in: RECOVERY_CLASSES },
+      attempts: { lte: MAX_ATTEMPTS },
+      role: null,
+      parentId: null,
+    },
+    orderBy: { updatedAt: 'desc' },
+    take: STORM_THRESHOLD,
+    select: { updatedAt: true },
+  })
+  const stormActive =
+    stormPool.length >= STORM_THRESHOLD &&
+    stormPool[0].updatedAt.getTime() > Date.now() - STORM_FRESH_MS
+  const cooldownMs = stormActive ? STORM_COOLDOWN_MS : COOLDOWN_MS
+  const staleBefore = new Date(Date.now() - cooldownMs)
 
   const candidates = await db.task.findMany({
     where: {
@@ -41,7 +67,8 @@ export async function POST() {
     return NextResponse.json({
       ok: true,
       requeued: 0,
-      reason: 'nothing-to-recover: אין-משימות-FAILED-חולפות-בכשל-מעל-30דק\' — כנות, לא המצאת-עבודה',
+      storm: stormActive,
+      reason: `nothing-to-recover: אין-משימות-FAILED-חולפות-בכשל-מעל-${Math.round(cooldownMs / 60_000)}דק' (${stormActive ? 'צינון-סערה' : 'צינון-רגיל'}) — כנות, לא המצאת-עבודה`,
     })
   }
 
@@ -81,8 +108,11 @@ export async function POST() {
     ok: true,
     requeued: requeued.length,
     recovered: requeued,
+    storm: stormActive,
     ledgerSigned: true,
-    note: 'המשימות-הוחזרו-לתור-עם-ה-attempts-שלהן-נשמר — ה-executor והסולם-ישפטו-מחדש',
+    note: stormActive
+      ? 'מצב-סערה: המחסן-חרג-מהסף — צינון-מתכווץ-ל-2דק\' והעבודה-התקפה-חוזרת-לזרימה-מיידית'
+      : 'המשימות-הוחזרו-לתור-עם-ה-attempts-שלהן-נשמר — ה-executor והסולם-ישפטו-מחדש',
   })
 }
 
@@ -97,6 +127,12 @@ export async function GET() {
     ok: true,
     failedTransientRecoverable: failedTransient,
     failedPermanent: failedPermanent,
-    policy: { classes: RECOVERY_CLASSES, maxAttempts: MAX_ATTEMPTS, cooldownMin: COOLDOWN_MS / 60_000, sweepCap: SWEEP_CAP },
+    policy: {
+      classes: RECOVERY_CLASSES,
+      maxAttempts: MAX_ATTEMPTS,
+      cooldownMin: COOLDOWN_MS / 60_000,
+      sweepCap: SWEEP_CAP,
+      storm: { threshold: STORM_THRESHOLD, freshMin: STORM_FRESH_MS / 60_000, cooldownMin: STORM_COOLDOWN_MS / 60_000 },
+    },
   })
 }
