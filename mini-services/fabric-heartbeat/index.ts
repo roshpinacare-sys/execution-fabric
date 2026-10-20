@@ -24,11 +24,16 @@
 //            אם-db/custom.db בלבד-בקונפליקט והשרשרת-המקומית על-קבוצה של הרחוקה
 //            (ראש-הרחוק ∈ שרשרת-מקומית && ספירה-מקומית ≥ רחוקה) → קח-מקומי והמשך.
 //            אחרת — abort כנה. אף-פתרון-אוטומטי על קבצי-קוד — רק על ה-db עם-הוכחת-הכלה.
+//   עורק-ב שדרוג (Task 87 — הלקח-החי מאירוע-הסנדבוקס 2026-10-20): ריפוי-מצב-גיט עצמי.
+//            rebase/merge תקועים מריצה-קודמת-שמתה השאירו את-הלב תקוע-לנצח (הזקיפה מחיה את
+//            התהליך — אף-איבר לא ריפא את-מצב-הגיט). השער-בראש-כל-פעימה: גילוי → abort →
+//            התכנסות-מול-origin בשימור-בייטים של db-החי (reset-ממוזג + checkout-סלקטיבי —
+//            reset --hard עם-נתיבים אסור-על-ידי-גיט; הרצף הוכח-בייטית בריפו-ניסוי מבודד).
 //
 // דיסציפלינה: אף סוד לא נוגע/נדפס כאן (ה-credential-helper קורא את קובץ-הסמכות
 // בזמן-ריצה); אין-force-push; כשל-סריקת-דליפות = אין-push (כנות); כל-כשל נרשם-וממשיך.
 
-import { existsSync, writeFileSync, statSync } from 'node:fs'
+import { existsSync, writeFileSync, statSync, renameSync } from 'node:fs'
 import path from 'node:path'
 import { Database } from 'bun:sqlite'
 
@@ -102,6 +107,9 @@ interface State {
   dbConflictsResolved: number
   lastGitPulseAt: string | null
   lastGitPulseResult: string | null
+  gitHeals: number
+  lastGitHealAt: string | null
+  lastGitHealResult: string | null
   evolutionPulses: number
   evolutionQueued: number
   lastEvolutionAt: string | null
@@ -171,6 +179,9 @@ const state: State = {
   dbConflictsResolved: 0,
   lastGitPulseAt: null,
   lastGitPulseResult: null,
+  gitHeals: 0,
+  lastGitHealAt: null,
+  lastGitHealResult: null,
   evolutionPulses: 0,
   evolutionQueued: 0,
   lastEvolutionAt: null,
@@ -317,6 +328,104 @@ function ledgerSupersetOK(): boolean {
   }
 }
 
+// ===== ריפוי-מצב-גיט עצמי (Task 87) — הלקח-החי מאירוע-הסנדבוקס 2026-10-20 =====
+// הזקיפה מחיה את-תהליך-הלב — אך-לב-שמוחזר-לחיים אל-תוך rebase/merge תקוע (ריצה-קודמת-שמתה)
+// נתקע-שוב-בכל-פעימה. הריפוי: abort → התכנסות-מול-origin בשימור-בייטים של db-החי.
+function gitStuckState(): 'rebase' | 'merge' | null {
+  if (existsSync(`${PROJECT_DIR}/.git/rebase-merge`) || existsSync(`${PROJECT_DIR}/.git/rebase-apply`)) return 'rebase'
+  if (existsSync(`${PROJECT_DIR}/.git/MERGE_HEAD`)) return 'merge'
+  return null
+}
+
+// התכנסות-מול-origin: הענף והעץ מתיישרים ל-origin/main; db/custom.db לעולם-לא-נוגע
+// (האפליקציה-החיה כותבת אליו; WAL שייך-לקובץ-החי). אם-השרשרת-המקומית על-קבוצה של-הרחוקה
+// (superset מוכח — אותו-חוק של Task 27) — גם-הייצוא-המקומי נשמר (על-יותר; סנכרון-הייצוא יאמת).
+// אם-לא — הייצוא מתכנס-ל-origin (המקור=origin לפי חוק-אי-האמון) ו-db-החי מוחלף-בשלם-הרחוק
+// (החלפת-db תחת-אפליקציה-חיה היא-זרימה-מוכחת: עורק-ב מנטר-inode ומחבר-מחדש דרך db-reconnect).
+function resyncFromOrigin(reason: string): boolean {
+  state.lastGitHealAt = new Date().toISOString()
+  const fetch = git(['fetch', 'origin'])
+  if (!fetch.ok) {
+    state.lastGitHealResult = `heal(${reason}): fetch failed`
+    log(`ריפוי-גיט: fetch נכשל — ${fetch.out.split('\n')[0] ?? ''} (כנות; ינסה-בפעימה-הבאה)`)
+    return false
+  }
+  const oldTip = git(['rev-parse', 'HEAD'])
+  const oldSha = oldTip.ok ? oldTip.out.trim().split('\n')[0] : null
+  const superset = ledgerSupersetOK()
+  const reset = git(['reset', '-q', 'origin/main']) // ממוזג: ענף+אינדקס→origin, עץ-לא-נוגע
+  if (!reset.ok) {
+    state.lastGitHealResult = `heal(${reason}): reset failed`
+    log(`ריפוי-גיט: reset נכשל — ${reset.out.split('\n')[0] ?? ''} (כנות)`)
+    return false
+  }
+  // עץ→origin לכל-מה-שאינו-db-החי (ולייצוא-מקומי-כשהוא-על-קבוצה)
+  const excludes = superset
+    ? [':(exclude)db/custom.db', ':(exclude)sovereign/chain-export/ledger.jsonl']
+    : [':(exclude)db/custom.db']
+  const checkout = git(['checkout', '--', '.', ...excludes])
+  if (!checkout.ok) {
+    state.lastGitHealResult = `heal(${reason}): checkout failed`
+    log(`ריפוי-גיט: checkout נכשל — ${checkout.out.split('\n')[0] ?? ''} (כנות)`)
+    return false
+  }
+  // קבצים-זומבים: קיימים-בענף-המקומי-הישן, חסרים-ב-origin — מחוץ-ל-db ולארטיפקטים-האפנדים
+  let staleRemoved = 0
+  if (oldSha) {
+    const oldList = git(['ls-tree', '-r', '--name-only', oldSha])
+    const newList = git(['ls-tree', '-r', '--name-only', 'origin/main'])
+    if (oldList.ok && newList.ok) {
+      const oldSet = new Set(oldList.out.split('\n').filter(Boolean))
+      const newSet = new Set(newList.out.split('\n').filter(Boolean))
+      const stale = [...oldSet].filter(
+        (p) => !newSet.has(p) && p !== 'db/custom.db' && !p.startsWith('sovereign/site/')
+      )
+      if (stale.length > 0) {
+        const rm = git(['rm', '-qf', '--', ...stale])
+        if (rm.ok) staleRemoved = stale.length
+      }
+    }
+  }
+  // מקרה-מזלג: db-החי אינו-על-קבוצה-של-origin → החלפה-בשלם-הרחוק (המקור=origin)
+  if (!superset) {
+    try {
+      const show = Bun.spawnSync(['git', 'show', 'origin/main:db/custom.db'], {
+        cwd: PROJECT_DIR,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      if (show.exitCode === 0 && show.stdout && show.stdout.length > 0) {
+        const tmp = `${PROJECT_DIR}/.git/fabric-heal-db.tmp`
+        writeFileSync(tmp, show.stdout)
+        renameSync(tmp, `${PROJECT_DIR}/db/custom.db`)
+        state.dbFileReplaced++
+        log('ריפוי-גיט: שרשרת-מקומית אינה-על-קבוצה — db-החי הוחלף-בשלם-origin (inode-חדש; החיבור-מחדש יבוא-בעקבות-ניטור-ה-inode)')
+      }
+    } catch {
+      log('ריפוי-גיט: החלפת-db-במזלג נכשלה — כנות; סנכרון-הייצוא יחשוף-את-הפער')
+    }
+  }
+  state.gitHeals++
+  state.lastGitHealResult = `healed(${reason}): superset=${superset}, staleRemoved=${staleRemoved}`
+  log(`ריפוי-גיט: הושלם — ${state.lastGitHealResult} (סה"כ ריפויים: ${state.gitHeals})`)
+  return true
+}
+
+// שער-הריפוי — רץ-בראש-כל-פעימת-גיט, לפני-הכל
+function gitStateGuard(): boolean {
+  const stuck = gitStuckState()
+  if (!stuck) return true
+  log(`ריפוי-גיט: נתגלה ${stuck} תקוע (ריצה-קודמת-שמתה) — abort → התכנסות-מול-origin`)
+  state.lastGitHealAt = new Date().toISOString()
+  const abort = git(stuck === 'rebase' ? ['rebase', '--abort'] : ['merge', '--abort'])
+  if (!abort.ok) {
+    state.lastGitHealResult = `heal: ${stuck} --abort failed`
+    log(`ריפוי-גיט: abort נכשל — ${abort.out.split('\n')[0] ?? ''} (כנות; לא-נמשך)`)
+    return false
+  }
+  return resyncFromOrigin(`stuck-${stuck}`)
+}
+
 // ===== עורק-ב: פעימת-גיט (RUNBOOK: pull → עבודה → סריקה → commit → rebase → push) =====
 // Task 28 (ריפוי-עצמי שכבת-האחסון): pull-rebase-שמביא-שינויים מחליף-את-קובץ-ה-db
 // (inode-חדש-תחת-האפליקציה) — בריכת-Prisma נשארת-על-הישן-וקוראת-מצב-מיושן-בשקט.
@@ -360,6 +469,12 @@ function gitPulse(): void {
   // (לקח-חי: Bun.file().exists() מחזיר Promise — אמת-תמידית בתנאי; existsSync בלבד)
   if (existsSync(`${PROJECT_DIR}/.git/index.lock`)) {
     state.lastGitPulseResult = 'skipped: git busy (index.lock)'
+    return
+  }
+
+  // ריפוי-מצב-גיט (Task 87) — לפני-הכל: rebase/merge תקועים מריצה-קודמת-שמתה
+  if (!gitStateGuard()) {
+    state.lastGitPulseResult = 'skipped: git-state heal failed — כנות'
     return
   }
 
