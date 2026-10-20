@@ -22,6 +22,7 @@ import { useToast } from '@/hooks/use-toast'
 import { MobileNav } from '@/components/MobileNav'
 import { AutonomyOps } from '@/components/AutonomyOps'
 import { OperationsHub } from '@/components/OperationsHub'
+import { NetworkHub } from '@/components/NetworkHub'
 import {
   Network,
   Bot,
@@ -2466,6 +2467,9 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
 
           {/* מרכז-הפיקוח-המרכזי (מחזור-#18): מימוש-הצעה-אוטונומית — כל-מדדי-הרשת במקום-אחד */}
           <OperationsHub />
+
+          {/* רכזת-הרשת (Task 88): השרשרת-המקומית מרכז-העניינים — עוגני-חוץ סביבה, במצבם-האמיתי */}
+          <NetworkHub />
 
           {/* פקח-הריבונות (Task 30 — tobi/disktree): אינטליגנציה-קודם, אפס-מחיקה */}
           <Card id="sec-map" className="scroll-mt-20">
