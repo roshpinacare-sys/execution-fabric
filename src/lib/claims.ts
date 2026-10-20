@@ -187,10 +187,11 @@ async function claimBrain(h: HeartJson): Promise<{ status: ClaimStatus; evidence
 async function claimRemoteGate(h: HeartJson): Promise<{ status: ClaimStatus; evidence: string }> {
   const r = h.lastRemoteGateResult
   if (!r) return { status: 'degraded', evidence: 'טרם-נבדק מעולם' }
-  // ירוק-אמת (Task 91 — סגירת-שקר-ענבר): 'ok' מהלב (חוזה-החדש) או מחרוזת-הישן
-  // 'completed/success @sha (=local)' — שני-הצורות משפטות-ירוק; אין-עוד-טענה-שלא-תוכל-להיות-אקטיבית.
-  const green = r === 'ok' || (r.startsWith('completed/success') && r.includes('(=local)'))
-  if (green) return { status: 'active', evidence: 'הריצה-הרחוקה על-הראש-שלנו ירוקה' }
+  // ירוק-אמת (Task 91 — סגירת-שקר-ענבר): 'ok' מהלב (ירוק-על-הראש-שלנו, חוזה-החדש)
+  // או 'completed/success…' (ירוק-כלשהו; הלב מדליק-אזהרה-משלו רק על FAILED-on-our-head וקודם-להכל).
+  // הפער-כנה בין-השניים בראייה — הראש-המקומי-חדש מהריצה הוא-מצב-רגיל (דלתא-db לא-מפעילה-runs).
+  if (r === 'ok') return { status: 'active', evidence: 'הריצה-הרחוקה ירוקה על-הראש-שלנו' }
+  if (r.startsWith('completed/success')) return { status: 'active', evidence: 'הריצה-הרחוקה ירוקה (ראש-מקומי חדש מהריצה — מצב-רגיל)' }
   return { status: 'degraded', evidence: short(r) }
 }
 
