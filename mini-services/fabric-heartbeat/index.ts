@@ -154,6 +154,9 @@ interface State {
   magnitudeCore: number | null
   lastMagnitudeAt: string | null
   lastMagnitudeResult: string | null
+  gapEvolutions: number
+  lastGapEvolutionAt: string | null
+  lastGapEvolutionResult: string | null
   narrations: number
   narrationFails: number
   lastNarrationAt: string | null
@@ -245,6 +248,9 @@ const state: State = {
   magnitudeCore: null,
   lastMagnitudeAt: null,
   lastMagnitudeResult: null,
+  gapEvolutions: 0,
+  lastGapEvolutionAt: null,
+  lastGapEvolutionResult: null,
   narrations: 0,
   narrationFails: 0,
   lastNarrationAt: null,
@@ -1301,6 +1307,10 @@ async function magnitudePulse(): Promise<void> {
       const line = `עוצמה-דיגיטלית-נמדדת: ~${d.measuredCore !== null && d.measuredCore !== undefined ? (d.measuredCore < 10 ? d.measuredCore.toFixed(1) : Math.round(d.measuredCore)) : '?'}x מול-יעד-1000x${worst ? ` · פער-הכי-גדול: ${worst.title ?? '?'} (${worst.current ?? '?'}x)` : ''}${d.dimensionsBeyondTarget ? ` · ${d.dimensionsBeyondTarget} ממדים-מעל-היעד` : ''}${d.signed?.id ? ` · נחתם #${d.signed.id} status=${d.signed.status}` : ''}`
       state.lastMagnitudeResult = line
       log(`מד-העוצמה: ${line}`)
+      // Task 94: המדידה-יורדת-לפעולה — פער-גדול → זריעת-הצעת-סגירה-עצמית (לא-ממתין-לבעלים)
+      if (worst && typeof worst.distanceToTarget === 'number' && d.signed?.status === 'DONE') {
+        void gapEvolutionPulse(worst.distanceToTarget, worst.title ?? '')
+      }
     } else {
       state.lastMagnitudeResult = `failed: HTTP ${res.status}`
       log(`מד-העוצמה: כשל-כן — ${state.lastMagnitudeResult}`)
@@ -1308,6 +1318,37 @@ async function magnitudePulse(): Promise<void> {
   } catch (e) {
     state.lastMagnitudeResult = e instanceof Error ? e.message : String(e)
     log(`מד-העוצמה: כשל-רשת — ${state.lastMagnitudeResult}`)
+  }
+}
+
+// ===== מצב-פער (Task 94): המדידה-הכנה יורדת-לפעולה — הרשת סוגרת-בעצמה את-הפערים שלה =====
+// אחרי-מדידת-עוצמה-מוצלחת: אם-הפער-הגדול ≥ 1.0 סדרי-גודל ועברו ≥ 2ש' מהזריעה-הקודמת →
+// POST /api/evolution?mode=gap — זריעת-הצעת-התפתחות-ממוקדת-בפער. תקציב-שעתי-שרת-והגנת-כפילות-קיימים.
+const GAP_EVOLUTION_MIN_MS = 2 * 60 * 60_000
+async function gapEvolutionPulse(distanceToTarget: number, gapTitle: string): Promise<void> {
+  if (distanceToTarget < 1.0) return // פער-קטן — אין-צורך-לזרוק-תקציב-LLM עליו
+  const last = state.lastGapEvolutionAt ? Date.parse(state.lastGapEvolutionAt) : 0
+  if (Number.isFinite(last) && Date.now() - last < GAP_EVOLUTION_MIN_MS) return
+  state.lastGapEvolutionAt = new Date().toISOString()
+  state.gapEvolutions++
+  try {
+    const res = await fetch(`${APP_URL}/api/evolution`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'gap' }),
+      signal: AbortSignal.timeout(180_000), // ירי-LLM אמיתי — נותנים-רשת
+    })
+    const d = (await res.json().catch(() => ({}))) as { ok?: boolean; taskId?: string; error?: string; proposal?: { title?: string } }
+    if (res.status === 201 && d.ok) {
+      state.lastGapEvolutionResult = `הוזרמה-הצעת-סגירת-פער: "${d.proposal?.title ?? '?"'}" (taskId=${d.taskId ?? '?'}) — ממד: ${gapTitle}`
+      log(`סגירת-פער-עצמית: ${state.lastGapEvolutionResult}`)
+    } else {
+      state.lastGapEvolutionResult = `לא-הוזרמה: HTTP ${res.status}${d.error ? ` — ${d.error.slice(0, 120)}` : ''}`
+      log(`סגירת-פער: ${state.lastGapEvolutionResult}`)
+    }
+  } catch (e) {
+    state.lastGapEvolutionResult = e instanceof Error ? e.message : String(e)
+    log(`סגירת-פער: כשל-רשת — ${state.lastGapEvolutionResult}`)
   }
 }
 

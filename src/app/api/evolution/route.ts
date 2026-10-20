@@ -7,6 +7,7 @@ import {
   evolutionBudgetUsed,
   EVOLUTION_BUDGET_PER_HOUR,
 } from '@/lib/evolution'
+import { collectMagnitude } from '@/lib/magnitude'
 
 // לופ-ההתפתחות-העצמית (worklog Task 26) + לולאת-הלמידה (worklog Task 28):
 // POST = מחזור-אמת אחד (ירי-LLM → ולידציה → שיגור לתור הרגיל). גוף-רשותי: {"mode":"auto"|"propose"|"learn"}.
@@ -17,7 +18,7 @@ import {
 // תקציב-שעתי כן משותף לשני-המקורות (evolution+learning): 12/שעה (Task 29) — מעבר 429 כן.
 // GET  = היסטוריית-המחזורים-העצמיים + תקציב + ספירות (שני-המקורות). הצגת-עצמי מלאה, אפס-הסתרה.
 
-type Mode = 'auto' | 'propose' | 'learn'
+type Mode = 'auto' | 'propose' | 'learn' | 'gap'
 
 const SELF_SOURCES = ['evolution', 'learning']
 
@@ -25,7 +26,7 @@ export async function POST(req: Request) {
   let mode: Mode = 'auto'
   try {
     const body = (await req.json()) as { mode?: string } | null
-    if (body && (body.mode === 'propose' || body.mode === 'learn' || body.mode === 'auto')) {
+    if (body && (body.mode === 'propose' || body.mode === 'learn' || body.mode === 'auto' || body.mode === 'gap')) {
       mode = body.mode
     }
   } catch {
@@ -52,7 +53,26 @@ export async function POST(req: Request) {
   }
 
   let r
-  if (mode === 'learn') {
+  if (mode === 'gap') {
+    // Task 94 — מצב-פער: הרשת פועלת-לסגירת-הפערים-הנמדדים שלה-בעצמה (ארכיטקטורה-כבעלים):
+    // מדידה-חיה → הפער-הגדול-ביותר (distanceToTarget-חיובי) → זריעת-הצעה-ממוקדת. אין-פער = 404 כן.
+    const mag = await collectMagnitude()
+    const top = mag.gaps.find((g) => g.distanceToTarget > 0)
+    if (!top) {
+      return NextResponse.json(
+        {
+          ok: false,
+          mode,
+          error: 'nothing-to-close: אין-פער-נמדד-מעל-היעד — כל-הממדים-הניתנים-להשוואה חוצים-את-היעד (כנות, לא-המצאת-עבודה)',
+          errorClass: 'nothing-to-close',
+          measuredCore: mag.measuredCore,
+        },
+        { status: 404 }
+      )
+    }
+    const seed = `ממד: ${top.title} · מכפלה-נמדדת: ${top.current}x · יעד: 1000x · פער: ${top.distanceToTarget} סדרי-גודל (מדידה-כנה-מראיות-חיות, לא-הצהרה)`
+    r = await proposeAndQueueEvolutionTask(seed)
+  } else if (mode === 'learn') {
     const highs = await findUnaddressedHighFindings()
     if (highs.length === 0) {
       return NextResponse.json(

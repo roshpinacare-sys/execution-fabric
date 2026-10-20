@@ -35,21 +35,65 @@ export function nvidiaPreferredModel(): string | null {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-  // עדיף המודל שאומת חי: nemotron-3-super עם thinking כבוי (200 + RAIL-OK)
-  return models.find((m) => m.includes('nemotron-3-super')) ?? models[0] ?? null
+  // עדיף-המודל-שאומת-חי (Task 94): ultra-550b אומת-200-חי-אחרי-ש-super-120b נמחק-אצל-הספק.
+  // הקריאות-עצמן-רצות-על-סולם-המודלים-המרפא-עצמו — כאן-תצוגה-בלבד.
+  return models.find((m) => m.includes('ultra-550b')) ?? models[0] ?? null
 }
 
 const NVIDIA_TIMEOUT_MS = 90_000
 
+// סולם-מודלים-מרפא-עצמו (Task 94): האמת-אצל-הספק משתנה — מודל-שמחזיר-404 "Function Not Found"
+// נחתם-מת-לשעה-בזיכרון והקריאה עוברת-אוטומטית למודל-הבא-ב-NVIDIA_MODELS. אין-עוד-העדפה-קשיחה
+// שמצהירה-חיים-על-מודל-מת (השקר-שנתפס-חי: super-120b נמחק-אצל-הספק-בעוד-המדריך-העדיף-אותו).
+const NVIDIA_DEAD_MODEL_MS = 60 * 60_000
+const nvidiaDeadModels = new Map<string, number>()
+
+function nvidiaModelLadder(): string[] {
+  const env = loadLlmEnv()
+  return (env.NVIDIA_MODELS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
 // ירי NVIDIA NIM אמיתי (OpenAI-compatible). זריקות נושאות סטטוס ל-classify.
+// סולם-מרפא-עצמו: מודל-404 → מסומן-מת-שעה → הבא-בתור. הכול-מת → כשל-כן-בשמות-המודלים.
 export async function nvidiaChat(system: string, user: string): Promise<string> {
   const env = loadLlmEnv()
   const key = env.NVIDIA_API_KEY
   const base = (env.NVIDIA_BASE_URL ?? 'https://integrate.api.nvidia.com/v1').replace(/\/$/, '')
-  const model = nvidiaPreferredModel()
-  if (!key || !model) {
+  if (!key) {
     throw new Error('provider-error: nvidia rail not configured')
   }
+  const ladder = nvidiaModelLadder()
+  if (ladder.length === 0) {
+    throw new Error('provider-error: nvidia ladder empty (NVIDIA_MODELS)')
+  }
+  const now = Date.now()
+  const alive = ladder.filter((m) => (nvidiaDeadModels.get(m) ?? 0) < now)
+  const models = alive.length > 0 ? alive : [ladder[0]] // הכול-חתום-מת? מנסים-את-הראשון-בכנות — הכשל-ידווח-בשמו
+  const failures: string[] = []
+  for (const model of models) {
+    try {
+      return await nvidiaChatOnce(model, base, key, system, user)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      if (/HTTP 404|Function .*Not found/i.test(msg)) {
+        nvidiaDeadModels.set(model, now + NVIDIA_DEAD_MODEL_MS)
+      }
+      failures.push(`${model}: ${msg.slice(0, 110)}`)
+    }
+  }
+  throw new Error(`provider-error: nvidia ladder exhausted — ${failures.join(' | ')}`)
+}
+
+async function nvidiaChatOnce(
+  model: string,
+  base: string,
+  key: string,
+  system: string,
+  user: string,
+): Promise<string> {
   const body = {
     model,
     messages: [

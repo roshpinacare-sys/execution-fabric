@@ -163,10 +163,15 @@ export type EvolutionResult =
 
 // מחזור-הצעה אחד: מצב-אמת → ירי-LLM אמיתי → ולידציה + הגנת-כפילות → שיגור לתור.
 // אין שיגור בלי הצעה-תקפה — כשל הסולם חוזר כן למתקשר.
-export async function proposeAndQueueEvolutionTask(): Promise<EvolutionResult> {
+// seed (Task 94): הזרקת-פער-נמדד-ממד-העוצמה — הרשת לא רק מודדת-את-הפערים שלה,
+// אלא פועלת-לסגירתם: מדידה→הכרעה→פעולה→חתימה. אין-זריעה = הצעה-רגילה.
+export async function proposeAndQueueEvolutionTask(seed?: string): Promise<EvolutionResult> {
   const t0 = Date.now()
   const ctx = await gatherEvolutionContext()
-  const userMsg = contextUserPrompt(ctx)
+  // זריעת-פער (Task 94): הנחיה-ממוקדת מהמדידה-החיה — אין-זריעה שקרית: רק-פער-נמדד-אמיתי
+  const userMsg = seed
+    ? `${contextUserPrompt(ctx)}\n\nהנחיית-פער-נמדד (ממד-העוצמה, ראייה-חיה):\n${seed}\nהצע-משימה-מעשית-אחת-בת-ביצוע שמקדמת-בפועל את-סגירת-הפער-הזה. אסור-להמציא-פער-אחר.`
+    : contextUserPrompt(ctx)
 
   const base: ChainCandidate[] = [
     { name: 'zai-primary', family: 'zai', call: () => callLlm(EVOLUTION_PRIMARY, userMsg) },
