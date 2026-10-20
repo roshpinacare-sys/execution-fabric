@@ -69,6 +69,8 @@ const DISPATCH_PULSE_MS = 15 * 60_000
 const DISPATCH_PULSE_FIRST_MS = 7 * 60_000
 const TREASURY_PULSE_MS = 30 * 60_000 // Task 101: עורק-הקופה — אימות-כספת FixedFloat חי (1 יחידת-משקל לפעימה — ריחוק-בטוח מתקרת-250/דק')
 const TREASURY_PULSE_FIRST_MS = 9 * 60_000
+const FLOW_PULSE_MS = 60_000 // Task 104: עורק-אבחון-הזרימה — "איפה-הזרימה-חסומה-עכשיו" כל-דקה
+const FLOW_PULSE_FIRST_MS = 20_000
 const RESTORE_PULSE_MS = 6 * 60 * 60_000 // Task 70: עורק-ח — הוכחה-קבועה שהכפילות-הרחוקה מחזירה-מערכת-שלמה
 const RESTORE_PULSE_FIRST_MS = 150_000
 // מחזור-חדשנות #12 (Task 79): עורק-ח-bis — תרגיל-התמונה-השעתית (מקור-שני, בלתי-תלוי בגיט).
@@ -235,6 +237,13 @@ interface State {
   treasuryAuth: boolean | null
   lastTreasuryAt: string | null
   lastTreasuryResult: string | null
+  flowPulses: number // Task 104: עורק-אבחון-הזרימה
+  flowBlocked: number // כמה-אבחנות-מצאו-זרימה-חסומה
+  flowDegraded: number // כמה-אבחנות-מצאו-זרימה-נגוסה
+  flowActions: number // כמה-פעמים-הזניק-עורקי-ניקוז בעקבות-אבחון
+  lastFlowAt: string | null
+  lastFlowState: string | null
+  lastFlowResult: string | null
 }
 
 const state: State = {
@@ -350,6 +359,13 @@ const state: State = {
   treasuryAuth: null,
   lastTreasuryAt: null,
   lastTreasuryResult: null,
+  flowPulses: 0,
+  flowBlocked: 0,
+  flowDegraded: 0,
+  flowActions: 0,
+  lastFlowAt: null,
+  lastFlowState: null,
+  lastFlowResult: null,
 }
 
 let lastTickAttemptMs = Date.now()
@@ -1020,6 +1036,45 @@ async function dispatchPulse(): Promise<void> {
   }
 }
 
+// ===== עורק-אבחון-הזרימה (Task 104) — הראייה-החיה: "איפה-הזרימה-נחסמת-עכשיו" =====
+// כל-דקה הלב שואל-את-מסלול-האבחון (/api/flow — קריאה-אמיתית-מהמסד, אפס-טענות).
+// flowing = שקט-תקין. degraded/blocked = הזנקת-עורקי-ניקוז (recovery+dispatch — להם-צינון-עצמי)
+// וספירה-כנה. האבחון-גם-חשוף-לדשבורד (FlowGuard) — הסתימה-רואה-עין-לפני-שהיא-כאב.
+async function flowPulse(): Promise<void> {
+  state.flowPulses++
+  state.lastFlowAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/flow`, { signal: AbortSignal.timeout(15_000) })
+    const d = (await res.json().catch(() => ({}))) as {
+      ok?: boolean
+      state?: string
+      bottleneck?: { code?: string | null; human?: string }
+      queue?: { queued?: number; running?: number; transientFailed?: number }
+    }
+    if (res.status !== 200 || !d.ok || !d.state) {
+      state.lastFlowResult = `failed: HTTP ${res.status}`
+      state.lastFlowState = 'unknown'
+      log(`עורק-אבחון-הזרימה: כשל-כן — ${state.lastFlowResult}`)
+      return
+    }
+    state.lastFlowState = d.state
+    if (d.state === 'flowing') {
+      state.lastFlowResult = `זורמת (${d.bottleneck?.human?.slice(0, 70) ?? 'ok'})`
+      return
+    }
+    if (d.state === 'blocked') state.flowBlocked++
+    else state.flowDegraded++
+    state.flowActions++
+    state.lastFlowResult = `${d.state === 'blocked' ? 'חסומה' : 'נגוסה'}: ${d.bottleneck?.human?.slice(0, 90) ?? '?'} — מזניק-עורקי-ניקוז`
+    log(`עורק-אבחון-הזרימה: ${state.lastFlowResult} (סה"כ-הזנקות: ${state.flowActions})`)
+    await Promise.allSettled([recoveryPulse(), dispatchPulse()])
+  } catch (e) {
+    state.lastFlowState = 'unknown'
+    state.lastFlowResult = e instanceof Error ? e.message : String(e)
+    log(`עורק-אבחון-הזרימה: כשל-רשת — ${state.lastFlowResult}`)
+  }
+}
+
 // ===== עורק-הקופה (Task 101) — היכולת-הכלכלית חיה, חתומה, ונבדקת-ברציפות =====
 // אימות-ccies חי כל-30 דק' מול FixedFloat (1 יחידת-משקל — ריחוק-בטוח מתקרת-250/דק').
 // המפתח-עצמו יושב ב-.env.local(600)/.vault(700) ואסור-בכל-פלט; הלב רואה רק פסק-דין:
@@ -1622,6 +1677,8 @@ setTimeout(() => void dispatchPulse(), DISPATCH_PULSE_FIRST_MS) // Task 97: עו
 setInterval(() => void dispatchPulse(), DISPATCH_PULSE_MS)
 setTimeout(() => void treasuryPulse(), TREASURY_PULSE_FIRST_MS) // Task 101: עורק-הקופה — אימות-כספת
 setInterval(() => void treasuryPulse(), TREASURY_PULSE_MS)
+setTimeout(() => void flowPulse(), FLOW_PULSE_FIRST_MS) // Task 104: עורק-אבחון-הזרימה
+setInterval(() => void flowPulse(), FLOW_PULSE_MS)
 setTimeout(() => void opsPulse(), OPS_PULSE_FIRST_MS)
 setInterval(() => void opsPulse(), OPS_PULSE_MS)
 setTimeout(() => void selftestPulse(), SELFTEST_PULSE_FIRST_MS)

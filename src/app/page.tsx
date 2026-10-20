@@ -27,6 +27,7 @@ import { ClaimsAuditor } from '@/components/ClaimsAuditor'
 import { MagnitudeMeter } from '@/components/MagnitudeMeter'
 import { SovereigntyMeter } from '@/components/SovereigntyMeter'
 import { LivePulse } from '@/components/LivePulse'
+import { FlowGuard } from '@/components/FlowGuard'
 import { OperatorGate } from '@/components/OperatorGate'
 import {
   Network,
@@ -2469,6 +2470,9 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
 
           {/* דופק-התנועה (Task 102): הראיה-בעין-שהרשת זורמת — מהירות-אמת מאיבר-המדידה */}
           <LivePulse />
+
+          {/* מגן-הזרימה (Task 104): איפה-הזרימה-נחסמת-עכשיו — פסק-דין-חי-מנומק; הסוף-של-סתימות-שקטות */}
+          <FlowGuard />
 
           {/* שער-התפעול-האוטונומי (Task 43): הדף כמשטח-תפעול — לאוטונומיה ולבעלים כאחד */}
           <OperatorGate />

@@ -12,6 +12,13 @@ import { autoProposeHandoffForTask } from '@/lib/autohandoff'
 // משימה-תקועה ב-RUNNING מעל 10 דקות (למשל הפסקת-שרת באמצע-ירי) ניתנת-לתביעה-מחדש — כמו-שער-ההעברה.
 const STALE_RUNNING_MS = 10 * 60_000
 
+// רסן-ביצוע (Task 104): לעולם לא משאירים-חריץ-RUNNING-חי-בלי-חוזה-זמן. השרשרת-עצמה חוסמת
+// פר-קריאה (90ש') אך-סולם-מועמדים × פידבק-חוזה יכול-להצטבר-מעל-סף-התביעה-מחדש (10דק') —
+// ואז-הסוואף-תובע-מחדש-בזמן-שהביצוע-המקורי-עוד-חי (כפל-ירי + כתיבה-התנגשות).
+// החוק-החדש: תקרת-8.5דק' < סף-10דק' — בחריגה, המשימה-נכשלת-כן (class=timeout) ומשחררת-את-החריץ
+// מוקדם. הירי-הנטוש-ממשיך-ברקע-בלי-כתיבה (race לא-כותב) — הכנות-שלמה: כשל-חתום, לא-תלייה.
+const EXEC_CAP_MS = 8.5 * 60_000
+
 export interface ExecuteResult {
   claimed: boolean
   executed: boolean
@@ -76,12 +83,25 @@ export async function executeTaskOnce(id: string): Promise<ExecuteResult> {
     }
   }
 
-  const result = await runTaskChain(
-    task.kind as TaskKind,
-    task.title,
-    task.prompt,
-    context ? { context } : undefined
-  )
+  const chainStart = Date.now()
+  const result = await Promise.race([
+    runTaskChain(task.kind as TaskKind, task.title, task.prompt, context ? { context } : undefined),
+    new Promise<{ ok: false; worker: 'exhausted'; errorClass: 'timeout'; error: string; attempts: number; durationMs: number }>(
+      (resolve) =>
+        setTimeout(
+          () =>
+            resolve({
+              ok: false,
+              worker: 'exhausted',
+              errorClass: 'timeout',
+              error: `חוזה-זמן: הביצוע-חרג-מ-${Math.round(EXEC_CAP_MS / 60_000)}דק' (רסן-ביצוע Task 104) — החריץ-משוחרר-לפני-סף-התביעה-מחדש`,
+              attempts: task.attempts + 1,
+              durationMs: Date.now() - chainStart,
+            }),
+          EXEC_CAP_MS,
+        ),
+    ),
+  ])
 
   // הקשחה (Task 28): פעימת-הגיט-האוטונומית נוגעת בקובץ-ה-db (commit/push/pull-rebase) —
   // כתיבת-תוצאה יכולה-ליפול בחלון-חולף (readonly-רגעי / P2025 עקב-החלפת-inode תחת-הבריכה).
