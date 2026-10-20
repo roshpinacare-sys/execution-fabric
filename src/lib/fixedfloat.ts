@@ -17,10 +17,27 @@ import { createHmac } from 'crypto'
 const FF_ENDPOINT = 'https://ff.io/api/v2'
 const FF_TIMEOUT_MS = 15_000
 
+// גישה-דינמית-בזמן-ריצה (Task 101 — לקח-אבחון): Turbopack מחליף `process.env.X`
+// סטטית-בזמן-קומפילציה לפי snapshot ישן — מה שהשאיר את הספרייה עיוורת למפתח.
+// גישה דרך-שם-משתנה אינה-ניתנת-להחלפה-סטטית — הכספת נקראת חי מזיכרון-התהליך.
+function envGet(name: string): string | undefined {
+  return (process.env as Record<string, string | undefined>)[name]
+}
+
 export function ffConfigured(): { key: boolean; secret: boolean } {
-  const key = process.env.FIXEDFLOAT_API_KEY ?? ''
-  const secret = process.env.FIXEDFLOAT_API_SECRET ?? ''
+  const key = envGet('FIXEDFLOAT_API_KEY') ?? ''
+  const secret = envGet('FIXEDFLOAT_API_SECRET') ?? ''
   return { key: key.length >= 16, secret: secret.length >= 16 }
+}
+
+// אבחון-זמני (Task 101): מה-המודול עצמו רואה מתוך-process.env — בוליאנים-בלבד
+export function ffDebugEnv(): { keys: number; fixed: number; hasDatabase: boolean } {
+  const ks = Object.keys(process.env as Record<string, string | undefined>)
+  return {
+    keys: ks.length,
+    fixed: ks.filter((k) => k.startsWith('FIXED')).length,
+    hasDatabase: !!(process.env as Record<string, string | undefined>)['DATABASE_URL'],
+  }
 }
 
 // מסחר-נעול-כברירת-מחדל: נפתח רק כשהבעלים מציב TREASURY_TRADING_ENABLED=true
@@ -49,14 +66,14 @@ async function ffCall<T>(method: string, params?: Record<string, unknown>): Prom
   }
   // חוק-החתימה: הגוף המדויק שנחתם = הגוף שנשלח. בלי-פרמטרים = מחרוזת-ריקה.
   const body = params && Object.keys(params).length > 0 ? JSON.stringify(params) : ''
-  const sign = createHmac('sha256', process.env.FIXEDFLOAT_API_SECRET as string).update(body).digest('hex')
+  const sign = createHmac('sha256', envGet('FIXEDFLOAT_API_SECRET') ?? '').update(body).digest('hex')
   try {
     const res = await fetch(`${FF_ENDPOINT}/${method}`, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json; charset=UTF-8',
-        'X-API-KEY': process.env.FIXEDFLOAT_API_KEY as string,
+        'X-API-KEY': envGet('FIXEDFLOAT_API_KEY') ?? '',
         'X-API-SIGN': sign,
       },
       ...(body ? { body } : {}),
