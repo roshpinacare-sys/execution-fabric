@@ -93,6 +93,13 @@ const DOCS_HISTORY_PULSE_FIRST_MS = 105_000
 const NARRATE_TIMEOUT_MS = 120_000 // Task 39: ירי-TTS אמיתי — מהיר, אך-נותנים-רשת
 const APP_GUARD_MS = 15_000
 const APP_GUARD_FAILS_TO_RESTART = 3
+// מחזור-הרפואה-החיה (2026-10-20): עורק-יג — הלב משגיח על הזקיפה.
+// הלקח-החי: הזקיפה מתה 03:40 ואף-שכבה לא שמה-לב ~45 דק׳ — היא-המשגיחה, ואיש-לא-השגיח-עליה.
+// מעתה: השגחה-הדדית בתחומי-אחריות מובחנים — הזקיפה מחיה לב+עד; הלב מחיה אפליקציה+זקיפה;
+// העד (קריאה-בלבד) מעיד על-השרשרת; ה-selftest חותם-את-מצב-הכל-בשרשרת (status כנה).
+const KEEPER_GUARD_MS = 15_000
+const KEEPER_GUARD_FAILS_TO_RESTART = 3
+const KEEPER_GUARD_BACKOFF_MS = 60_000
 
 interface State {
   startedAt: string
@@ -134,6 +141,9 @@ interface State {
   appRestarts: number
   lastAppGuardAt: string | null
   lastAppGuardResult: string | null
+  keeperRestarts: number
+  lastKeeperGuardAt: string | null
+  lastKeeperGuardResult: string | null
   dbFileReplaced: number
   lastReconnectResult: string | null
   restorePulses: number
@@ -206,6 +216,9 @@ const state: State = {
   appRestarts: 0,
   lastAppGuardAt: null,
   lastAppGuardResult: null,
+  keeperRestarts: 0,
+  lastKeeperGuardAt: null,
+  lastKeeperGuardResult: null,
   dbFileReplaced: 0,
   lastReconnectResult: null,
   restorePulses: 0,
@@ -626,6 +639,72 @@ async function appGuard(): Promise<void> {
     state.lastAppGuardResult = `down (${appGuardFails}/${APP_GUARD_FAILS_TO_RESTART})`
   }
   appGuardBusy = false
+}
+
+// ===== עורק-יג: שומר-הזקיפה (מחזור-הרפואה-החיה) — הלב מחיה את מחייה-הלב =====
+// אותו-דפוס-של-עורק-0: נאמנות-לגוף (לא-לכותרת), 3 כשלים = הזנקה, backoff-נגד-סערת-הזנקות,
+// והריגת-מחזיקי-הפורט לפני-הספון (לקח-77: זומבי-שמחזיק-פורט = EADDRINUSE-לנצח).
+let keeperGuardFails = 0
+let keeperGuardBusy = false
+let keeperGuardLastRespawnMs: number | null = null
+
+async function keeperGuard(): Promise<void> {
+  if (keeperGuardBusy) return
+  keeperGuardBusy = true
+  state.lastKeeperGuardAt = new Date().toISOString()
+  try {
+    const res = await fetch('http://127.0.0.1:3051/health', { signal: AbortSignal.timeout(5_000) })
+    // נאמנות-לגוף: {"ok":false} בגוף = מת — גם-אם-HTTP-200 (לקח-העיוורון, מחזור-#10).
+    let bodyOk = false
+    try {
+      const j = (await res.json()) as { ok?: boolean }
+      bodyOk = j.ok === true
+    } catch {
+      bodyOk = false
+    }
+    if (res.ok && bodyOk) {
+      keeperGuardFails = 0
+      state.lastKeeperGuardResult = 'ok'
+      keeperGuardBusy = false
+      return
+    }
+    keeperGuardFails++
+  } catch {
+    keeperGuardFails++
+  }
+
+  if (keeperGuardFails >= KEEPER_GUARD_FAILS_TO_RESTART) {
+    if (keeperGuardLastRespawnMs && Date.now() - keeperGuardLastRespawnMs < KEEPER_GUARD_BACKOFF_MS) {
+      state.lastKeeperGuardResult = `down — respawn-backoff`
+      keeperGuardBusy = false
+      return
+    }
+    keeperGuardLastRespawnMs = Date.now()
+    state.lastKeeperGuardResult = 'restarting keeper...'
+    log('שומר-הזקיפה: הזקיפה לא עונה — מזניק מחדש (הריגת-מחזיקי-פורט קודם — לקח-77)')
+    try {
+      Bun.spawnSync(
+        ['bash', '-c', 'pids=$(lsof -t -i:3051 2>/dev/null); [ -n "$pids" ] && kill -9 $pids; sleep 1'],
+        { cwd: PROJECT_DIR, stdout: 'ignore', stderr: 'ignore' }
+      )
+      Bun.spawn(['bun', 'run', 'dev'], {
+        cwd: path.join(PROJECT_DIR, 'mini-services', 'survival-keeper'),
+        stdin: 'ignore',
+        stdout: 'ignore',
+        stderr: 'ignore',
+      })
+      state.keeperRestarts++
+      state.lastKeeperGuardResult = `respawned (#${state.keeperRestarts}) — ממתין לבריאות`
+      log(`שומר-הזקיפה: הוזנק מופע-חדש (#${state.keeperRestarts})`)
+    } catch (e) {
+      state.lastKeeperGuardResult = `spawn failed: ${e instanceof Error ? e.message : String(e)}`
+      log(`שומר-הזקיפה: כשל-הזנקה כן — ${state.lastKeeperGuardResult}`)
+    }
+    keeperGuardFails = 0
+  } else {
+    state.lastKeeperGuardResult = `down (${keeperGuardFails}/${KEEPER_GUARD_FAILS_TO_RESTART})`
+  }
+  keeperGuardBusy = false
 }
 
 // ===== עורק-ג: פעימת-התפתחות (Task 26) — הרשת מציעה לעצמה עבודה =====
@@ -1085,6 +1164,8 @@ setInterval(() => void docsPulse(), DOCS_PULSE_MS)
 setTimeout(() => void docsHistoryPulse(), DOCS_HISTORY_PULSE_FIRST_MS) // מחזור-#16: היסטוריית-המסמכים
 setInterval(() => void docsHistoryPulse(), DOCS_HISTORY_PULSE_MS)
 setInterval(() => void appGuard(), APP_GUARD_MS)
+setInterval(() => void keeperGuard(), KEEPER_GUARD_MS) // מחזור-הרפואה-החיה: עורק-יג
 
 void tick() // פעימה-ראשונה מיידית
 void appGuard() // בדיקת-בריאות ראשונה מיידית
+void keeperGuard() // בדיקת-זקיפה ראשונה מיידית
