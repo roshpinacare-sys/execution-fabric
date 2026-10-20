@@ -21,7 +21,7 @@ function parseSource(req: NextRequest): DrillSource {
   // מחזור-#13: 'export' — המקור-השלישי (הערה-ללקח-החי: בגרסה-הראשונה 'export' נפל-בחזרה
   // ל-'git' — הפעימה-בדקה-בשקט-מקור-אחר-מזה-שנשלח; התגלה-רק-בפורנזיקה-של-השרשרת.
   // הלקח: כל-מקור-חדש-חייב-להיכנס-לניתוח-כאן-וב-WORKERS-יחד — אין-ברירת-מחדל-שקטה-למקור-שלא-נבחן)
-  return s === 'snapshot' ? 'snapshot' : s === 'export' ? 'export' : 'git'
+  return s === 'snapshot' ? 'snapshot' : s === 'export' ? 'export' : s === 'mirror' ? 'mirror' : 'git'
 }
 
 export async function GET(req: NextRequest) {

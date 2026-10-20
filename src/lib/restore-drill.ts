@@ -32,6 +32,14 @@
 // בלי-עותק-עבודה (אפס-mkdtemp) — ואז אותה-הצלבת-קידומת-מול-הייצור. יתרון-היסטוריית-הגיט:
 // הייצוא-שנחתם-אתמול אינו-נשחק-על-ידי-פגיעה-בקובץ-היום. כנות: קובץ-חסר=export-missing,
 // שורה-פגומה=export-corrupt-line-N, פער-רצף=export-gap-at-N — כשלים-חתומים, לא-המצאות.
+// מחזור-חדשנות #17 (Task 95): מקור-שחזור רביעי — המראה-המקומית (bare-mirror של הזקיפה,
+// מחוץ-לעץ-הפרויקט). הפער: שלושת-המקורות-הקיימים נשענים-על גישה-לגיט-המרוחק (clone-גיט,
+// ייצוא-שנדחף-לגיט) או על תמונת-db בלבד (בלי-עץ-קוד). אם-הרשת-מתה-והסנדבוקס-נמחק —
+// המראה-המקומית היא-המקור-היחיד-שמשחזר-עץ-מלא+db. עד-היום היא-התעדכנה-אך-לא-נבחנה-מעולם
+// כמקור-שחזור. מעתה: source='mirror' — clone-מקומי מהמראה → אותו-אימות-עצמאי-בזרימה →
+// אותה-הצלבת-קידומת-מול-הייצור → חתימה-ב-worker-משלו (drill:restore-mirror).
+// כנות: מראה-חסרה = mirror-missing — כשל-חתום, לא-המצאה. clone-מקומי — אפס-רשת,
+// אפס-credentials, אפס-מגע-במכסת-ה-REST.
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
@@ -47,15 +55,18 @@ const WORKERS: Record<DrillSource, string> = {
   git: 'drill:restore',
   snapshot: 'drill:restore-snapshot',
   export: 'drill:restore-export',
+  mirror: 'drill:restore-mirror',
 }
 const MIN_INTERVAL_MS = 30 * 60_000
 const CLONE_TIMEOUT_MS = 120_000
 // מקור-התמונות-השעתיות — נגזר-מ-cwd, מחוץ-לעץ-הפרויקט (כמו המראה ה-bare של הזקיפה)
 const SNAPSHOT_DIR = path.join(process.cwd(), '..', 'fabric-backups')
+// מקור-המראה-המקומית (Task 95) — באותו-מקום שהזקיפה מתחזקת (PROJECT_ROOT/../fabric-mirror.git)
+const MIRROR_DIR = path.join(process.cwd(), '..', 'fabric-mirror.git')
 const SNAPSHOT_NAME = /^db-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.db$/
 const SNAPSHOT_MAX_AGE_MS = 90 * 60_000 // מעבר-לזה: המכונה-השעתית-עצמה-פסקה → כשל-כן
 
-export type DrillSource = 'git' | 'snapshot' | 'export'
+export type DrillSource = 'git' | 'snapshot' | 'export' | 'mirror'
 
 export interface RestoreDrillResult {
   ok: boolean
@@ -171,6 +182,15 @@ export async function runRestoreDrill(force = false, source: DrillSource = 'git'
         execFileSync(
           'git',
           ['clone', '--depth', '1', '--single-branch', '--branch', 'main', '-c', `credential.helper=${helper}`, REPO_URL, dir as string],
+          { timeout: CLONE_TIMEOUT_MS, stdio: 'pipe', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
+        )
+        copyDb = path.join(dir as string, 'db', 'custom.db')
+      } else if (source === 'mirror') {
+        // Task 95: clone-מקומי מהמראה — בלי-רשת, בלי-credentials, בלי-מכסת-REST.
+        if (!existsSync(MIRROR_DIR)) throw new Error('mirror-missing')
+        execFileSync(
+          'git',
+          ['clone', '--depth', '1', '--single-branch', '--branch', 'main', MIRROR_DIR, dir as string],
           { timeout: CLONE_TIMEOUT_MS, stdio: 'pipe', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
         )
         copyDb = path.join(dir as string, 'db', 'custom.db')

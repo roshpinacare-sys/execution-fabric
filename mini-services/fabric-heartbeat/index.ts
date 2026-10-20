@@ -76,6 +76,10 @@ const EXPORT_SYNC_PULSE_MS = 10 * 60_000
 const EXPORT_SYNC_PULSE_FIRST_MS = 60_000
 const EXPORT_RESTORE_PULSE_MS = 30 * 60_000
 const EXPORT_RESTORE_PULSE_FIRST_MS = 120_000
+// Task 95: עורק-ח-tris — תרגיל-המראה-המקומית. המקור-הרביעי: בלי-רשת, בלי-גיט-מרוחק.
+// אם-הסנדבוקס-נמחק-והרשת-מתה — זו-ההוכחה-הקבועה-שההישרדות-המקומית-משחזרת-באמת.
+const MIRROR_RESTORE_PULSE_MS = 30 * 60_000
+const MIRROR_RESTORE_PULSE_FIRST_MS = 180_000
 // מחזור-חדשנות #14 (Task 81): עורק-ט — תרגיל-אטימות-ההיסטוריה.
 // כל-שעה: POST /api/sovereign/history-drill — הייצוא-מהקומיט-העתיק-ביותר-במראה-ה-bare
 // נחשב-מחדש-מה-Genesis-בזיכרון-ומוצלב-כקידומת-ביט-ביט-מול-הייצור. שלושת-התרגילים-
@@ -187,6 +191,10 @@ interface State {
   exportRestoreOk: boolean | null
   lastExportRestoreAt: string | null
   lastExportRestoreResult: string | null
+  mirrorRestorePulses: number
+  mirrorRestoreOk: boolean | null
+  lastMirrorRestoreAt: string | null
+  lastMirrorRestoreResult: string | null
   historyPulses: number
   historyOk: boolean | null
   lastHistoryAt: string | null
@@ -281,6 +289,10 @@ const state: State = {
   exportRestoreOk: null,
   lastExportRestoreAt: null,
   lastExportRestoreResult: null,
+  mirrorRestorePulses: 0,
+  mirrorRestoreOk: null,
+  lastMirrorRestoreAt: null,
+  lastMirrorRestoreResult: null,
   historyPulses: 0,
   historyOk: null,
   lastHistoryAt: null,
@@ -1068,6 +1080,42 @@ async function exportRestorePulse(): Promise<void> {
   }
 }
 
+// ===== עורק-ח-tris (Task 95): פעימת-תרגיל-המראה-המקומית — המקור-הרביעי =====
+// כל-30דק': POST /api/sovereign/restore-drill?source=mirror — clone-מקומי מהמראה-ה-bare
+// (מחוץ-לעץ, מתוחזקת-על-ידי-הזקיפה) → אימות-שרשרת-עצמאי → הצלבת-קידומת → חתימת-DRILL.
+// זו-ההוכחה-הקבועה-שההישרדות-המקומית-משחזרת-מערכת-שלמה-גם-בלי-רשת-ובלי-גיט-מרוחק —
+// כלומר: מוות-סנדבוקס+אובדן-רשת בו-זמנית אינו-קץ-העולם. כשל = זעקה-גלויה.
+async function mirrorRestorePulse(): Promise<void> {
+  state.mirrorRestorePulses++
+  state.lastMirrorRestoreAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/sovereign/restore-drill?source=mirror`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(60_000), // clone-מקומי — בן-שניות; נותנים-רווח-למנוע
+    })
+    const d = (await res.json()) as {
+      ok?: boolean
+      drill?: { ran?: boolean; ok?: boolean; reason?: string; verified?: number; prefixMatch?: boolean }
+    }
+    const dr = d.drill ?? {}
+    if (dr.ran === false) {
+      state.lastMirrorRestoreResult = `skipped: ${dr.reason ?? 'recent'}`
+    } else if (d.ok && dr.ok) {
+      state.mirrorRestoreOk = true
+      state.lastMirrorRestoreResult = `restored: ${dr.verified} entries · prefixMatch:${dr.prefixMatch}`
+      log(`עורק-המראה: המקור-הרביעי מאומת ✓ ${state.lastMirrorRestoreResult}`)
+    } else {
+      state.mirrorRestoreOk = false
+      state.lastMirrorRestoreResult = `FAILED: ${dr.reason ?? 'unknown'}`
+      log(`עורק-המראה: 🚨 תרגיל-המראה-המקומית נכשל — ${state.lastMirrorRestoreResult}`)
+    }
+  } catch (e) {
+    state.mirrorRestoreOk = false
+    state.lastMirrorRestoreResult = `error: ${e instanceof Error ? e.message : String(e)}`
+    log(`עורק-המראה: כשל-רשת — ${state.lastMirrorRestoreResult}`)
+  }
+}
+
 // ===== עורק-ט (מחזור-חדשנות #14): פעימת-אטימות-ההיסטוריה — העבר מוכח-שלא-נשכתה =====
 // כל-שעה: POST /api/sovereign/history-drill — הייצוא-מהקומיט-העתיק-ביותר-במראה-ה-bare
 // מחושב-מחדש-מה-Genesis-בזיכרון (מאמת-הקנון) ומוצלב-כקידומת-ביט-ביט-מול-הייצור-החי.
@@ -1379,7 +1427,7 @@ setInterval(() => {
 }, 60_000)
 
 log(
-  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', פעימת-אמת-עצמית כל ${SELFTEST_PULSE_MS / 60_000} דק', תרגיל-תמונה כל ${SNAPSHOT_RESTORE_PULSE_MS / 60_000} דק', סנכרון-ייצוא כל ${EXPORT_SYNC_PULSE_MS / 60_000} דק', תרגיל-ייצוא כל ${EXPORT_RESTORE_PULSE_MS / 60_000} דק', אטימות-היסטוריה כל ${HISTORY_PULSE_MS / 60_000} דק', אטימות-מסמכים כל ${DOCS_PULSE_MS / 60_000} דק', היסטוריית-מסמכים כל ${DOCS_HISTORY_PULSE_MS / 60_000} דק', דופק על :${PORT}`
+  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s, פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', פעימת-אמת-עצמית כל ${SELFTEST_PULSE_MS / 60_000} דק', תרגיל-תמונה כל ${SNAPSHOT_RESTORE_PULSE_MS / 60_000} דק', סנכרון-ייצוא כל ${EXPORT_SYNC_PULSE_MS / 60_000} דק', תרגיל-ייצוא כל ${EXPORT_RESTORE_PULSE_MS / 60_000} דק', תרגיל-מראה-מקומית כל ${MIRROR_RESTORE_PULSE_MS / 60_000} דק', אטימות-היסטוריה כל ${HISTORY_PULSE_MS / 60_000} דק', אטימות-מסמכים כל ${DOCS_PULSE_MS / 60_000} דק', היסטוריית-מסמכים כל ${DOCS_HISTORY_PULSE_MS / 60_000} דק', דופק על :${PORT}`
 )
 
 setInterval(() => void tick(), TICK_MS)
@@ -1407,6 +1455,8 @@ setTimeout(() => void exportSyncPulse(), EXPORT_SYNC_PULSE_FIRST_MS) // מחזו
 setInterval(() => void exportSyncPulse(), EXPORT_SYNC_PULSE_MS)
 setTimeout(() => void exportRestorePulse(), EXPORT_RESTORE_PULSE_FIRST_MS)
 setInterval(() => void exportRestorePulse(), EXPORT_RESTORE_PULSE_MS)
+setTimeout(() => void mirrorRestorePulse(), MIRROR_RESTORE_PULSE_FIRST_MS) // Task 95: המקור-הרביעי — המראה
+setInterval(() => void mirrorRestorePulse(), MIRROR_RESTORE_PULSE_MS)
 setTimeout(() => void historyPulse(), HISTORY_PULSE_FIRST_MS) // מחזור-#14: אטימות-ההיסטוריה
 setInterval(() => void historyPulse(), HISTORY_PULSE_MS)
 setTimeout(() => void docsPulse(), DOCS_PULSE_FIRST_MS) // מחזור-#15: אטימות-המסמכים
