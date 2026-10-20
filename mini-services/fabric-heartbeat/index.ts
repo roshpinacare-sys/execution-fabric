@@ -58,6 +58,14 @@ const SOVEREIGNTY_PULSE_FIRST_MS = 2 * 60_000
 const MAGNITUDE_PULSE_MS = 30 * 60_000 // Task 93: עורק-יח — מד-העוצמה: "פי-1000-מהבעלים" נמדד-בכנות, לא-מוצהר
 const MAGNITUDE_PULSE_FIRST_MS = 3 * 60_000
 const SELFTEST_PULSE_FIRST_MS = 3 * 60_000
+// Task 97: עורק-הזדמנות-שנייה — משימות-FAILED-ממחלקות-חולפות (rate-limit/provider/...)
+// חוזרות-לתור כל-30דק' (ה-route-עצמו כופה-צינון-30דק' ותקרה-8; כאן-הקצב-התואם-בלבד).
+const RECOVERY_PULSE_MS = 30 * 60_000
+const RECOVERY_PULSE_FIRST_MS = 5 * 60_000
+// Task 97: עורק-ההשלמה — גשר-סגירת-הלולאה של קיר-הצמיחה: הצעות-PROPOSED הופכות
+// למשימות-CODE-אמיתיות (זריעה) ומשימות-יישום-שהושלמו מכתירות-הצעה-APPLIED (קציר).
+const DISPATCH_PULSE_MS = 30 * 60_000
+const DISPATCH_PULSE_FIRST_MS = 7 * 60_000
 const RESTORE_PULSE_MS = 6 * 60 * 60_000 // Task 70: עורק-ח — הוכחה-קבועה שהכפילות-הרחוקה מחזירה-מערכת-שלמה
 const RESTORE_PULSE_FIRST_MS = 150_000
 // מחזור-חדשנות #12 (Task 79): עורק-ח-bis — תרגיל-התמונה-השעתית (מקור-שני, בלתי-תלוי בגיט).
