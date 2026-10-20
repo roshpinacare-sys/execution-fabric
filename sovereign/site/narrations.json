@@ -270,6 +270,15 @@
       "textChars": 91,
       "narratedAt": "2026-10-20T00:18:12.441Z",
       "worker": "sdk-tts:tongtong"
+    },
+    "114": {
+      "audioPath": "sovereign/site/audio/improvement-114.wav",
+      "sizeBytes": 1441296,
+      "voice": "tongtong",
+      "speed": 1,
+      "textChars": 105,
+      "narratedAt": "2026-10-20T00:28:10.033Z",
+      "worker": "sdk-tts:tongtong"
     }
   }
 }
