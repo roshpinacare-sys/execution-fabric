@@ -67,6 +67,8 @@ const RECOVERY_PULSE_FIRST_MS = 5 * 60_000
 // Task 98: 15דק' × זריעה-כפולה — איטרציית-מועמדים במקום-רעב-צינון.
 const DISPATCH_PULSE_MS = 15 * 60_000
 const DISPATCH_PULSE_FIRST_MS = 7 * 60_000
+const TREASURY_PULSE_MS = 30 * 60_000 // Task 101: עורק-הקופה — אימות-כספת FixedFloat חי (1 יחידת-משקל לפעימה — ריחוק-בטוח מתקרת-250/דק')
+const TREASURY_PULSE_FIRST_MS = 9 * 60_000
 const RESTORE_PULSE_MS = 6 * 60 * 60_000 // Task 70: עורק-ח — הוכחה-קבועה שהכפילות-הרחוקה מחזירה-מערכת-שלמה
 const RESTORE_PULSE_FIRST_MS = 150_000
 // מחזור-חדשנות #12 (Task 79): עורק-ח-bis — תרגיל-התמונה-השעתית (מקור-שני, בלתי-תלוי בגיט).
@@ -225,6 +227,11 @@ interface State {
   dispatchHarvested: number
   lastDispatchAt: string | null
   lastDispatchResult: string | null
+  treasuryPulses: number
+  treasuryOk: boolean | null
+  treasuryAuth: boolean | null
+  lastTreasuryAt: string | null
+  lastTreasuryResult: string | null
 }
 
 const state: State = {
@@ -332,6 +339,11 @@ const state: State = {
   dispatchHarvested: 0,
   lastDispatchAt: null,
   lastDispatchResult: null,
+  treasuryPulses: 0,
+  treasuryOk: null,
+  treasuryAuth: null,
+  lastTreasuryAt: null,
+  lastTreasuryResult: null,
 }
 
 let lastTickAttemptMs = Date.now()
@@ -981,6 +993,48 @@ async function dispatchPulse(): Promise<void> {
   }
 }
 
+// ===== עורק-הקופה (Task 101) — היכולת-הכלכלית חיה, חתומה, ונבדקת-ברציפות =====
+// אימות-ccies חי כל-30 דק' מול FixedFloat (1 יחידת-משקל — ריחוק-בטוח מתקרת-250/דק').
+// המפתח-עצמו יושב ב-.env.local(600)/.vault(700) ואסור-בכל-פלט; הלב רואה רק פסק-דין:
+// authVerified=true/false. כשל-רשת/API נראה-מיד בבריאות-הלב — הכספת לא שקטה, היא מדווחת.
+async function treasuryPulse(): Promise<void> {
+  state.treasuryPulses++
+  state.lastTreasuryAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/sovereign/treasury/fixedfloat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'ping' }),
+      signal: AbortSignal.timeout(30_000),
+    })
+    const d = (await res.json().catch(() => ({}))) as {
+      ok?: boolean
+      authVerified?: boolean
+      data?: { currencies?: number }
+      errorClass?: string
+      msg?: string
+    }
+    if (res.status === 200 && d.authVerified === true) {
+      state.treasuryOk = true
+      state.treasuryAuth = true
+      state.lastTreasuryResult = `כספת-חיה: ${d.data?.currencies ?? '?'} מטבעות נתמכים`
+    } else if (res.status === 200) {
+      state.treasuryOk = false
+      state.treasuryAuth = false
+      state.lastTreasuryResult = `אימות-נכשל: ${d.errorClass ?? 'api'} ${d.msg?.slice(0, 60) ?? ''}`
+      log(`עורק-הקופה: ${state.lastTreasuryResult}`)
+    } else {
+      state.treasuryOk = false
+      state.lastTreasuryResult = `failed: HTTP ${res.status}`
+      log(`עורק-הקופה: כשל-כן — ${state.lastTreasuryResult}`)
+    }
+  } catch (e) {
+    state.treasuryOk = false
+    state.lastTreasuryResult = e instanceof Error ? e.message : String(e)
+    log(`עורק-הקופה: כשל-רשת — ${state.lastTreasuryResult}`)
+  }
+}
+
 // ===== עורק-ההקראה (Task 39) — השימוש-הראשון-המוצדק בכלי-SDK-TTS =====
 // כל-תוכן-שנולד בעורק-הבנייה מוקרא (עברית) ל-mp3 בגיט — המוצר לא רק נראה, הוא גם נשמע.
 // best-effort: כשל-הקראה לא מכתיר לידת-תוכן — אבל-הוא כן ומתועד (NARRATE FAILED בשרשרת).
@@ -1525,7 +1579,7 @@ setInterval(() => {
 }, 60_000)
 
 log(
-  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s (lanes=3), פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', עורק-הזדמנות-שנייה כל ${RECOVERY_PULSE_MS / 60_000} דק', עורק-ההשלמה כל ${DISPATCH_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', פעימת-אמת-עצמית כל ${SELFTEST_PULSE_MS / 60_000} דק', תרגיל-תמונה כל ${SNAPSHOT_RESTORE_PULSE_MS / 60_000} דק', סנכרון-ייצוא כל ${EXPORT_SYNC_PULSE_MS / 60_000} דק', תרגיל-ייצוא כל ${EXPORT_RESTORE_PULSE_MS / 60_000} דק', תרגיל-מראה-מקומית כל ${MIRROR_RESTORE_PULSE_MS / 60_000} דק', אטימות-היסטוריה כל ${HISTORY_PULSE_MS / 60_000} דק', אטימות-מסמכים כל ${DOCS_PULSE_MS / 60_000} דק', היסטוריית-מסמכים כל ${DOCS_HISTORY_PULSE_MS / 60_000} דק', דופק על :${PORT}`
+  `fabric-heartbeat חי — tick כל ${TICK_MS / 1000}s (lanes=3), פעימת-גיט כל ${GIT_PULSE_MS / 60_000} דק', פעימת-התפתחות כל ${EVOLUTION_PULSE_MS / 60_000} דק', פעימת-בנייה כל ${BUILD_PULSE_MS / 60_000} דק', עורק-הזדמנות-שנייה כל ${RECOVERY_PULSE_MS / 60_000} דק', עורק-ההשלמה כל ${DISPATCH_PULSE_MS / 60_000} דק', פעימת-ריבונות כל ${OPS_PULSE_MS / 60_000} דק', פעימת-אמת-עצמית כל ${SELFTEST_PULSE_MS / 60_000} דק', תרגיל-תמונה כל ${SNAPSHOT_RESTORE_PULSE_MS / 60_000} דק', סנכרון-ייצוא כל ${EXPORT_SYNC_PULSE_MS / 60_000} דק', תרגיל-ייצוא כל ${EXPORT_RESTORE_PULSE_MS / 60_000} דק', תרגיל-מראה-מקומית כל ${MIRROR_RESTORE_PULSE_MS / 60_000} דק', אטימות-היסטוריה כל ${HISTORY_PULSE_MS / 60_000} דק', אטימות-מסמכים כל ${DOCS_PULSE_MS / 60_000} דק', היסטוריית-מסמכים כל ${DOCS_HISTORY_PULSE_MS / 60_000} דק', עורק-הקופה כל ${TREASURY_PULSE_MS / 60_000} דק', דופק על :${PORT}`
 )
 
 setInterval(() => void tick(), TICK_MS)
@@ -1539,6 +1593,8 @@ setTimeout(() => void recoveryPulse(), RECOVERY_PULSE_FIRST_MS) // Task 97: עו
 setInterval(() => void recoveryPulse(), RECOVERY_PULSE_MS)
 setTimeout(() => void dispatchPulse(), DISPATCH_PULSE_FIRST_MS) // Task 97: עורק-ההשלמה
 setInterval(() => void dispatchPulse(), DISPATCH_PULSE_MS)
+setTimeout(() => void treasuryPulse(), TREASURY_PULSE_FIRST_MS) // Task 101: עורק-הקופה — אימות-כספת
+setInterval(() => void treasuryPulse(), TREASURY_PULSE_MS)
 setTimeout(() => void opsPulse(), OPS_PULSE_FIRST_MS)
 setInterval(() => void opsPulse(), OPS_PULSE_MS)
 setTimeout(() => void selftestPulse(), SELFTEST_PULSE_FIRST_MS)

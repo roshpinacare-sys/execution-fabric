@@ -118,6 +118,7 @@ interface HeartJson {
   mirrorRestorePulses: number
   recoveryPulses: number
   dispatchPulses: number
+  treasuryPulses?: number // Task 101: עורק-הקופה — ייתכן-לב-ישן-בטרם-הצמדה
   historyPulses: number
   docsPulses: number
   docsHistoryPulses: number
@@ -205,8 +206,8 @@ function measureParallelism(h: HeartJson | null): { multiplier: number | null; s
     h.gitPulses, h.evolutionPulses, h.buildPulses, h.opsPulses, h.selftestPulses,
     h.claimsPulses, h.sovereigntyPulses, h.magnitudePulses, h.restorePulses,
     h.snapshotRestorePulses, h.exportSyncPulses, h.exportRestorePulses,
-    h.mirrorRestorePulses, h.recoveryPulses, h.dispatchPulses, h.historyPulses,
-    h.docsPulses, h.docsHistoryPulses,
+    h.mirrorRestorePulses, h.recoveryPulses, h.dispatchPulses, h.treasuryPulses,
+    h.historyPulses, h.docsPulses, h.docsHistoryPulses,
   ]
   const live = arteries.filter((p) => (p ?? 0) > 0).length
   const guards = (h.lastAppGuardAt ? 1 : 0) + (h.lastKeeperGuardAt ? 1 : 0)
