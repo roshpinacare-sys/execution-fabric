@@ -165,13 +165,20 @@ export type EvolutionResult =
 // אין שיגור בלי הצעה-תקפה — כשל הסולם חוזר כן למתקשר.
 // seed (Task 94): הזרקת-פער-נמדד-ממד-העוצמה — הרשת לא רק מודדת-את-הפערים שלה,
 // אלא פועלת-לסגירתם: מדידה→הכרעה→פעולה→חתימה. אין-זריעה = הצעה-רגילה.
-export async function proposeAndQueueEvolutionTask(seed?: string): Promise<EvolutionResult> {
+export async function proposeAndQueueEvolutionTask(seed?: string, avoidTitle?: string, depth = 1): Promise<EvolutionResult> {
   const t0 = Date.now()
   const ctx = await gatherEvolutionContext()
   // זריעת-פער (Task 94): הנחיה-ממוקדת מהמדידה-החיה — אין-זריעה שקרית: רק-פער-נמדד-אמיתי
+  // Task 96 — סולם-ההצעות-הייחודיות: דחיית-כפילות אינה קץ-הפעימה. avoidTitle = הכותרת-שנדחתה
+  // זה-עתה — מוזרקת-לפרומפט-כאיסור-מפורש, והמחזור-חוזר-מיידית (עומק-מוגבל: 2) במקום
+  // למות-עד-הפעימה-הבאה-בעוד-5 דק'. עד-Task-96: הצעה-כפולה = 5 דק' אספקה-אפסית —
+  // סתימה-אמיתית-שנמדדה-בפעימות-ההתפתחות (failed: duplicate חוזר).
+  const avoidBlock = avoidTitle
+    ? `\n\n⚠️ דחיית-כפילות-חיה: הכותרת "${avoidTitle}" נדחתה-זה-עתה (כותרת-קיימת-ב-24שע'). אסור-להציע-כותרת-דומה-לה — הצע-זווית-הנדסית-שונה-במהותה (בדיקות/ביצועים/תצפיתיות/אבטחה/ממשק/תיעוד).`
+    : ''
   const userMsg = seed
-    ? `${contextUserPrompt(ctx)}\n\nהנחיית-פער-נמדד (ממד-העוצמה, ראייה-חיה):\n${seed}\nהצע-משימה-מעשית-אחת-בת-ביצוע שמקדמת-בפועל את-סגירת-הפער-הזה. אסור-להמציא-פער-אחר.`
-    : contextUserPrompt(ctx)
+    ? `${contextUserPrompt(ctx)}\n\nהנחיית-פער-נמדד (ממד-העוצמה, ראייה-חיה):\n${seed}\nהצע-משימה-מעשית-אחת-בת-ביצוע שמקדמת-בפועל את-סגירת-הפער-הזה. אסור-להמציא-פער-אחר.${avoidBlock}`
+    : `${contextUserPrompt(ctx)}${avoidBlock}`
 
   const base: ChainCandidate[] = [
     { name: 'zai-primary', family: 'zai', call: () => callLlm(EVOLUTION_PRIMARY, userMsg) },
@@ -208,10 +215,14 @@ export async function proposeAndQueueEvolutionTask(seed?: string): Promise<Evolu
   }
 
   const titles = await recentTitleSet()
-  if (titles.has(normalizeTitle(proposal.title))) {
+  const dup = titles.has(normalizeTitle(proposal.title)) || normalizeTitle(avoidTitle ?? '') === normalizeTitle(proposal.title)
+  if (dup) {
+    if (depth < 2) {
+      return proposeAndQueueEvolutionTask(seed, proposal.title, depth + 1)
+    }
     return {
       ok: false,
-      error: `duplicate: proposed title matches a task from the last 24h — "${proposal.title}"`,
+      error: `duplicate: proposed title matches a task from the last 24h — "${proposal.title}" (2 מחזורי-הצעה-עם-פידבק-נדחו — סולם-Task-96-מוצה)`,
       errorClass: 'duplicate',
       attempts: result.attempts,
       durationMs: Date.now() - t0,
@@ -349,9 +360,13 @@ const LEARNING_PRIMARY = [
 export type LearningResult = EvolutionResult
 
 // מחזור-למידה אחד: ממצא-HIGH לא-מטופל → ירי-LLM אמיתי → ולידציה + כפילות + אימות-ריפו → שיגור source='learning'.
-export async function proposeLearningTask(finding: HighFinding): Promise<LearningResult> {
+export async function proposeLearningTask(finding: HighFinding, avoidTitle?: string, depth = 1): Promise<LearningResult> {
   const t0 = Date.now()
   const ctx = await gatherEvolutionContext()
+  // Task 96 — אותו-סולם-הצעות-ייחודיות גם-בלולאת-הלמידה (עומק-מוגבל: 2)
+  const avoidLine = avoidTitle
+    ? [`⚠️ דחיית-כפילות-חיה: הכותרת "${avoidTitle}" נדחתה-זה-עתה — אסור-להציע-כותרת-דומה-לה; זווית-הנדסית-שונה-במהותה.`, '']
+    : []
   const userMsg = [
     'ממצא-HIGH פתוח מביקורת-עצמית של הרשת:',
     JSON.stringify(
@@ -370,6 +385,7 @@ export async function proposeLearningTask(finding: HighFinding): Promise<Learnin
     '',
     'כותרות-אחרונות (חל איסור-חזרה עליהן):',
     ctx.recentTitles.length ? ctx.recentTitles.map((t) => `- ${t}`).join('\n') : '(אין)',
+    ...avoidLine,
   ].join('\n')
 
   const base: ChainCandidate[] = [
@@ -413,10 +429,14 @@ export async function proposeLearningTask(finding: HighFinding): Promise<Learnin
   }
 
   const titles = await recentTitleSet()
-  if (titles.has(normalizeTitle(proposal.title))) {
+  const dup = titles.has(normalizeTitle(proposal.title)) || normalizeTitle(avoidTitle ?? '') === normalizeTitle(proposal.title)
+  if (dup) {
+    if (depth < 2) {
+      return proposeLearningTask(finding, proposal.title, depth + 1)
+    }
     return {
       ok: false,
-      error: `duplicate: proposed title matches a task from the last 24h — "${proposal.title}"`,
+      error: `duplicate: proposed title matches a task from the last 24h — "${proposal.title}" (2 מחזורי-הצעה-עם-פידבק-נדחו — סולם-Task-96-מוצה)`,
       errorClass: 'duplicate',
       attempts: result.attempts,
       durationMs: Date.now() - t0,

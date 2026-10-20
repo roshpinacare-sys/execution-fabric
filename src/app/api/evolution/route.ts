@@ -57,8 +57,11 @@ export async function POST(req: Request) {
     // Task 94 — מצב-פער: הרשת פועלת-לסגירת-הפערים-הנמדדים שלה-בעצמה (ארכיטקטורה-כבעלים):
     // מדידה-חיה → הפער-הגדול-ביותר (distanceToTarget-חיובי) → זריעת-הצעה-ממוקדת. אין-פער = 404 כן.
     const mag = await collectMagnitude()
-    const top = mag.gaps.find((g) => g.distanceToTarget > 0)
-    if (!top) {
+    // Task 96 — סיבוב-פערים: tops[0] דטרמיניסטי גרם לזריעה-חד-גונית (אותו-פער → אותן-כותרות
+    // → דחיות-כפילות). סבב-לפי-התקציב-שנוצל (דפוס-Task-29): כל-פעימה מזריעה-את-הפער-הבא
+    // בתור — עיכול-לרוחב, כל-הפערים-הנמדדים נחשפים-ללולאה, ואף-פער לא נזנח.
+    const tops = mag.gaps.filter((g) => g.distanceToTarget > 0)
+    if (tops.length === 0) {
       return NextResponse.json(
         {
           ok: false,
@@ -70,6 +73,7 @@ export async function POST(req: Request) {
         { status: 404 }
       )
     }
+    const top = tops[used % tops.length]
     const seed = `ממד: ${top.title} · מכפלה-נמדדת: ${top.current}x · יעד: 1000x · פער: ${top.distanceToTarget} סדרי-גודל (מדידה-כנה-מראיות-חיות, לא-הצהרה)`
     r = await proposeAndQueueEvolutionTask(seed)
   } else if (mode === 'learn') {
