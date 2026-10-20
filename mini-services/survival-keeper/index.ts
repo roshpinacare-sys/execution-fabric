@@ -57,6 +57,7 @@ const CRED_HELPER = path.join(PROJECT_ROOT, '.zscripts', 'git-credential-pat.sh'
 const APP_URL = 'http://127.0.0.1:3000'
 const HEARTBEAT_URL = 'http://127.0.0.1:3031/health'
 const WITNESS_URL = 'http://127.0.0.1:3050/health'
+const METRICS_URL = 'http://127.0.0.1:3060/health' // Task 102 — איבר-המדידה (הוחזר מהמתים)
 
 interface WatchState {
   up: boolean
@@ -89,10 +90,11 @@ interface Event {
   msg: string
 }
 
-const watches: Record<'app' | 'heartbeat' | 'witness', WatchState> = {
+const watches: Record<'app' | 'heartbeat' | 'witness' | 'metrics', WatchState> = {
   app: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null },
   heartbeat: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null },
   witness: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null },
+  metrics: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null }, // Task 102
 }
 
 const mirror: MirrorState = {
@@ -121,7 +123,7 @@ function loadState(): void {
       events?: Event[]
     }
     if (typeof s.ticks === 'number') ticks = s.ticks
-    for (const key of ['app', 'heartbeat', 'witness'] as const) {
+    for (const key of ['app', 'heartbeat', 'witness', 'metrics'] as const) {
       const p = s.watches?.[key]
       if (p) Object.assign(watches[key], p, { up: false, fails: 0 }) // רעננות-חיים-מתחילה-מאפס; הראיות-נשמרות
     }
@@ -195,8 +197,8 @@ async function watchApp(): Promise<void> {
   if (!up) log(`אפליקציה לא-עונה (${w.fails}) — נצפית-בלבד; הלב אחראי-להזנקתה`)
 }
 
-// הלב-והעד: מעקב + החייאה-עצמית
-async function watchService(name: 'heartbeat' | 'witness', url: string): Promise<void> {
+// הלב, העד ואיבר-המדידה: מעקב + החייאה-עצמית
+async function watchService(name: 'heartbeat' | 'witness' | 'metrics', url: string): Promise<void> {
   const w = watches[name]
   w.lastCheckAt = new Date().toISOString()
   const up = await probe(url)
@@ -217,7 +219,9 @@ async function watchService(name: 'heartbeat' | 'witness', url: string): Promise
     w.lastResult = `down — backoff-הזנקה (${Math.round((RESPAWN_BACKOFF_MS - (Date.now() - new Date(w.lastRestartAt).getTime())) / 1000)}s)`
     return
   }
-  const dir = path.join(PROJECT_ROOT, 'mini-services', name === 'heartbeat' ? 'fabric-heartbeat' : 'chain-witness')
+  const dirName =
+    name === 'heartbeat' ? 'fabric-heartbeat' : name === 'metrics' ? 'saos-metrics' : 'chain-witness' // Task 102
+  const dir = path.join(PROJECT_ROOT, 'mini-services', dirName)
   try {
     const child = Bun.spawn(['bun', 'run', 'dev'], {
       cwd: dir,
@@ -375,13 +379,18 @@ Bun.serve({
 
 async function check(): Promise<void> {
   ticks++
-  await Promise.all([watchApp(), watchService('heartbeat', HEARTBEAT_URL), watchService('witness', WITNESS_URL)])
+  await Promise.all([
+    watchApp(),
+    watchService('heartbeat', HEARTBEAT_URL),
+    watchService('witness', WITNESS_URL),
+    watchService('metrics', METRICS_URL), // Task 102 — המדיד נשמר-כמו-כולם
+  ])
 }
 
 // ── אתחול ────────────────────────────────────────────────────────────────────
 loadState()
 log(
-  `הזקיפה חיה — מעקב כל ${CHECK_MS / 1000}s על אפליקציה/לב/עד (החייאה אחרי ${FAILS_TO_RESPAWN} כשלים, backoff ${RESPAWN_BACKOFF_MS / 1000}s); מראת-גיבוי כל ${MIRROR_PULSE_MS / 60_000} דק'; תמונות-db כל ${SNAPSHOT_PULSE_MS / 60_000} דק' (מלאי ${SNAPSHOT_KEEP}); מצב-עמיד: ${STATE_PATH}; דופק על :${PORT}`,
+  `הזקיפה חיה — מעקב כל ${CHECK_MS / 1000}s על אפליקציה/לב/עד/מדיד (החייאה אחרי ${FAILS_TO_RESPAWN} כשלים, backoff ${RESPAWN_BACKOFF_MS / 1000}s); מראת-גיבוי כל ${MIRROR_PULSE_MS / 60_000} דק'; תמונות-db כל ${SNAPSHOT_PULSE_MS / 60_000} דק' (מלאי ${SNAPSHOT_KEEP}); מצב-עמיד: ${STATE_PATH}; דופק על :${PORT}`,
 )
 
 void check()

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Activity, HeartPulse, Eye, ShieldCheck, Monitor } from 'lucide-react'
+import { Activity, HeartPulse, Eye, ShieldCheck, Monitor, Gauge } from 'lucide-react'
 
 // מרכז-הפיקוח-המרכזי (מחזור-חדשנות #18) — לוח-מדדים חי על /api/operations.
 // כל-מספר נגזר-ממקור-חי; איבר-שכבה מוצג-בכנות ולא-מוסתר. RTL, פלטת-הרשת בלבד
@@ -31,6 +31,7 @@ interface Operations {
     heart: { up: boolean; error: string | null; ticks: number | null; gitPulses: number | null; lastTickError: string | null }
     witness: { up: boolean; error: string | null; total: number | null; verifyOk: boolean }
     sentry: { up: boolean; error: string | null; uptimeMs: number | null; mirrorSynced: boolean | null; snapshots: number | null }
+    metrics: { up: boolean; error: string | null; samples: number | null; ticks: number | null }
   }
 }
 
@@ -115,6 +116,13 @@ export function OperationsHub() {
           detail: `מראה: ${ops.organs.sentry.mirrorSynced ? 'מסונכרנת' : 'תלושה'} · תמונות: ${fmtNum(ops.organs.sentry.snapshots)}`,
           icon: ShieldCheck,
         },
+        {
+          key: 'metrics',
+          label: 'איבר-המדידה',
+          up: ops.organs.metrics.up,
+          detail: `${fmtNum(ops.organs.metrics.samples)} דגימות · ${fmtNum(ops.organs.metrics.ticks)} טיקים`,
+          icon: Gauge,
+        },
       ]
     : []
 
@@ -164,7 +172,7 @@ export function OperationsHub() {
           </span>
         </div>
         <CardDescription>
-          מימוש-הצעה-אוטונומית (מחזור-#18): כל-מדדי-הרשת במקום-אחד — שרשרת, משימות, הצעות, זיכרון, וארבעת-האיברים. איבר-שכבה מוצג-בשמו, לא-מוסתר.
+          מימוש-הצעה-אוטונומית (מחזור-#18): כל-מדדי-הרשת במקום-אחד — שרשרת, משימות, הצעות, זיכרון, וחמשת-האיברים. איבר-שכבה מוצג-בשמו, לא-מוסתר.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

@@ -1,0 +1,9 @@
+{
+  "name": "saos-metrics",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "bun --watch index.ts",
+    "start": "bun index.ts"
+  }
+}

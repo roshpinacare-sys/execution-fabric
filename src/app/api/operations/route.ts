@@ -35,10 +35,11 @@ export async function GET() {
   await dbReady()
   const census = await buildCensus()
 
-  const [heart, witness, sentry] = await Promise.all([
+  const [heart, witness, sentry, metrics] = await Promise.all([
     probeOrgan('heart', 'http://127.0.0.1:3031/health'),
     probeOrgan('witness', 'http://127.0.0.1:3050/health'),
     probeOrgan('sentry', 'http://127.0.0.1:3051/health'),
+    probeOrgan('metrics', 'http://127.0.0.1:3060/health'), // Task 102 — איבר-המדידה
   ])
 
   const chain = census.chain
@@ -47,7 +48,7 @@ export async function GET() {
 
   const mem = process.memoryUsage()
   const chainOk = chain?.verify?.ok === true
-  const organsUp = { app: true, heart: heart.up, witness: witness.up, sentry: sentry.up }
+  const organsUp = { app: true, heart: heart.up, witness: witness.up, sentry: sentry.up, metrics: metrics.up }
   const networkStatus = chainOk && Object.values(organsUp).every(Boolean) ? 'active' : 'degraded'
 
   return NextResponse.json({
@@ -101,6 +102,12 @@ export async function GET() {
         uptimeMs: sentry.data?.['uptimeMs'] ?? null,
         mirrorSynced: (sentry.data?.['mirror'] as { synced?: boolean } | undefined)?.synced ?? null,
         snapshots: (sentry.data?.['snapshots'] as { count?: number } | undefined)?.count ?? null,
+      },
+      metrics: {
+        up: metrics.up,
+        error: metrics.error ?? null,
+        samples: metrics.data?.['samples'] ?? null,
+        ticks: metrics.data?.['ticks'] ?? null,
       },
     },
   })
