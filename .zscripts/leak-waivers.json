@@ -1,0 +1,4 @@
+{
+  "_doc": "מרשם-פטורים-מבוקר ל-leak-scan — רק kind=key-pointer (הזכרות-שם-קובץ-מפתח = מטא-דאטה). הסודות-האמת (טוקן/WIF/cred-url/pass-material) אינם-ניתנים-לפטור. כל-רשומה: kind,file,line,reason,until(ISO),signedBy. פג-תוקף-מוסר-אוטומטית-מהאכיפה.",
+  "waivers": []
+}

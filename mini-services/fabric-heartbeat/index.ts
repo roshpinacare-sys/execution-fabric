@@ -51,6 +51,8 @@ const BUILD_PULSE_FIRST_MS = 4 * 60_000
 const OPS_PULSE_MS = 10 * 60_000 // Task 44: עורק-הריבונות — הלב מריץ את הטיק העצמי ומרוקן מלאי
 const OPS_PULSE_FIRST_MS = 90_000
 const SELFTEST_PULSE_MS = 30 * 60_000 // Task 45: עורק-ז — הלב מוכיח את סרט-הכלים שלו ברציפות
+const CLAIMS_PULSE_MS = 30 * 60_000 // Task 90: עורק-ט"ו — בודק-הטענות: כל-הצהרה נשפטת-חי
+const CLAIMS_PULSE_FIRST_MS = 90_000
 const SELFTEST_PULSE_FIRST_MS = 3 * 60_000
 const RESTORE_PULSE_MS = 6 * 60 * 60_000 // Task 70: עורק-ח — הוכחה-קבועה שהכפילות-הרחוקה מחזירה-מערכת-שלמה
 const RESTORE_PULSE_FIRST_MS = 150_000
@@ -134,6 +136,11 @@ interface State {
   selftestFails: number
   lastSelftestAt: string | null
   lastSelftestResult: string | null
+  claimsPulses: number
+  claimsActive: number
+  claimsDegraded: number
+  lastClaimsAt: string | null
+  lastClaimsResult: string | null
   narrations: number
   narrationFails: number
   lastNarrationAt: string | null
@@ -211,6 +218,11 @@ const state: State = {
   selftestFails: 0,
   lastSelftestAt: null,
   lastSelftestResult: null,
+  claimsPulses: 0,
+  claimsActive: 0,
+  claimsDegraded: 0,
+  lastClaimsAt: null,
+  lastClaimsResult: null,
   narrations: 0,
   narrationFails: 0,
   lastNarrationAt: null,
@@ -1166,6 +1178,41 @@ async function selftestPulse(): Promise<void> {
   }
 }
 
+// ===== עורק-ט"ו (Task 90): כל-30 דק' — POST /api/claims?subject=claims-audit — בודק-הטענות
+// כל-הצהרה-ארכיטקטונית נשפטת-על-ידי-בדיקה-חיה ונחתמת-בכנות (FAILED כשהמצב אינו פעיל — אנטי-ירוק-שקר)
+async function claimsPulse(): Promise<void> {
+  state.claimsPulses++
+  state.lastClaimsAt = new Date().toISOString()
+  try {
+    const res = await fetch(`${APP_URL}/api/claims?subject=claims-audit`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(90_000), // הבדיקה כוללת-leak-scan ו-git — נותנים-רשת
+    })
+    if (res.status === 200) {
+      const d = (await res.json()) as {
+        overall?: 'active' | 'degraded' | 'critical'
+        counts?: { total?: number; active?: number; degraded?: number; down?: number }
+        signed?: { id?: number; status?: string }
+      }
+      const c = d.counts ?? {}
+      const line = `${c.active ?? 0}/${c.total ?? 0} טענות-מאומתות — overall=${d.overall ?? '?'}${d.signed?.id ? ` · נחתם #${d.signed.id} status=${d.signed.status}` : ''}`
+      if (d.overall === 'active') {
+        state.claimsActive++
+      } else {
+        state.claimsDegraded++
+      }
+      state.lastClaimsResult = line
+      log(`בודק-הטענות: ${line}`)
+    } else {
+      state.lastClaimsResult = `failed: HTTP ${res.status}`
+      log(`בודק-הטענות: כשל-כן — ${state.lastClaimsResult}`)
+    }
+  } catch (e) {
+    state.lastClaimsResult = e instanceof Error ? e.message : String(e)
+    log(`בודק-הטענות: כשל-רשת — ${state.lastClaimsResult}`)
+  }
+}
+
 // ===== שרת-דופק (תצפית) =====
 Bun.serve({
   port: PORT,
@@ -1207,6 +1254,8 @@ setTimeout(() => void opsPulse(), OPS_PULSE_FIRST_MS)
 setInterval(() => void opsPulse(), OPS_PULSE_MS)
 setTimeout(() => void selftestPulse(), SELFTEST_PULSE_FIRST_MS)
 setInterval(() => void selftestPulse(), SELFTEST_PULSE_MS)
+setInterval(() => void claimsPulse(), CLAIMS_PULSE_MS)
+setTimeout(() => void claimsPulse(), CLAIMS_PULSE_FIRST_MS)
 setTimeout(() => void restorePulse(), RESTORE_PULSE_FIRST_MS)
 setInterval(() => void restorePulse(), RESTORE_PULSE_MS)
 setTimeout(() => void snapshotRestorePulse(), SNAPSHOT_RESTORE_PULSE_FIRST_MS)
