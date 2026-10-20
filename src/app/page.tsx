@@ -24,6 +24,7 @@ import { AutonomyOps } from '@/components/AutonomyOps'
 import { OperationsHub } from '@/components/OperationsHub'
 import { NetworkHub } from '@/components/NetworkHub'
 import { ClaimsAuditor } from '@/components/ClaimsAuditor'
+import { OperatorGate } from '@/components/OperatorGate'
 import {
   Network,
   Bot,
@@ -2464,6 +2465,7 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
           </Card>
 
           {/* שער-התפעול-האוטונומי (Task 43): הדף כמשטח-תפעול — לאוטונומיה ולבעלים כאחד */}
+          <OperatorGate />
           <AutonomyOps />
 
           {/* מרכז-הפיקוח-המרכזי (מחזור-#18): מימוש-הצעה-אוטונומית — כל-מדדי-הרשת במקום-אחד */}

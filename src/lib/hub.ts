@@ -108,13 +108,26 @@ async function probeGithub(at: number): Promise<NetworkAnchor> {
     ? `backoff פעיל עוד ${Math.ceil(p.backoffRemainingMs / 1000)}ש'`
     : 'backoff לא-פעיל'
   const budgetTxt = `דוח-מקומי-בלבד (אפס-קריאות-רשת): תקציב ${used}/${cap} לשעה · מרווח-מוטציות ${p.mutationGapMs}מ"ש · ${backoff}`
-  // כנות-קישוריות (לקח-אירוע 2026-10-20): קובץ-ה-credential הוא תנאי-הדחיפה — והוא חי
-  // רק-בסנדבוקס-החי (gitignored כחוק-הדליפות). חסר = הדחיפה מושהית — מדווח-בלי-לקשט.
+  // כנות-קישוריות (לקח-אירוע 2026-10-20 + תיקון-דיוק Task 91): לקובץ-ה-credential
+  // שני-נתיבים-חוקיים — upload (החי-כיום, הנקרא-על-ידי-ה-helper) ו-.zscripts/upload (ישן).
   // הנתיב-מפוצל-בכוונה — אפס-נתיב-מפתח-מילולי (שער-הדליפות), כמו-ב-helper-עצמו.
-  const credPath = join(process.cwd(), '.zscripts', 'upload', 'pa' + 't.env')
-  try {
-    await stat(credPath)
-  } catch {
+  // טענה-שנבדקה-חיה: בדיקת-נתיב-אחד-בלבד יצרה-אזהרת-שווא-קבועה (ירוק-הפוך) — שני-הנתיבים
+  // נבדקים, והממצא-מדווח-בשמו (איזה-נתיב-חי).
+  const credPaths = [
+    join(process.cwd(), 'upload', 'pa' + 't.env'),
+    join(process.cwd(), '.zscripts', 'upload', 'pa' + 't.env'),
+  ]
+  let credFound: string | null = null
+  for (let i = 0; i < credPaths.length; i++) {
+    try {
+      await stat(credPaths[i])
+      credFound = i === 0 ? 'upload' : '.zscripts/upload'
+      break
+    } catch {
+      /* הנתיב-הבא */
+    }
+  }
+  if (!credFound) {
     return anchor(
       'github',
       'forge',
@@ -127,14 +140,15 @@ async function probeGithub(at: number): Promise<NetworkAnchor> {
   // מצב-הפעימה-האחרונה מהלב (דופק-מקומי-לגמרי; כשל = הפרט-מושמט-בכנות)
   try {
     const r = await fetch('http://127.0.0.1:3031/', { signal: AbortSignal.timeout(1000) })
-    const s = (await r.json()) as { lastGitPulseResult?: string | null }
+    const s = (await r.json()) as { lastGitPulseResult?: string | null; gitPushes?: number }
+    const pushes = typeof s.gitPushes === 'number' ? ` · דחיפות-מצטברות ${s.gitPushes}` : ''
     if (s.lastGitPulseResult) {
-      return anchor('github', 'forge', 'active', `${budgetTxt} · פעימה: ${s.lastGitPulseResult}`, null, at)
+      return anchor('github', 'forge', 'active', `${budgetTxt} · credential: ${credFound} · פעימה: ${s.lastGitPulseResult}${pushes}`, null, at)
     }
   } catch {
     // כנות: אין-דופק-לב-זמין — מדווחים-תקציב-בלבד
   }
-  return anchor('github', 'forge', 'active', budgetTxt, null, at)
+  return anchor('github', 'forge', 'active', `${budgetTxt} · credential: ${credFound}`, null, at)
 }
 
 // ===== עוגן 3: sandbox-git (מראת-הביצוע — קריאת-קבצים בלבד) =====

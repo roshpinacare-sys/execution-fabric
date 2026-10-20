@@ -10,6 +10,8 @@
 name: codelint
 
 on:
+  # Task 91: ידני-גם-כן — הריפו ציבורי מעתה (Actions חינם-לציבורי); דיספצ' לבדיקה-עצמאית-בכל-רגע
+  workflow_dispatch:
   push:
     paths:
       - 'src/**'
