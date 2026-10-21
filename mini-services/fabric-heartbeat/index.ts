@@ -43,7 +43,7 @@ const PORT = Number(process.env.FABRIC_HEARTBEAT_PORT ?? 3031)
 const PROJECT_DIR = process.env.FABRIC_PROJECT_DIR ?? path.resolve(import.meta.dir, '../..')
 const TICK_MS = 5_000
 const GIT_PULSE_MS = 15 * 60_000
-const GIT_PULSE_FIRST_MS = 90_000
+const GIT_PULSE_FIRST_MS = 20_000 // Task 103: צמצום-חלון-החסימה — אחרי-כל-הפעלה-מחדש התכנסות/ריפוי-עצמי תוך 20ש' (לקח-חי: rebase-יתום חסם-זרימה עד-הפעימה-הראשונה)
 const EVOLUTION_PULSE_MS = 5 * 60_000 // Task 29: 10→5 דק' — "טפל בפתוחים בצורה הטובה ביותר" (התקציב השעתי 12 קושר בדיוק)
 const EVOLUTION_PULSE_FIRST_MS = 120_000
 const BUILD_PULSE_MS = 10 * 60_000 // Task 32: עורק-הבנייה — 6 פעימות/שעה = התקציב השעתי בדיוק
@@ -1645,6 +1645,7 @@ Bun.serve({
         app: APP_URL,
         tickMs: TICK_MS,
         gitPulseMin: GIT_PULSE_MS / 60_000,
+        gitStuck: gitStuckState(), // Task 103: מצב-תקיעה גלוי-תמיד (rebase/merge יתום = החוסם-השקט הקטלני ביותר)
         ...state,
       }, null, 2),
       { headers: { 'content-type': 'application/json' } }
