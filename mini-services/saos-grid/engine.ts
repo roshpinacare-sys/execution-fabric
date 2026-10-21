@@ -465,14 +465,20 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
         // אימוץ: פקודות-חיות-שלנו-שלא-במעקב (כולל-של-הרץ-היומי) → מעקב-מלא.
         // Task-113 הפרדת-סמכויות (נמדד-בדם): פקודות-שלא-הוצבו-על-ידי-המנוע-הזה
         // מסומנות level=-9 — מעקב-מילויים/ביטולים-בלבד, אף-קיזוז, אף-ביטול.
+        // Task-114 (נמדד-בדם): השרשרת-היא-האמת — שורה-מסומנת-כ-'canceled'-בפנקס-אך-חיה-
+        // בשרשרת (רוח-רפאים-מהעבר) נפתחת-מחדש; אסור-שפקודה-חיה-בשרשרת-תהיה-בלתי-נראית-
+        // לגילוי-מילויים (היתומים-החיים-הם-הדלקה-לכפילויות-ולאובדן-מילויים).
         for (const c of chain) {
           const id = `live:${c.orderid}:${n}`
-          const known = db.query('SELECT 1 FROM grid_orders WHERE orderid=?').get(id)
+          const known = db.query('SELECT status FROM grid_orders WHERE orderid=?').get(id) as { status?: string } | undefined
           if (!known) {
             db.query('INSERT INTO grid_orders(orderid,account,side,level,price,amount_steem,amount_sbd,placed_at,status,mode) VALUES(?,?,?,?,?,?,?,?,?,?)').run(
               id, n, c.side, -9, c.price, c.amountSteem, c.amountSbd, c.created, 'open', 'live',
             )
             event('adopt', { account: n, side: c.side, level: -9, price: c.price, amountSteem: c.amountSteem, amountSbd: c.amountSbd, mode: 'live', detail: `אומץ-למעקב-בלבד (לא-לניהול); orderid=${c.orderid}` })
+          } else if (known.status === 'canceled') {
+            db.query("UPDATE grid_orders SET status='open' WHERE orderid=?").run(id)
+            event('adopt', { account: n, side: c.side, level: -9, price: c.price, amountSteem: c.amountSteem, amountSbd: c.amountSbd, mode: 'live', detail: `השרשרת-מנצחת-את-הפנקס: שורה-שסומנה-כמבוטלת-חיה-בשרשרת — נפתחה-מחדש; orderid=${c.orderid}` })
           }
         }
 

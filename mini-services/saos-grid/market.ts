@@ -207,7 +207,9 @@ export async function getAccountFills(account: string, last = 100): Promise<RpcR
   const out: ChainFill[] = []
   for (const [, item] of r.data ?? []) {
     const [name, body] = item.op ?? []
-    if (name !== 'limit_order_fill') continue
+    // Task-114 (נמדד-בדם 23:00Z): שם-האופ-האמיתי-בשרשרת-הוא fill_order (נמדד: 6-מילויים-
+    // אמיתיים-בהיסטוריה-שחולצו-כ-0 בגלל-סינון-שגוי limit_order_fill). שדות: current_*/open_*.
+    if (name !== 'fill_order') continue
     const steemStr = String(body.current_pays ?? '').includes('STEEM') ? String(body.current_pays) : String(body.open_pays ?? '')
     const sbdStr = String(body.current_pays ?? '').includes('SBD') ? String(body.current_pays) : String(body.open_pays ?? '')
     const steem = parseFloat(steemStr) || 0
