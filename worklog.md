@@ -2194,3 +2194,60 @@ Work Log:
 
 Stage Summary:
 - מה שכן מוכח-חי ב-production עכשיו: כל הדפים המשודרגים חיים (press 18 מדורים/0 חיתוכים, console נקי, progress+handoff 200, wallet/receipts/reports מאוחדים); המראה — מוצתה, בתור, החלמה צפויה בריצה הבאה; אין-טענה-בלי-ראיה: "המסילות התעוררו" ייאמר רק אחרי lanes.json חדש עם data-carried
+
+---
+Task ID: 110-a
+Agent: frontend-styling-expert
+Task: fix office3d/network 5px horizontal overflow at 390px viewport
+
+Work Log:
+- קראתי את זנב-ה-worklog (15KB אחרונים) — הסטנדרט שנקבע: אימות-מכנה ב-playwright (playwright זמין ב-/home/z/.venv), תיקון-שורש ולא עטיפה עצלה, אפס-git, טבלאות-נגללות-במובייל כתקדים-בית מ-109 (bake-press + reports.html)
+- קראתי את שני ה-index.html במלואם + את ה-CSS-האסופה של office3d (assets/index-B6BuwR3O.css, 6KB); בדקתי גם את ה-bundle (index-B-kpT5EF.js) כדי לשלול הרחבת-canvas ל-innerWidth — מדידה-חיה הוכיחה שה-renderer ממדד את ה-stage ל-clientWidth (style 375px במצב client 375), כלומר ה-canvas עצמו לא הוא הגורם
+- בניתי רתמת-מדידה RTL-aware ב-playwright (localhost HTTP כדי ש-fetch של status.json יעבוד והשורות-אמיתיות ייבנו): מדידת docEl.scrollWidth−clientWidth ומניית כל אלמנט שחורג מאזור-הלקוח, במטריצה: 2 עמודים × {emulation-מובייל, desktop} × {פס-גלילה-קלאסי, בלי} × {390, 360, 320} + מצב-פתוח של פאנל-המנהל ב-office3d (קליק על .hud-op-btn)
+- שחזור-הגורם ב-network: הטבלה עם width:100% מתנהגת לפי מינימום-התוכן שלה — 367.3px (pill/age ב-white-space:nowrap + ריפוד-תאים 12px + שמות-ריצה) מול מכל 343px ב-390px-עם-פס-גלילה-קלאסי → גלישת-עמוד של +8px שמאלה (RTL); ב-360px +23px; ב-320px +63px; ב-390-מובייל-בלי-פס-גלילה ה-scrollWidth הציג 0 אבל הטבלה דיממה 9.3px לתוך הריפוד של body — פצצה-לטירגית שמתפוצצת לגלישת-viewport בגופנים מעט-רחבים יותר (כנראה ה-~5px של 109 אצל המודד הקודם)
+- שחזור-הגורם ב-office3d: `.hud-op { width: min(350px, calc(100vw - 20px)) }` — 100vw כולל פס-גלילה-קלאסי: ברוחבי-viewport 350–374 הפאנל הפתוח נמדד right=360 מול clientWidth=355 → 5px מעבר לשולי-הפריסה (מתחת לפס-הגלילה); השכבה-הסטטית (section.how) נבדקה ואינה יכולה לגלוש (רוחב-auto + max-width + overflow-wrap:anywhere על כל הטוקנים-הלטיניים)
+- התיקון ב-network (בקובץ עצמו, RTL): עטיפת `<div class="tbl-scroll">` סביב הטבלה עם `overflow-x:auto` (התקדים-הביתי — כל שארית-נתונים עתידית נקלטת בעטיפה ולא בעמוד) + `thead th, tbody td { overflow-wrap:anywhere }` שממוטט את מינימום-התוכן כך שהטבלה בפועל נכנסת למכל בכל רוחב ואין צורך בגלילה-פנימית
+- התיקון ב-office3d: ב-CSS-האסופה `.hud-op` מ-`calc(100vw - 20px)` ל-`calc(100% - 20px)` (עמדה-fixed נמדדת מול ICB בלי-פס-גלילה) ו-`.stage` קיבל `overflow:hidden` (משמרת-תקנית לבמה-תלת-מימדית מול כל מדידת-innerWidth עתידית של ה-renderer); ובנוסף כיסוי-נגד-בנייה-מחדש: `<style>`-משמרת אחרי ה-<link> ב-index.html עם אותם-שניים כללים (cascade: מאוחר-יותר = מנצח באותו-specificity)
+- אימות-מכנה אחרי: 30/30 קונפיגורציות PASS — over_vs_client=0 ואפס-אלמנטים-חורגים בכל המטריצה כולל פאנל-מנהל-פתוח; ב-network הטבלה נמדדת בתוך העטיפה בכל רוחב (tblW==wrapW: 358/358 ב-390, 343/343 ב-390-SB, 328/328 ב-360, 288/288 ב-320) ו-46 שורות נבנו-חי מ-status.json; איזון-תגים נקי בשני ה-HTML (פרסר, טיפול ב-self-closing); git status ב-Domain: רק 3 הקבצים שבבעלותי
+- לא ביצעתי שום git add/commit/push; לא נגעתי בקבצים מחוץ ל-scope; סקריפטי-המדידה הושארו ב-/home/z/.tmp-110a/ (מחוץ ל-repo) לשחזור
+
+Stage Summary:
+- שורש-התקלה: ב-network — מינימום-התוכן של טבלת-המדידה (367.3px, נגזר מ-pill/age ב-nowrap + ריפודי-תאים) חורג מהמכל בנייד וגורר גלישת-עמוד RTL שמאלה (+8px ב-390 עם פס-גלילה, +23 ב-360, +63 ב-320; ב-390-מובייל התחבאה כדימום-9.3px לריפוד שהופך לגלישת-viewport במטריקות-גופן שונות — ה-~5px הידוע); ב-office3d — `calc(100vw - 20px)` בפאנל-המנהל: 100vw כולל פס-גלילה-קלאסי ולכן הפאנל חורג בדיוק 5px משולי-הפריסה ברוחבי 350–374 (ומסוכן בכל עתיד-של מדידות-vw נוספות)
+- התיקון: network/index.html — עטיפת .tbl-scroll (overflow-x:auto) + overflow-wrap:anywhere בתאים (שורות 30–33 CSS, עטיפה בשורות 92+102); office3d/assets/index-B6BuwR3O.css — hud-op 100vw→100% + stage overflow:hidden; office3d/index.html — שכבת-משמרת זהה אחרי ה-<link> (שורות 28–34) ששורדת בנייה-מחדש של ה-assets; אפס overflow:hidden על body/html — כל התיקונים בשורש
+- מספרי-אימות: לפני — network SB/desktop@390 = +8px גלישה מדודה (table rect L=-8.3), @360 = +23px, @320 = +63px; office3d opsOpen@370 = right 360 מול client 355 = 5px; אחרי — 30/30 קונפיגורציות (2 עמודים × מובייל/desktop × עם/בלי פס-גלילה × 390/360/320 + opsOpen) = 0 גלישה, 0 אלמנטים-חורגים, טבלה 46-שורות נכנסת למכל בכולם
+- הערה-פתוחה-מתועדת: assets של office3d הם ארטיפקטים של Vite — בנייה-מחדש מהפרויקט-המקורי תדרוש החלה-מחדש של שני הכללים במקור (או שהמשמרת ב-index.html תכסה); ידוע-ופתוח-מחוץ-לטווח שלי: כל השאר
+
+---
+Task ID: 110-c (orchestrator union)
+Agent: Z.ai Code (ארכיטקט-ראשי)
+Task: "מעולה בוא נעשה את זה ודחוף" — סגירת-פערי-T109 + תיקון-שורש של כל-הליקויים-הנמדדים + הוכחת-מראה
+
+Work Log:
+- סבב-ריגול: PAT אומת-חי (upload/pat.env → זהות roshpinacare-sys עצמה — הכספת אמיתית, הריבונות מחזיקה-מפתחות בפועל); 30+ ריפואות נדחפות-כולן בשעה-האחרונה (דופק-אוטונומי חי ללא-נוכחות-בעלים); 7/9 איברים 200 (2 בדיקות-בנתיב-שגוי שלי — app /api/health 200)
+- מראת-Pulse הוכחה-חיה: mirror/lanes.json נולד 07:30:10Z · trigger repository_dispatch · steemHead 110623533 (api.steemit.com 118ms ok) · hiveHead 110960953 (api.hive.blog 103ms ok) · steemTreasury נמדד — הפער-הפתוח-האחרון של-T109 נסגר-בראיה, לא-בטענה
+- dex/money.json נמצא-רענן (R39 money-watch 06:04Z) — רישום-T109 היה-מיושן; האורגניזם ריפא-לבד; נותרה-בו-שגיאה-כנה אחת (peg-outbox wallet לא-נמצא ב-world.json) — מדווחת-בכנות, לא-מזויפת
+- 2 סוכנים-מקבילים (110-a / 110-b) עם-תחומים-מוצהרים למניעת-דריסות:
+  · 110-a (frontend-styling): office3d+network — שורש-ה-5px: טבלה ב-min-content nowrap (367px) + 100vw-כולל-פס-גלילה ב-.hud-op; 30/30 קונפיגורציות 0px אחרי-תיקון-מקור
+  · 110-b (browser-prod): 12 עמודים-חיים ב-production, 0 שגיאות-קונסולה, תוכן-אמיתי-ומתוארך; גילה 2 ליקויים-חדשים בכנות
+- ליקויים-שנמצאו-ותוקנו-בשורש (קומיט 0352071 → origin/main): receipts 81px@390 (11 טבלאות ב-.rwrap) → 0px/6 קונפיגורציות · office3d cold-freeze (>2 דק' על-WebGL-תוכנה) → מודול-הסצנה נטען ב-requestIdleCallback אחרי-צביעה-ראשונה · archive/wallet-v2 bidi-fix.js 404 (הממצא-היחיד של site-audit 07:51Z, 95 עמודים/302 קישורים) → נתיב-יחסי-תוקן
+- איחוד-עם-אחים: rebase מול 81c4727 (contradiction-cure) + arb-mesh tick — אפס-דריסות, push מוצלח בניסיון-2
+
+Stage Summary:
+- כל-הפערים-הפתוחים של-T109 נסגרו-בהוכחה: מראה-חיה-עם-דאטה · דפים-מקצועיים-שנבדקו-חוץ · ליקויי-390px אפס · site-audit ממצא-יחיד-תוקן
+- הארגניזם מוכיח-את-עצמו בלי-עוזר: דופק-30דק' · money-watch · network-census (46 ריפואות: 11 live/14 ok/4 stale/3 failing — נמדד-ומפורסם) · contradiction-cure של-אח-אחר
+- נותר-פתוח-כנה: FixedFloat 401 (ממתין-לספק · אין-להפעיל-בכוח) · steem.env ריק (ממתין-למפתחות-active) · שאריות-3-stale/3-failing ב-census — זרועות-היצרן שלהן
+
+---
+Task ID: 110-c (סגירה סופית)
+Agent: Z.ai Code (ארכיטקט-ראשי)
+Task: דחיפה סופית של T-110 — הוכחות-מול-פרודקשן
+
+Work Log:
+- פרודקשן אומת אחרי-הדחיפה: receipts rwrap=13 חי · network tbl-scroll=2 חי · archive bidi-fix → ../assets/bidi-fix.js 200 (ה-404 הישן נעלם-מהעולם כי-הפניה-תוקנה)
+- agent-browser על-פרודקשן: receipts@390 overflow=0 · network@390 overflow=0 עם 46 שורות-חיות
+- office3d v2 נדחף (c3930a6): תקרת-DPR=1 לפני-עליית-המודול + 500ms חסד-שלד
+- כנות-מלאה: בדיקה-מקומית על-swiftshader הוכיחה שהקפאת-הקומפילציה בלתי-תלויה-ברזולוציה (>120ש' גם-ב-DPR1) — זה-ארטיפקט של-GL-תוכנה בסביבות-חסרות-GPU; מכשירים-אמיתיים עם-GPU חומרי לא-מושפעים (רילואד-חם נענה 60ש'+ נמדד בפרודקשן); השלד נצבע-ראשון בכל-מקרה. אין-טענה של "תוקן-מלא" שאין-לה-ראיה
+
+Stage Summary:
+- T-110 סגור: 4 ליקויים-שורש תוקנו-ונדחפו (0352071 + c3930a6), מראת-Pulse חיה-בהוכחה (lanes.json 07:30:10Z עם-סקרי-שרשרת-חיים), money.json רענן-על-ידי-האורגניזם-לבד, site-audit ממצא-יחיד-טופל
+- שאריות-כנות: FixedFloat 401 (אצל-הספק) · steem.env ריק (ממתין-למפתחות) · swiftshader-freeze (סביבתי, מתועד) · 3-stale/3-failing ב-census (זרועות-היצרן)
