@@ -318,11 +318,11 @@
     },
     "130": {
       "audioPath": "sovereign/site/audio/improvement-130.wav",
-      "sizeBytes": 1441296,
+      "sizeBytes": 732816,
       "voice": "tongtong",
       "speed": 1,
-      "textChars": 111,
-      "narratedAt": "2026-10-21T04:46:46.163Z",
+      "textChars": 154,
+      "narratedAt": "2026-10-21T17:57:32.212Z",
       "worker": "sdk-tts:tongtong"
     },
     "133": {
