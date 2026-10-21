@@ -22,6 +22,7 @@ const REVIVAL_ORGANS: Array<{ name: string; probe: string; cwd: string }> = [
   { name: 'keeper', probe: 'http://127.0.0.1:3051/health', cwd: 'mini-services/survival-keeper' },
   { name: 'metrics', probe: 'http://127.0.0.1:3060/health', cwd: 'mini-services/saos-metrics' },
   { name: 'vault-guardian', probe: 'http://127.0.0.1:3080/health', cwd: 'mini-services/vault-guardian' },
+  { name: 'dex', probe: 'http://127.0.0.1:3010/saos-dex/api/dex/state', cwd: 'repos/saos-dex' }, // Task 112: המקום-הריבוני שוחזר-מ-github (clone) — עתה-בעץ-הנצחי
 ]
 
 type RevivalMemory = { spawns: Record<string, number>; lastProbes: Record<string, boolean>; bootAt: string }

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- .cjs = CommonJS לפי-הגדרה; require-כאן-הוא-החוק */
 /**
  * steem-pub-derive.cjs — WIF→STM pubkey [T-111 · trace 1a15e3bf30e79311]
  * ═════════════════════════════════════════════════════════════════════════
