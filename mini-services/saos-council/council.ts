@@ -53,17 +53,17 @@ function evidencePrompt(e: EvidenceBundle, r: GovernorRuling): string {
       מחיר: e.grid.price,
       מצב: e.grid.mode,
       מושהה: e.grid.halted ? e.grid.haltReason : false,
-      כשלים-רצופים: e.grid.consecutiveErrors,
-      פקודות-קנייה: { מספר: e.grid.openBuys, שוויSBD: e.grid.openBuySbd },
-      פקודות-מכירה: { מספר: e.grid.openSells, שוויSBD: e.grid.openSellValueSbd },
+      'כשלים-רצופים': e.grid.consecutiveErrors,
+      'פקודות-קנייה': { מספר: e.grid.openBuys, 'שוויSBD': e.grid.openBuySbd },
+      'פקודות-מכירה': { מספר: e.grid.openSells, 'שוויSBD': e.grid.openSellValueSbd },
       מימושים: { קנייה: e.grid.fillsBuy, מכירה: e.grid.fillsSell },
-      רווח-צל: e.grid.shadowPnlSbd,
+      'רווח-צל': e.grid.shadowPnlSbd,
     },
     ארב: e.arb,
-    דקס: e.dex && { שווקים: e.dex.markets, שדות-חיים: e.dex.okFields },
+    דקס: e.dex && { שווקים: e.dex.markets, 'שדות-חיים': e.dex.okFields },
     זרימה: e.flow,
     כמותי: e.quant,
-    מנהל-הסיכון: { פסק: r.verdict, ממצאים: r.findings, ספים: r.thresholds },
+    'מנהל-הסיכון': { פסק: r.verdict, ממצאים: r.findings, ספים: r.thresholds },
   }
   return `ראיות-חיות-חתומות מאיברי-האורגניזם (JSON):\n${JSON.stringify(compact, null, 1)}\n\nהפק-את-כרטיס-המועצה-לפי-המבנה. זכור: שני-הצדדים, שוברי-תזה-מדידים, חסרון-כמותי, הנחות-מפורשות.`
 }

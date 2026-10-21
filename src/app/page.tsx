@@ -30,6 +30,7 @@ import { LivePulse } from '@/components/LivePulse'
 import { FlowGuard } from '@/components/FlowGuard'
 import { GridPanel } from '@/components/GridPanel'
 import { HotMarketPanel } from '@/components/HotMarketPanel'
+import { CouncilPanel } from '@/components/CouncilPanel'
 import { OperatorGate } from '@/components/OperatorGate'
 import {
   Network,
@@ -2481,6 +2482,9 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
 
           {/* השוק-החריף (Task 106): גריד+ארביטראז על הדקס-הריבוני-שלנו, מחובר-לאמת-חוץ-מדידה */}
           <HotMarketPanel />
+
+          {/* מועצת-השולחן (Task 107): ראיות→מנהל-מכני→Director-LLM — AutoHedge+agency-agents מותאם-ריבונות */}
+          <CouncilPanel />
 
           {/* שער-התפעול-האוטונומי (Task 43): הדף כמשטח-תפעול — לאוטונומיה ולבעלים כאחד */}
           <OperatorGate />
