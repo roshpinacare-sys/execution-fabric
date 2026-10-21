@@ -5,5 +5,8 @@
   "scripts": {
     "dev": "bun --watch index.ts",
     "start": "bun index.ts"
+  },
+  "dependencies": {
+    "@hiveio/dhive": "1"
   }
 }
