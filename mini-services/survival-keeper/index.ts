@@ -173,6 +173,45 @@ function pushEvent(kind: string, msg: string): void {
   markDirty()
 }
 
+// ── Task-114: חוק-הקמה-מחדש-עצמית (self-provision from git) ────────────────
+// לקח-בדם (22:26Z): אתחול-מכונה-מחק-את-repos/ ואת-node_modules — הזקיפה-ניסתה-
+// להזניק-את-הדקס-103-פעמים-וכשלה-ב-ENOENT-מטעה ("/bin/sh" שהוא-בעצם-cwd-חסר),
+// והגריד-קרס-בכל-אתחול-על-ה-binding-ה-native. מעתה: לפני-כל-זינוק, אם-האיבר
+// חסר-מהעץ — הזקיפה-**מקימה-אותו-מהגיט-בעצמה**. אסור-שתהיה-מצב-בו-איבר-מורד
+// וממתין-לבן-אדם. המקור-המכונן-הוא-גיט; ההקמה-אוטונומית-לגמרי.
+function shellOut(cmd: string, cwd: string, timeoutMs = 300_000): { ok: boolean; out: string } {
+  const p = Bun.spawnSync(['/bin/sh', '-c', cmd], { cwd, stdout: 'pipe', stderr: 'pipe', timeout: timeoutMs })
+  return { ok: p.exitCode === 0, out: `${p.stdout ?? ''}\n${p.stderr ?? ''}`.trim() }
+}
+
+function provisionOrgan(name: string, dir: string): { provisioned: boolean; detail: string } {
+  const steps: string[] = []
+  // א'-התיקיה-עצמה נעדרת → שיבוט-מה-origin-של-העץ (dex חי-בגיט נפרד)
+  if (!existsSync(dir)) {
+    const origin = git(['remote', 'get-url', 'origin'])
+    if (!origin.ok) return { provisioned: false, detail: 'origin url לא-נקרא' }
+    const rel = path.relative(PROJECT_ROOT, dir)
+    // קינון-רק-לאיבר-שהוא-ריפו-נפרד (dex); שאר-האיברים-חיים-בתוך-העץ-ולא-יגיעו-לכאן
+    const c = shellOut(`git clone --depth 1 '${origin.out.split('\n')[0].trim()}' '${rel}' 2>&1`, PROJECT_ROOT, 300_000)
+    if (!c.ok) return { provisioned: false, detail: `clone נכשל: ${c.out.split('\n').slice(-1)[0] ?? '?'}` }
+    steps.push('clone ✓')
+  }
+  // ב'-תלויות חסרות → התקנה-עצמית (אתחול-מכונה-מוחק-node_modules)
+  if (!existsSync(path.join(dir, 'node_modules'))) {
+    const i = shellOut('bun install 2>&1', dir, 300_000)
+    if (!i.ok) return { provisioned: false, detail: `bun install נכשל: ${i.out.split('\n').slice(-1)[0] ?? '?'}` }
+    steps.push('bun install ✓')
+  }
+  // ג'-דקס: סכמת-prisma חייבת-להיות-מסונכרנת לפני-עלייה
+  if (name === 'dex') {
+    const hasDb = existsSync(path.join(dir, 'db', 'dex.db'))
+    const p = shellOut('bun run db:push 2>&1', dir, 300_000)
+    if (!p.ok) return { provisioned: false, detail: `db:push נכשל: ${p.out.split('\n').slice(-1)[0] ?? '?'}` }
+    steps.push(hasDb ? 'db:push ✓' : 'db:push (db-חדש) ✓')
+  }
+  return { provisioned: true, detail: steps.join(' · ') || 'היה-שלם' }
+}
+
 // ── עזרי-גיט (spawnSync — פשוט, אין-ערימה) ────────────────────────────────
 function git(args: string[], cwd?: string): { ok: boolean; out: string } {
   const p = Bun.spawnSync(['git', ...args], {
@@ -243,6 +282,19 @@ async function watchService(
     : 'chain-witness'
   const dir = path.isAbsolute(dirName) ? dirName : path.join(PROJECT_ROOT, 'mini-services', dirName)
   try {
+    // Task-114 — חוק-הקמה-מחדש-עצמית: איבר-חסר-מהעץ (תיקיה/node_modules/db) מוקם-מהגיט-
+    // לפני-הזינוק. לעולם-לא 'spawn-נכשל-וממתינים' — הריבונות-מקימה-את-עצמה.
+    const prov = provisionOrgan(name, dir)
+    if (!prov.provisioned) {
+      w.lastResult = `provision failed: ${prov.detail}`
+      log(`🚨 הקמת-${name}-מהגיט-נכשלה — ${prov.detail}`)
+      pushEvent('provision-failed', `${name}: ${prov.detail}`)
+      return
+    }
+    if (prov.detail && prov.detail !== 'היה-שלם') {
+      log(`🛠 ${name} הוקם-מהגיט (${prov.detail}) — לפני-זינוק`)
+      pushEvent('provisioned', `${name}: ${prov.detail}`)
+    }
     // לקח-חי (Task 106): spawn עם 'bun' רק-מסתמך-על-PATH-של-ההורה (ENOENT נמדד);
     // וגם posix_spawn-ישיר-של-הבינארי-נכשל-ENOENT-מהתהליך-הזה (נמדד-חי) —
     // מעטפת-/bin/sh פותרת (שלוש-שכבות-ניסיון-מתועדות: יחסי → מוחלט → מעטפת).
