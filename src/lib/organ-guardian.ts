@@ -34,11 +34,19 @@ const LOG_DIR = join(ROOT, 'mini-services', 'saos-arb', 'state')
 const BUN = '/usr/local/bin/bun'
 
 // האיברים-שהשומר-מחזיק: נתיב-בדיקה + תיקיית-הרצה
+// Task 112 [trace 1a15f2614827141d]: כל-האיברים-תחת-העץ-הנצחי — תגלית-חיה: תהליכים-שנוצרו-מחוץ-לעץ-ה-3000
+// נקצרים-על-ידי-הסנדבוקס-בין-קריאות-הכלי (נמדד: 3-שיטות-התחלה, 5-איברים, אפס-שורדים);
+// רק-צאצאי-next-server-הנצחי שורדים. לכן-הזקיפה-מחזיקה-עתה-בכל-9-האיברים — אין-עוד-מנגנון-החייאה.
 const ORGANS: Array<{ name: string; probe: string; cwd: string }> = [
   { name: 'grid', probe: 'http://127.0.0.1:3070/health', cwd: join(ROOT, 'mini-services', 'saos-grid') }, // Task 105
   { name: 'arb', probe: 'http://127.0.0.1:3071/health', cwd: join(ROOT, 'mini-services', 'saos-arb') }, // Task 106
   { name: 'dex', probe: 'http://127.0.0.1:3010/saos-dex/api/dex/state', cwd: join(ROOT, 'repos', 'saos-dex') }, // Task 106 — השוק-שלנו
   { name: 'council', probe: 'http://127.0.0.1:3072/health', cwd: join(ROOT, 'mini-services', 'saos-council') }, // Task 107 — מועצת-השולחן (AutoHedge+agency-agents מותאם)
+  { name: 'heart', probe: 'http://127.0.0.1:3031/health', cwd: join(ROOT, 'mini-services', 'fabric-heartbeat') }, // Task 112 — הלב: פעימת-גיט
+  { name: 'witness', probe: 'http://127.0.0.1:3050/health', cwd: join(ROOT, 'mini-services', 'chain-witness') }, // Task 112 — עד-השרשרת
+  { name: 'keeper', probe: 'http://127.0.0.1:3051/health', cwd: join(ROOT, 'mini-services', 'survival-keeper') }, // Task 112 — הזקיפה-החיצונית
+  { name: 'metrics', probe: 'http://127.0.0.1:3060/health', cwd: join(ROOT, 'mini-services', 'saos-metrics') }, // Task 112 — המדיד
+  { name: 'vault-guardian', probe: 'http://127.0.0.1:3080/health', cwd: join(ROOT, 'mini-services', 'vault-guardian') }, // Task 112 — שומר-הכספת (ריבונות-מפתחות)
 ]
 
 function logEvent(kind: string, msg: string): void {
