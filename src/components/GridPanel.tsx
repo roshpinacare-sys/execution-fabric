@@ -200,7 +200,7 @@ export function GridPanel() {
                   const m = KIND_META[e.kind] ?? { label: e.kind, cls: 'text-zinc-500' }
                   return (
                     <div key={e.id} className="flex items-center gap-2 text-[11px] leading-relaxed">
-                      <span className="shrink-0 font-mono text-zinc-400">{new Date(e.at + 'Z').toLocaleTimeString('he-IL', { hour12: false })}</span>
+                      <span className="shrink-0 font-mono text-zinc-400">{new Date(e.at.endsWith('Z') ? e.at : e.at + 'Z').toLocaleTimeString('he-IL', { hour12: false })}</span>
                       <span className={`shrink-0 font-semibold ${m.cls}`}>{m.label}</span>
                       <span className="shrink-0">{e.account}</span>
                       {e.price > 0 ? <span className="shrink-0 font-mono text-zinc-500">@{e.price.toFixed(5)}</span> : null}
@@ -239,7 +239,7 @@ export function GridPanel() {
 
             <div className="flex items-center justify-between text-[11px] text-zinc-400">
               <span>
-                מחזורים: {grid.stats?.cycles ?? 0} · מחזור-אחרון: {grid.stats?.lastCycleAt ? new Date(grid.stats.lastCycleAt + 'Z').toLocaleTimeString('he-IL', { hour12: false }) : '—'}
+                מחזורים: {grid.stats?.cycles ?? 0} · מחזור-אחרון: {grid.stats?.lastCycleAt ? new Date(grid.stats.lastCycleAt.endsWith('Z') ? grid.stats.lastCycleAt : grid.stats.lastCycleAt + 'Z').toLocaleTimeString('he-IL', { hour12: false }) : '—'}
                 {grid.stats?.lastError ? ` · שגיאה-אחרונה: ${grid.stats.lastError.slice(0, 50)}` : ''}
               </span>
               <span>עודכן {updatedAt}</span>

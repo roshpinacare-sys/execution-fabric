@@ -120,3 +120,11 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Task 106 — בלוקי-קוד ארוכים (curl וכד') לא גולשים אופקית במובייל */
+main code,
+pre code {
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+  white-space: pre-wrap !important;
+}

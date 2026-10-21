@@ -73,6 +73,11 @@ interface HotData {
 
 const POLL_MS = 15_000
 const fmtMu = (v: number | null | undefined) => (v === null || v === undefined ? '—' : (v / 1000).toLocaleString('he-IL', { maximumFractionDigits: 1 }))
+const fmtTime = (iso: string | null | undefined) => {
+  if (!iso) return '—'
+  const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z')
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleTimeString('he-IL', { hour12: false })
+}
 
 export function HotMarketPanel() {
   const [d, setD] = useState<HotData | null>(null)
@@ -231,7 +236,7 @@ export function HotMarketPanel() {
                 <div className="mb-2 flex items-center justify-between text-xs">
                   <span className="font-medium">רכיב-הריצה-האחרון #{card.cycle} — ההחלטות-החיות</span>
                   <span className="text-zinc-400">
-                    {new Date(card.at + 'Z').toLocaleTimeString('he-IL', { hour12: false })}
+                    {fmtTime(card.at)}
                   </span>
                 </div>
                 <div className="max-h-44 space-y-1 overflow-y-auto pr-1">
@@ -312,7 +317,7 @@ export function HotMarketPanel() {
 
             <div className="flex items-center justify-between text-[11px] text-zinc-400">
               <span>
-                מחזור-אחרון: {card ? new Date(card.at + 'Z').toLocaleTimeString('he-IL', { hour12: false }) : '—'} ·
+                מחזור-אחרון: {fmtTime(card?.at)} ·
                 ידיים: {arb?.hands?.join(', ') ?? '—'} · קצה-מינימום: {arb?.minEdgeBps ?? '—'}bps
               </span>
               <span>עודכן {updatedAt}</span>

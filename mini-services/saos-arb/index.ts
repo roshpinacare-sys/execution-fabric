@@ -402,6 +402,7 @@ async function cycle(): Promise<void> {
     return
   }
   consecErrors = 0
+  lastError = null // הצלחה-מנקה-את-השגיאה-האחרונה (כנות-היא-גם-ניקוי)
   cycles++
   lastCycleAt = new Date().toISOString()
 

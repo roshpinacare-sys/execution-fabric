@@ -76,3 +76,6 @@ sovereign/site/audio/*.wav
 # Task 101 — כספת-מפתחות הקופה (FixedFloat) — אסור-בגיט, אסור-בלוגים
 .vault/
 repos/
+
+# Task 106 — מצב-ריצה של איבר-השוק-החריף
+mini-services/saos-arb/state/
