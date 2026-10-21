@@ -2071,3 +2071,126 @@ Stage Summary:
 - המועצה-עתה-רואה-את-כל-מה-שביקשה-לראות (כרטיס-#1-נענה-במלואו): פרמיה, מימושים-פר-יד, חשיפות-פר-יד, MTM, רוחב-הספר — ומחויבת-בפרוטוקול-הסלמה-אכוף-מכנית
 - מהשניים-הריפואים-נטמעו-עד-תום: AutoHedge (שער-איכות-שווקים + תקרות-מלאי-חיות) ו-agency-agents (NEXUS-הסלמה + רישום-מכונה-לצי) — אפס-תלות-חדשה, אפס-שירות-חוץ
 - חסימות-חוץ-בכנות (לא-נוספה-אף-חסימה-פנימית): FF-ממתין-לאימות-הספק (401) · steem.env-ריק-עד-מפתחות-headcorner · HTX-סגור-סופית-KYC — הכל-מדווח-חי-בדשבורד-וברישום-האיברים
+
+---
+Task ID: 109 (תכנון — ביצוע בעיצומו)
+Agent: Z.ai Code (ארכיטקט-ראשי)
+Task: "בחן תכנן בצע ודחף" — העלאת רמת כל דפי ה-Domain הציבוריים (בדיקת טענות מול אמת בגיט, תיקון, דחיפה) · תיאום אנטי-דריסה
+
+Work Log (ביקורת שנמדדה, לא טענות):
+- נשכפל roshpinacare-sys/Domain (29 דפי HTML שורש + hub/ + תתי-עצים); גישת-דחיפה אומתה (credential-helper דרך .zscripts/git-credential-pat.sh — הטוקן לא נוגע בדיסק)
+- דפדפן-אמת על האתר החי: index/press/money/wallet/console — צילומים ב-audit-shots/
+- ממצאים מדידים: (1) wallet.html = 63 מילים סטטיות מול 104KB JS — בלי-JS/מנוע-חיפוש רואים כלום; (2) hub/explainer=8 מילים, office3d=7, docs=76, network=73, receipts.html=139, api-references=33; (3) press: קיפולי-טקסט RTL/BiDi — תאריכים וכותרות נחתכים בקצוי-כרטיסים; (4) console: כרטיסי לקחים/חדשות נשברים חזותית (קיר-טקסט); (5) דפים סטטיים מיושנים (defi 17/9, products 7/9, hub/fact-sheet, about, pitch...); (6) progress.md + session-handoff.md חסרים לגמרי אף ש-AGENTS.md דורש אותם בפרוטוקול-האתחול; (7) sovereign-lighthouse עכשיו 200-חי (החוק נכתב כשהיה מת) — קישורי-repo תקפים, נשמרים
+- חוק-אפייה: press/index.html נאפה יומית מ-tools/bake-press.mjs → התיקון חייב במקור + בתפוקה; console/wallet/money בעבודת-יד
+- נתוני-אמת חיים: status.json (60/387 עורקים, ALIVE 19), pulse.json (treasury BELOW-FLOOR 1714/3000, verifier DEGRADED) — ישמשו עובדות-מדידה, לא המצאות
+
+בעלות-קבצים נוקשה (אסור לגעת מחוץ לרשימה):
+- 109-a: tools/bake-press.mjs + press/index.html (תבנית העיתון — RTL/BiDi)
+- 109-b: wallet.html, receipts.html, network/index.html, docs/index.html, hub/explainer/index.html, office3d/index.html, hub/products/api-reference.html, hub/products/identity-api-reference.html, hub/developers/identity-api.html, market/onepager-en.html, market/index-en.html, marketing/adsmarket.html (שכבת-תוכן ללא-JS)
+- 109-c: defi.html, products.html, sovereign.html, versus.html, readiness.html, reports.html, hub/fact-sheet.html, hub/index.html, about/index.html, pitch/index.html, hub/ecosystem.html (רענון-סטגנציה)
+- ראשי (אני): console.html + progress.md + session-handoff.md + אימות-סופי + דחיפה (pull --rebase → push)
+
+חוקי-גל: אפס-סודות · אפס-טענות-בלי-מדידה (רק עובדות מהספרים: status.json/mirror.json/pulse.json/feature_list.json/dex/*.json) · אף-אחד לא קומיט — ראשי דוחף · מערכת-עיצוב קיימת נשמרת · RTL: מחרוזות לטיניות/מספרים ב-.mono/.num עם unicode-bidi · word-break לטוקנים ארוכים
+
+Stage Summary:
+- תוכנית מאושרת-עצמית על בסיס אמת מדידה בלבד; הגלים יוצאים לפועל מיד; עדכון-סיום יבוא ברישום נפרד
+
+---
+Task ID: 109-a
+Agent: 109-a · Z.ai Code (סוכן-תבנית-העיתון — bake-press RTL/BiDi)
+Task: תיקון-שורש של חיתוכי-RTL/BiDi בעיתון-הצי — התיקון ברמת-התבנית (tools/bake-press.mjs) + אפייה-מחדש של press/index.html באותם-תיקונים, כך שישרוד כל אפייה-יומית-עתידית
+
+Work Log:
+- נותחו tools/bake-press.mjs מלא והמהדורה-האפויה: אותרו-3-שורשי-החיתוך — (1) טוקנים לטיניים/מספריים לא-שבירים (ISO-זמנים, נתיבי-מקור, event-names) בלי overflow-wrap — גולשים-מעבר לקצה-הכרטיס; (2) פריטי-ה-grid בלי min-width:0 — עמודה-מתרחבת-מעבר ל-1fr ונחתכת; (3) תווית-המקור נחתכה-אכזרית ב-.slice(0,64) באמצע-טוקן ("…/main/office/s")
+- בנויים-עוזרי-בידוד בתבנית: num() ו-mono() — כל טוקן לטיני/מספרי נעטף ב-<span class="num|mono"> עם direction:ltr + unicode-bidi:isolate + display:inline-block + max-width:100% + overflow-wrap:anywhere + word-break:break-word + font-variant-numeric:tabular-nums; ltrize() — regex ISO-8601 שעוטף-זמנים בתוך טקסט-חופשי מהנתונים (כותרות-פרסומים, סטטוס-משרד, חוזי-גיוס); ago() מחזיר מספרים-מבודדים
+- CSS-קשיחות בתבנית: .grid>*{min-width:0;max-width:100%} + .card{min-width:0} — מבטל-גלישת-עמודות; overflow-wrap:anywhere+word-break:break-word+max-width:100% על h2/kick/lead/li/sub/src; .chip ו-.tagc קיבלו direction:ltr+unicode-bidi:isolate (ALIVE 19 · STEEM · PROPOSED); .src a — unicode-bidi:embed+inline-block+שבירה; tabular-nums גלובלי על body; hyphens לא-הופעל — עברית-אינה-מוטעמת וכתובות לא-מקבלות מקף-חזותי (overflow-wrap:anywhere מספיק)
+- תווית-מקור-חכמה srcLabel(): קיצור בגבול-מקטע לפורמט "מארח/…/שם-קובץ" — raw.githubusercontent.com/…/office-state.json במקום חיתוך-אמצע-מילה; ה-href נשאר ה-URL המלא (כנות-נשמרת); כל-6-מקורות אומתו-בפלט
+- עוטפו-כל-הטוקנים-המוכרים ב-6-הכתבות: 60/387, "N repos", -76 bps, RISK_ON, STEEM/BTC/HIVE/BLURT, מחירים (0.05475$, 82,803$), פחד-וחמדנות 63-Greed, מספרי-גיוס 1/7, 160-משמרות, ISO-זמני-מדידה ו-ISO-בכותרות (2026-10-20T05:32Z) — 30 ספאני-num ו-26 ספאני-mono במהדורה; הערות-ה-fail-soft הרב-שורתיות מוחזקו-לשורה-אחת
+- אפייה: node tools/bake-press.mjs → {"state":"ok","press":"baked","bytes":13784}, exit-code 0; אימות-אנטי-בריחה: אפס-&lt;span (בלי-escape-כפול); git-diff מוגבל ל-2-הקבצים-שבבעלותי
+- הוכחת-דפדפן (headless): מובייל 390px — scrollWidth 390/390, אפס-אלמנטים-חורגים-מגבולות-הכרטיס/המסך (clippedCount 0); דסקטופ 1440px — אפס-חיתוכי-כרטיס; בדיקת-לחץ: טוקן-סינתטי-ארוך של 148 תווים-בלתי-ניתן-לשבירה הוזרק-לתוך li — נשבר-מקומית-ל-312px ונכנס-בכרטיס, אפס-גלישת-עמוד; צילומי-הוכחה /tmp/press-mobile-390.png · /tmp/press-desktop-1440.png · /tmp/press-mobile-390-stress.png
+- הערת-אמת מחוץ-לבעלותי: status.json החי-ב-github.io משיב JSON-שבור לאפייה (Unexpected token 'a' … acct-00) — הכתבה-נפלה-בכנות-ל"לא נמדד במהדורה זו" לפי חוק-ה-fail-soft; מצריך-תיקון-בזרוע-המייצרת-את-status.json (לא-נגעתי — לא-בבעלותי)
+
+Stage Summary:
+- עיתון-הצי עבר-הקשחת-RTL/BiDi מלאה ברמת-המקור: כל טוקן לטיני/מספרי/תאריך מבודד-כיוון, נשבר-במקום-להיחתך, ומוצג-בספרות-טבלאיות — התיקון-חי-בתבנית ולכן כל אפייה-יומית-עתידית יורשת-אותו-אוטומטית; המהדורה-של-היום נאפת-מחדש-עם-התיקונים (13,784 bytes, exit 0)
+- אפס-שינוי-תוכן-ואפס-שקר: כל המספרים מהמדידות-החיות, מקור-שלא-השיב ממשיך-להיות-מדווח-בכנות, וה-href-ים נשארים-מלאים; מערכת-העיצוב (צבעים/טיפוגרפיה/masthead) נשמרה-כמו-שהיא — רק-קשיחות-נוספה
+- נותר-מחוץ-לטווח שלי: status.json-החי-שבור (מדווח-למוביל-הגל) · לא-בוצע git add/commit/push — הראשי דוחף
+
+---
+Task ID: 109-b
+Agent: Z.ai Code (סוכן-גל 109-b — שכבת-תוכן ללא-JS)
+Task: העלאת 12 הדפים הדקים של Domain — שכבת-תוכן סטטית עשירה לפני/סביב אפליקציית-ה-JS, בלי לגעת בלוגיקה ובלי המצאות (רק עובדות מהספרים)
+
+Work Log:
+- קראתי את 12 הקבצים במלואם ואת הספרים: status.json (60/387 עורקים, 19 ALIVE), pulse.json, mirror.json, saos-live.json (truthLabel: fold דטרמיניסטי של custom_json, כל חתימה נבדקת מחדש), network/status.json (46 ריפואים: 8 חי/8 רצים/17 תקינים/4 נכשלים/1 שקט/8 בלי ריצות), token.json, dex/state.json, content/published.json, README.md, FLEET-NOTE.md, receipts/ (r35/r40/r44/r46/r47), office3d/world/world.json (office3d.world/2 · v16 · append/expand only), marketing/adsmarket.json (MEASURED · 10 נכסים · 295,256 בייט · 15 עוגני-txid · fact-sheet-internal-he.md MISSING מוצג בכנות), hub/api/identity-api.html (הקנון), onepager/, about/, hub/explainer/en.html (9 סצנות נמדדו בעצמי)
+- wallet.html 63→693 מילים: שכבת-proof חדשה (מה המכונה · תשע התחנות ב-details · הספרים שהיא קוראת עם קישורי saos-live.json/dex/state.json/token.json · שורת-כנות: המספרים מחושבים חי בדפדפן, אין יתרות בטקסט הסטטי; עוגני-ספר חתומים: genesis done · initialMint 126682000=126,682 SAOS v0 · maxSupply 21000000000 · stateRoot 7023345ea9c6…). בנוסף מילאתי סטטית את ה-hero וכותרות/פסקאות תחנות 1–9 מהמחרוזות העבריות הקיימות של ה-i18n — אימות מכני: כל מחרוזת-מילוי שווה ביט-ביט ל-I[k].he, וה-JS דורס באותו טקסט ממש
+- receipts.html 139→308: הסבר מה הפנקס (איבר→קבלה-בגיט→אפייה שעתית), משמעות שלושת הצבעים כולל "אין-מדידה" ככנות-ולא-תקלה, קישורים לקבלות-הגלם (receipts/autonomy-guardian/latest.json, r47/r46/r44/r40/r35) ולקיר-הקבלות; הדף עצמו אפס-JS וזה נאמר בגוף-ראשון
+- network/index.html 73→224: איך סוקר-הרשת עובד (agents/network-census.mjs על הגריד כל 15 דק'), משמעות ששת המצבים, תמונת-מצב מהספר עם חותמת-זמן (2026-10-21 04:55 UTC · 46 ריפואים) + הצבעה ל-status.json השורשי (60/387, 19 ALIVE), וקריאה גלויה: הטבלה נבנית בדפדפן — בלי JS פתחו את הספר
+- docs/index.html 76→182: כרטיס "איך מרכז-התיעוד נבנה" (סריקת-עץ בזמן-בנייה על-ידי איבר-הבונה), הסבר שני המסמכים החיים, מסמכי-יסוד בריפו (README/FLEET-NOTE/AGENTS/feature_list.json), ספרים (pulse/status/mirror) ומדריכים
+- hub/explainer/index.html 8→212 (אנגלית, שומר refresh/canonical/noindex): מה המסביר המונפש (9 סצנות × 7.5 שניות — נמדד מהקוד; "8 scenes" המיושן ב-meta תוקן ל-9), העוגנים-על-השרשרת האמיתיים מתוך en.html (Ethereum/Solana/Steem txids), חוק-הניפוץ, וקישורי-ספרים
+- office3d/index.html 7→181: מה הסצנה (React+three.js, אור-יום לפי ירושלים 06:30/22:30 מהספר), חוק-העולם מ-world/world.json (append/expand only, גרסה 16, world-evolver), שלושת המקורות החיים (FleetHQ digest.json, agents/STASIS.json, Sandbox operator-journal.jsonl), וכנות: בלי JS אין סצנה — תלות-מוצהרת; השכבה מוצבת מתחת ל-#root ונבדקה בדפדפן
+- שלושת קברי-ה-API (hub/products/api-reference.html 33→157 · identity-api-reference.html 34→159 · hub/developers/identity-api.html 33→152): שלושה טקסטים לא-זהים (הוכחת-המפתח/המכסה-והמדידה/זווית-מפתחים), כולם נכונים מול הקנון hub/api/identity-api.html: עוגן saos.id.v1 + EIP-191 ecrecover + הרשות-הפעילה החיה; 1,000 קריאות/יום-UTC; PROVEN/FAILED כן נמדדות, 401/429 לא; הוכחה מול בלוק Steem 109,389,994; npm+שער-ציבורי פתוחים — כנות-גבול מהקנון עצמו
+- market/onepager-en.html 33→201 ו-market/index-en.html 35→235 (אנגלית, dir=ltr מבודד): מה פרש, מה בקנון (onepager/: live proof/atomic clock/product family/honest economics/roadmap בלי תאריכים; about/: הסעיפים האמיתיים שנמדדו מה-HTML), ספרים + README/fact-sheet מקומיים
+- marketing/adsmarket.html 100→231: מה Adsmarket (זרוע-השיווק, ריפו פרטי), צינור המדידה (adsmarket-panel.yml שני 05:41 UTC → agents/adsmarket-panel.cjs → adsmarket.json), תמונת-מצב מהספר עם חותמת (2026-10-19 · MEASURED · @669499c6 · 105 קבצים · 10 נכסים · 295,256 בייט · 15 עוגני-txid · 7 מאמרי-EN) וחוב-כנות: MISSING אחד מוצג בשמו
+- אימות-מכנה על כל 12: (1) בלוקי-<script> זהים-בייטים ל-HEAD — אפס נגיעה בלוגיקה; (2) כל הקישורים היחסיים הסטטיים נפתרים לקבצים קיימים (סקריפט-בדיקה, כולל שלילת יעדים חסרים); (3) איזון-תגים תקין בכל הקבצים; (4) ספירות-מילים סופיות (בלי script/style): 693/308/224/182/212/181/157/159/152/201/235/231 — הכל מעל 150; (5) בדיקת-דפדפן חיה: wallet נטען, אפס שגיאות-קונסולה, legend=7 parts=7 — זהה לאתר-החי, chips עצמי-בוחן ✓; שכבת-proof מרונדרת עם 24 טוקני-.lat בכיוון-ltr ואפס גלישה; mobile 390px ללא גלישת-עמוד ב-wallet; network 395/390 — נמדד גם על HEAD (395) — קיים-מראש, לא רגרסיה שלי
+- אפס סודות: אף מפתח/טוקן לא נכתב; כל המספרים מהספרים עצמם או מתוארים כחי-בדפדפן; לא הרצתי git add/commit/push (ראשי דוחף)
+
+Stage Summary:
+- 12 הדפים-הדקים עברו מ"קליפה ריקה" לדפים שמסבירים את עצמם לקרואלר ולמבקר-בלי-JS: מינימום 152 מילים אמת לכל דף (רובם 180–310, wallet 693), כל עובדה מסומנת למקורה בספר, וכל דף מסיים בקישורי-המשך חיים (console/money/receipts/tools ודומיהם)
+- החוק נשמר: אפס נגיעה ב-JS (הוכחה: בלוקי-script זהים-בייטים ל-HEAD בכל 12 הקבצים), אפס המצאות (כל מספר עם חותמת-זמן ומקור), מערכות-עיצוב קיימות נשמרו (CSS מקומי-מוקף בלבד, ללא פריימוורקים), RTL: טוקנים לטיניים ב-.lat עם unicode-bidi:embed/direction:ltr/overflow-wrap:anywhere
+- תיקון-אמת קטן בדרך: "eight scenes" המיושן ב-meta של מסביר-הרשת תוקן ל-9 הנמדדות
+- שארית-מדידה לבעלים/ראשי: overflow של 5px ב-390px בטבלת network/index.html — קיים ב-HEAD, לא נוגעתי (מחוץ לסמכות-הגל שלי למקור-ה-JS של הטבלה)
+
+---
+Task ID: 109-c
+Agent: 109-c · Z.ai Code (סוכן גל-רענון — דפי-סטגנציה: 11 קבצים בבעלות בלעדית)
+Task: המשך (resume) — אימות 5 הדפים שהריצה הקודמת נגעה בהם (defi/products/sovereign/versus/readiness) והשלמת המעבר המלא על 6 הדפים שלא נגעו (reports, hub/fact-sheet, hub/index, about/index, pitch/index, hub/ecosystem) · אפס מידע-ישן שמוצג כחוק-היום, כל מספר עומד על אמת מדידה
+
+Work Log:
+- קראתי את ספרי-האמת במלואם ואימתתי כל מספר סטטי בדפים מולם: dex/world.json (h988,045 · ops 4,637,680 · fills 255,685 · swaps 73,380 · liveOrders 18 · stateRoot bf0f8b96 · rail fundedMu 1,179,546 · income treasuryProfitEverMu 18,394,550µ · poolFeesMu 24,055,954µ · engine.cow 4,192 אצוות/77,400,000µ/607,540µ עודף · burnedSaosMu 62,354,722µ · router.vePaidMu 10,026,081µ · auto 8 DCA/770 טריגרים · backing WSTEEM −60,664µ / WSBD 84,811µ · premBps −182), dex/state.json (fair SAOS/USDS 1,016 · USDS/WSTEEM 55 · feeBps 30–1,404 · בריכת USDS/WSTEEM צד-USDS 475,025µ ≈ $475), dex/deposits.json (הפקדה 1: 100 STEEM · 2026-10-19 · txid bdd9fe35…), dex/grid.json (ARMED-WAITING · keyGate ok · run.filledTotal 104 · externalFlowUsd $0.30 · מלאי 191.045 STEEM/28.203 SBD · openOrdersNow 31 · book 0.10506/0.10535 · parity 0.10575 · powerdown 0.00025 SP/שבוע · remainingSp 1,000.19 · nextPayout 2026-10-25), dex/money.json (redemption applicable:false · "watch dormant, nothing fabricated"), dex/portfolio.json (core valueUsdsMu 1,908,608,477 ≈ $1.9M), status.json (60/387 · 46 ריפואים · ALIVE 19/MIXED 15/STALE 1/IDLE 11 · 2026-10-21T03:46Z), pulse.json (verifier DEGRADED · אוצר BELOW-FLOOR 1,714.246/3,000 · 2026-10-21T04:30Z), savings.paidMu 7,081,484µ
+- אימות-חוץ חי ממקורות ציבוריים בזמן-אמת (curl, 2026-10-21): DefiLlama overview/fees — Tether $523,714,891 · Circle USDC $212,170,402 · Uniswap V4 $68,991,817 · PumpSwap $116,264,858 · Polymarket שתי-הישויות $30,120,061+$83,810,733=$113.9M · Lido $51,539,855 · Aave V3 $37,128,148 · pump.fun $62,626,872 · Ethereum $17,772,056 · Tron $23,905,342 — כל טבלת נתיבי-הכסף ב-sovereign.html וב-readiness.html עומדת מדה-במדה; historicalChainTvl — Ethereum $50.16B · Solana $5.95B · Base $6.26B · Tron $5.54B (הזרקתי את הערכים שנמדדו עתה: $50.2B/$5.95B/$6.26B/$5.54B במקום $50.3/$5.99/$6.25/$5.55 של הריצה הקודמת); coins API — STEEM $0.0547 · SOL $105.6 · BTC $82,585 · ETH $2,436 (הוכנסו לסעיף ח של readiness שהחזיק מחירי 17/09 כ"נמשך חי היום"); tvl slugs של versus.html (aave/makerdao/curve-dex/uniswap/morpho/ethena/hyperliquid) נמדדו חי ותאמו את תמונת-הבנייה של ה-2026-10-21; registry.npmjs.org/saos-id-verify = 404 — ההסקה: פרסום-npm עדיין פתוח (מהקנון: "Until then, install from the repo") ולכן סקופית-הבקשה ב-pitch תוקנה ל"עוד פתוח" ולא "בוצע"
+- הריצה הקודמת (5 קבצים) — אומתה והושלמה: defi.html תקין כמעט כולו (כל מספרי ה-ids תואמים את הספרים) — תיקנתי 3 דברים: (1) "מדיניות העומדת שנפרסה אתמול" → "נפרסה בR26, 2026-09-16"; (2) טענת-Tether "$523.7M (2026-10-21)" שהריצה הקודמת כתבה בלא מקור-מדידה — הוחזרה למדידת-הסקר R28 485.4M$ עם תאריך-מדידתה (וזאת בעוד sovereign/readiness מחזיקים את $523.7M באותו ערך שאומת חי בפועל מ-DefiLlama — ההבדל: שם יש מקור-מדידה חי, ב-defi הייתה טענה ללא ריצת-מדידה מתועדת); (3) שורת-Tether בסעיף ג אותו-דבר. products.html — תקין (התאריך היחיד 2026-09-07 מתויג "נמדד", 26 קישורים נפתרים כולם); sovereign.html — אומת מקצה לקצה מול dex/grid.json+world.json (104 מילויים = run.filledTotal ✓, ARMED-WAITING ✓, מלאי/ספר/פריטי-kv מדויקים) — לא נגעתי פרט לוודא שאין-שאריות; versus.html — תוקנה טענת-הטווח "30-677bps בבריכות החיות" → "30-1,404bps" (feeBps ב-dex/state.json כולל USDS/WSBD 1,404 שהושמט) + מקור; readiness.html — תוקנו שאריות-ישן שהריצה הקודמת לא סיימה: h19034 שהוצג כגובה-חי ב-2 מקומות → h988,045 מהספרים (ההיסטורי h18553→h19034 נשאר מתויג במקומו), "נמשך היום 17:50Z" / "נמשק היום" → "נמדד 2026-10-21", מחירי-עולם מ-17/09 שהוצגו כחיים-היום הוחלפו במדידה חיה של היום + עוגן-האורקל של המנוע (54.9µ), 11 מופעי "היום" יחסיים-שחוקים (בוצע היום/שווידאנו היום/תפסה היום/המשמעות של היום…) הומרו ל"בבחינה/2026-09-17", ורשימת-החסרונות ה א החזיקה מספרי-17/09 כ"מציאות נמדדת": גיבוי 34 STEEM≈$1.9 → כתוב בספר WSTEEM −60,664µ (חריגה מתועדת) + WSBD 84,811µ + SP בטפטוף, וצד-USDS $584 → $475 (dex/state.json)
+- reports.html (לא נגעו קודם): נוסף כרטיס "המצב החי עכשיו" — הספרים שמחליפים את הדוחות-הישנים (60/387 · ALIVE 19/MIXED 15/STALE 1/IDLE 11 · verifier DEGRADED · אוצר BELOW-FLOOR) עם שורת-נמדד (status.json נוצר 03:46:04Z · pulse.json 04:30:27Z) וקישורי-מקור; תוקן מספר-קצב שגוי "כל-~17 דקות" → "כל-20 דקות" עם המקור (.github/workflows/grid-sentinel.yml cron */20 שנבדק בקוד); הארכיון-הסגור הושאר כמו-שהוא — כנה ומתועד
+- hub/fact-sheet.html (אנגלית, 103KB): נוסף truthbar גלוי בראש העמוד (Truth refresh 2026-10-21: הגיליון קפוא בתאריכי-הסריקה שלו, הספרים החיים — status.json/dex/world.json/pulse.json עם הערכים; שורות-שנוגעו מתויגות [refreshed 2026-10-21]) + CSS .truthbar; שורת-גובה "133,259+ blocks" שהוצגה כחיה → "133,259 at the 2026-09-13 scan · now h988,045"; שורת-מסחר "282 trades today" → מתויגת לסריקת-09-13 ומוסיפה את הספר-החי (255,685 fills · 73,380 swaps · treasuryProfitEverMu ≈ $18.4K); "dust-scale today" → סימון פנימי מדוד ~$18.4K+$24.1K (2026-10-21); "currently at stage S2" → ניסוח כהצהרת-סריקה מתוארכת במקום טענה על ההווה
+- hub/index.html: "8 סצנות" → "9 סצנות" (המסביר ההברי כבר 9-סצנות מאז 109-b); "חי היום" → "חי באוויר"; ה-footer הפנה ל-fact-sheet.md שאינו קיים (MISSING ב-ls) → הופנה ל-fact-sheet.html עם הספרים החיים; כרטיס מקור-האמת קיבל את משפט-הכנות (סריקה 2026-09-13 מתויגת + רענון-אמת 2026-10-21); RTL: 19 טוקנים לטיניים בכותרות נעטפו ב-.lat חדש (direction:ltr · unicode-bidi:isolate · inline-block · overflow-wrap:anywhere)
+- about/index.html (אנגלית): סטטיסטיקת-הגיבור "133,259+ blocks … measured" → "133,259 at the 2026-09-10 snapshot · now h988,045 (dex/world.json, 2026-10-21)"; שורת-ה-roadmap Core באותו-תיקון; og:description ו-boundary "live today" → "live"; ה-disclaimer קיבל "(spot-refreshed 2026-10-21)"
+- pitch/index.html (מצגת 12 שקופיות): הקיקר קיבל "גרסת 2026-09-11 · רענון-אמת 2026-10-21"; ה-fnode SAOS-NET "133,259+ בלוקים" → h988,045 חי עם מקור; "נמדד השבוע" → "קבלות מתוארכות במקומן"; "(חי היום)" → "(חי באוויר)"; "היום כל מחרוזת גרסה" → "מאז"; שקופית-הבקשה נכתבה מחדש בכנות-מלאה: 2 מתוך 4 ההחלטות בוצעו (השקיית-גז ✓ $0.00 זול מהמבוקש $0.94 — R9 2026-09-12 · פרסום-ציבורי ✓ חי — העמוד עצמו הוכחה) ו-2 פתוחות (npm+שער — נבדק חי ב-registry: 404 · pilot ראשון); footer קיבל את שורת-המקור
+- hub/ecosystem.html (אנגלית): truthbar בראש המפה (זהה-מבנה ל-fact-sheet); שורת-Core "Height 74,907+" → 74,907 מתוארך + [refreshed] h988,045; סעיף-grid98 "5,606 transactions · 9,935,250µ PnL" → מתויג scan 2026-09-08 + [refreshed] הספר-החי
+- אימות-מכנה על כל 11 הקבצים: (1) איזון-תגים מלא (פרסר-HTML, אפס-פסול/לא-סגור); (2) כל הקישורים היחסיים נפתרים לקבצים קיימים (סקריפט-פתרון-נתיבים על כל href/src, אפס-MISSING לאחר תיקון ה-footer); (3) אפס-סודות (סריקת-תבניות ghp_/github_pat_/AKIA/sk-/BEGIN-PRIVATE — אפס-פגיעות בכל 11); (4) גרף-תאריכים: כל תאריך ישן מ-4-ימים שנותר בכל דף נבדק אחד-אחד בהקשרו — כולם ארכיון/היסטוריה/מקור-מתוארך (R26/R28/בחינה/סריקות/קבלות), אפס-טענת-עכשיו על תאריך-ישן; (5) דפדפן-ראש חסר (playwright): 10 דפים נטענים עם אפס-שגיאות-קונסולה אמיתיות (רק הודעות file://-scheme של fetch ל-JSON מקומי — התנהגות קיימת מראש, עטופות fail-soft, חיות ב-HTTPS), overflow אופקי 0 בכולם; ב-390px נמצא גלישה שנוצרה בכרטיס החדש ב-reports.html — תוקנה בעטיפת overflow-x:auto (390/390 אחרי)
+- לא בוצע git add/commit/push (הראשי דוחף); לא נגעתי בשום קובץ מחוץ ל-11 שבבעלותי
+
+Stage Summary:
+- כל 11 הקבצים שבבעלותי עברו את חוק-הרענון: אפס תאריך-ישן שמוצג כהווה — כל תאריך שנותר הוא ארכיון/היסטוריה/מקור עם הקשר מפורש, כל מספר-חי עומד על הספרים של 2026-10-21 (dex/world.json · dex/state.json · dex/grid.json · dex/deposits.json · status.json · pulse.json) או מתויג בתאריך מדידתו
+- הריצה הקודמת אומתה והושלמה במקום להיבנות מחדש: defi/products/sovereign כמעט-נקיים (תוקנו טענת-Tether ללא-מקור, "אתמול", טווח-עמלות חסר-קצה), readiness קיבלה את ההשלמה הגדולה (h19034 כחי → h988,045; מחירים מ-17/09 כ"נמשק היום" → מדידה חיה של היום; 11 "היום" יחסיים; גיבוי-נזיל ישן → כתוב-הספר)
+- 6 הדפים שלא נגעו עברו מעבר מלא: כרטיס-ספרים-חי ב-reports (ותיקון קצב 17→20 דק' מתוך קריאת-ה-workflow), truthbar ממוסגר ב-fact-sheet וב-ecosystem עם תיוג [refreshed 2026-10-21] לכל שורה-שנוגעה, תיקון 8→9 סצנות ו-footer-מת לקישור-קיים ב-hub/index, גובה-חי ב-hero וב-roadmap של about, ושקופית-הבקשה של pitch נכתבה מחדש כ-2-בוצעו/2-פתוחות על בסיס בדיקת-registry חיה
+- הוכחות-מכנה: איזון-תגים נקי בכל 11 · כל הקישורים היחסיים נפתרים · אפס-סודות · playwright: אפס-שגיאות-קונסולה אמיתיות, overflow 0 (כולל 390px לאחר תיקון reports) · אימות-חוץ חי מ-DefiLlama (fees/TVL/coins) ומ-registry.npmjs.org — הכתוב בדפים עומד על מדידה, לא על זיכרון
+- ידוע-ופתוח-מחוץ-לטווח שלי: dex/money.json לא מתחדש מאז 2026-10-16 (ערוץ-הפדיון מדווח DORMANT בכנות עם תאריך-המקור) — זרוע-המייצרת שלו היא שתרענן; אפס git add/commit/push — הראשי דוחף
+
+---
+Task ID: 109 (השלמה)
+Agent: Z.ai Code (ארכיטקט-ראשי)
+Task: ביצוע-ודחיפה מלאים של גל 109 — העלאת-רמת הדפים הציבוריים + תיקון-שורש של מראת-Pulse
+
+Work Log:
+- דחיפת Pulse c940fc8: חוק-הניסיון-האנונימי על rawGet (טוקן-ללא-מענק מחזיר 404 על raw → נבדק שוב אנונימית לפני שנקרא "חסר") + חלון-מחקר 9→14 ימים; כל 7 מקורות-המראה שנולדו-שבורים (מ-02:00Z) צפויים להתעורר בטיק-הלב הבא
+- מיזוג-איחוד עם 4 גלי-אחים שנחתו במקביל (בדיוק מה שהבעלים הזהיר): agent-5/T-561 (עיתון v2 + הריגת ping-pong של status.json + תיקון-דליפות + תיקון-חיתוך-מרכאות ב-redact), trace-1a15ceb5/R76 (truth-fix על wallet/money/reports), sovereign-agent-9 (משטח-קבלות שעתי), W30/trace-1a15d213 (אמנות-AI + masthead). אפס-דריסות — כל מיזוג הוא איחוד תוספתי
+- bake-press.mjs: הגרסה-העשירה של agent-5 + חוק-ה-BiDi שלי בנקודת-היציאה-האחת (sec() מבודד אוטומטית כל טוקן לטיני/מספרי בצמתי-טקסט, בטוח-ישויות; ago() מחזיר מספרים מבודדים; srcLabel ללא חיתוך באמצע-טוקן; grid min-width; טבלאות נגללות במובייל) — אפייה חיה: 30KB, 171 אי-ספאנים, 0 דליפות, clips=0 ב-390px
+- receipts/wallet/reports: איחוד תלת-כיווני (המשטחים-המכוניים שלהם + שכבות-העומק שלנו, מוצבות מחוץ לאזורי-הרענון של האופים)
+- קונפליקטי-rebase מרובים נפתרו באיחוד (לא בחירת-צד); 2 קומיטים דחופים: 92b285e + 8f88f3c → origin/main
+- אימות-חי: progress.md + session-handoff.md 200 ב-production; press 390/390 עם 18 מדורים; console 390/390 אפס-שגיאות; חוק-קישורי-הנחיתה grep=0
+
+Stage Summary:
+- האמת-על-הטענות של הבעלים אומתה ותוקנה: עיתון = אמיתי ונאפה יומית (18 מדורים, עתה גם מקצועי-טיפוגרפית ללא חיתוכים); קונסוליה = חיה עם 14 פאנלים (חצי-פאנלים היו ריקים בגלל באג-שורש במראת-Pulse — תוקן במקור); ארנק = 63→693+ מילים סטטיות (כולל שכבת-R74 של אחים); 12 דפים קיבלו תוכן-אמת ללא-JS; 11 דפים רועננו מול הספרים של היום; הרנסנס-המכני (progress/session-handoff) נולד
+- הפער-האמיתי שנמצא: לא "אין שימוש בכלים" אלא שרשרת-אספקה שבורה (מראה שנולדה-שבורה מאחורי-טוקן) — הכלים היו, המים לא הגיעו; תוקן בשורש ולא בטיח
+- נותר-פתוח (מדווח): אימות-התעוררות-המראה בטיק 07:00/07:30; office3d/network גלישת-5px ב-390px (ידוע, קטן); dex/money.json לא מתחדש מ-10-16 (זרוע-המייצרת שלו)
+
+---
+Task ID: 109 (עדכון-מצב אחרון)
+Agent: Z.ai Code (ארכיטקט-ראשי)
+Task: מעקב-החלמת מראת-Pulse — כנות מלאה
+
+Work Log:
+- הלב לא פעם מאז 06:30 (גם ה-07:00 מתוזמן לא נחת — תור-הרצה); הצתה ידנית של heartbeat.yml ב-workflow_dispatch — התקבלה 204 והריצה בתור מאז 06:56 (pending)
+- התיקון מוכח ברמת-ה-URL (כל 8 היעדים 200 אנונימית) וברמת-החוק (anonymous-retry) — אבל אין עדיין קומיט-אפייה חדש שמוכיח את החלמת-7-המסילות מקצה-לקצה; הריצה הבאה שתרוץ תספק את ההוכחה
+
+Stage Summary:
+- מה שכן מוכח-חי ב-production עכשיו: כל הדפים המשודרגים חיים (press 18 מדורים/0 חיתוכים, console נקי, progress+handoff 200, wallet/receipts/reports מאוחדים); המראה — מוצתה, בתור, החלמה צפויה בריצה הבאה; אין-טענה-בלי-ראיה: "המסילות התעוררו" ייאמר רק אחרי lanes.json חדש עם data-carried
