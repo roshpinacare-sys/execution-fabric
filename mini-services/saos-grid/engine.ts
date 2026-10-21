@@ -1,6 +1,12 @@
 // ===== מוח-הגריד — אסטרטגיה, custody, ביצוע, בטיחות, מצב-עמיד =====
 // גוף-אחד-חכם-עם-הרבה-ידיים: מוח-אחד מקצה-פסים-בין-חשבונות (אפס-דריסות),
 // מדיד-כנה (shadow מתויג-ככזה, live רק-עם-מפתחות-אמיתיים), fail-closed בכל-שכבה.
+//
+// Task-113 (מדידה-חיה שהכתיבה-את-השינוי): המנוע-הישן היה "מציב-ושוכח" במצב-חי —
+// אין-גילוי-מילויים, אין-פקודות-נגד, אין-ריקול-סטיות, ו-dup-check-על-שורות-צל
+// חסם-הצבות-אמיתיות (1710-הצבות-צל, 0-שידורים). מעתה: אמת-מול-השרשרת-בכל-מחזור
+// (אימוץ·מילויים·נגדים·ריקול), קו-זהות-חוץ-כרצפת-מכירה, מנהל-חשיפה-מודע-נעילות,
+// ותקרת-מחויבות — הצל נשאר רק לחשבונות-בלי-מפתח, בכנות.
 
 import { readFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -41,6 +47,21 @@ function envOf(k: string): string | undefined {
     .split('\n')
     .find((l) => l.startsWith(`${k}=`))
   return line?.split('=').slice(1).join('=').trim()
+}
+
+// Task-113: מגבלות-ריצה-מדודות — עיגול-ספרד-הפנימי הוא 0.001-SBD; רמה-מינימלית
+export const MIN_ORDER_SBD = 0.05
+export const MIN_ORDER_STEEM = 0.5
+const COMMIT_PCT = 0.9 // תקרת-מחויבות-לכל-צד (grid-beat-תואם)
+const FLOOR_BUFFER_BPS = 50 // הרצפה = קו-הזהות + 0.5% (אותו-מדף-מדיד)
+const MAX_REQUOTE_PER_CYCLE = 4 // אנטי-צ'רנר: מקסימום-קיזוזי-חיים-למחזור
+const EXPIRY_DAYS = 27 // מדידה-חיה: 28-ימים נדחה-על-ידי-השרשרת (STEEM_MAX_LIMIT_ORDER_EXPIRATION); 27 = תקרה-בטוחה-שנמדדה
+// orderid-חד-ערכי-בתהליך (מדידה-חיה: שני-שידורים-באותה-שנייה עם-orderid-זהה
+// נדחים-על-ידי-השרשרת "uniqueness constraint violated")
+let orderIdSeq = Math.floor(Date.now() / 1000) % 2_147_483_647
+function nextOrderId(): number {
+  orderIdSeq = (orderIdSeq + 1) % 2_147_483_647
+  return orderIdSeq
 }
 
 // ── custody — הכספת. אפס-פלט-של-סודות, אף-פעם ───────────────────────────────
@@ -95,12 +116,12 @@ db.exec(`CREATE TABLE IF NOT EXISTS grid_events (
   price REAL NOT NULL,
   amount_steem REAL NOT NULL,
   amount_sbd REAL NOT NULL,
-  kind TEXT NOT NULL,        -- place|cancel|fill|halt|resume|error|decision
+  kind TEXT NOT NULL,        -- place|cancel|fill|adopt|halt|resume|error|decision
   mode TEXT NOT NULL,        -- shadow|live
   detail TEXT
 )`)
 db.exec(`CREATE TABLE IF NOT EXISTS grid_orders (
-  orderid TEXT PRIMARY KEY,  -- shadow:<n> או מס'-פקודה-אמיתי
+  orderid TEXT PRIMARY KEY,  -- shadow:<n> או live:<chainid>:<account>
   account TEXT NOT NULL,
   side TEXT NOT NULL,
   level INTEGER NOT NULL,
@@ -178,6 +199,10 @@ export type CycleStats = {
   consecutiveErrors: number
   price: number | null
   lastPrice: number | null
+  floor: number | null // רצפת-מכירה (קו-זהות+בופר) — null=אין-מדידה-חיה
+  identityLine: number | null
+  lastReconcileAt: string | null
+  lastFillsLive: number
 }
 export const stats: CycleStats = {
   cycles: 0,
@@ -187,21 +212,86 @@ export const stats: CycleStats = {
   consecutiveErrors: 0,
   price: null,
   lastPrice: null,
+  floor: null,
+  identityLine: null,
+  lastReconcileAt: null,
+  lastFillsLive: 0,
+}
+
+// ── שידור-חי (דורש-מפתח-אמיתי; מבודד-כדי-שצל-לא-יישבר) ──────────────────────
+async function dhiveClient() {
+  const dhive = await import('@hiveio/dhive')
+  const client = new dhive.Client(
+    [process.env.STEEM_RPC ?? 'https://api.steemit.com'],
+    { chainId: '0000000000000000000000000000000000000000000000000000000000000000' },
+  )
+  return { dhive, client }
+}
+
+async function broadcastLimitOrder(acct: Account, p: Plan): Promise<{ ok: true; orderid: number } | { ok: false; error: string }> {
+  try {
+    const { dhive, client } = await dhiveClient()
+    const ops: dhive.Operation[] = [
+      [
+        'limit_order_create',
+        {
+          owner: acct.name,
+          orderid: nextOrderId(),
+          amount_to_sell:
+            p.side === 'buy'
+              ? `${p.amountSbd.toFixed(3)} SBD`
+              : `${p.amountSteem.toFixed(3)} STEEM`,
+          min_to_receive:
+            p.side === 'buy'
+              ? `${p.amountSteem.toFixed(3)} STEEM`
+              : `${p.amountSbd.toFixed(3)} SBD`,
+          fill_or_kill: false,
+          expiration: new Date(Date.now() + EXPIRY_DAYS * 24 * 3600_000).toISOString().slice(0, 19),
+        },
+      ],
+    ]
+    const key = dhive.PrivateKey.fromString(acct.wif!)
+    await client.broadcast.sendOperations(ops, key)
+    return { ok: true, orderid: (ops[0][1] as { orderid: number }).orderid }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+async function broadcastCancel(acct: Account, orderid: number): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const { dhive, client } = await dhiveClient()
+    const ops: dhive.Operation[] = [['limit_order_cancel', { owner: acct.name, orderid }]]
+    const key = dhive.PrivateKey.fromString(acct.wif!)
+    await client.broadcast.sendOperations(ops, key)
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 // ── המחזור — מוח-אחד, הרבה-ידיים ─────────────────────────────────────────────
-type Plan = { account: string; side: 'buy' | 'sell'; level: number; price: number; amountSteem: number; amountSbd: number }
+type Plan = {
+  account: string
+  side: 'buy' | 'sell'
+  level: number
+  price: number
+  amountSteem: number
+  amountSbd: number
+  origin?: 'ladder' | 'counter' | 'requote'
+}
 
-export async function cycle(): Promise<{ placed: number; canceled: number; filledShadow: number; decisions: string[] }> {
+export async function cycle(): Promise<{ placed: number; canceled: number; filledShadow: number; filledLive: number; decisions: string[] }> {
   const t0 = Date.now()
   const decisions: string[] = []
   let placed = 0
   let canceled = 0
   let filledShadow = 0
+  let filledLive = 0
   try {
     if (halted()) {
       stats.lastCycleAt = new Date().toISOString()
-      return { placed: 0, canceled: 0, filledShadow: 0, decisions: ['halted — מחזור-מושהה'] }
+      return { placed: 0, canceled: 0, filledShadow: 0, filledLive: 0, decisions: ['halted — מחזור-מושהה'] }
     }
 
     // 1) שוק — אמת-מהשרשרת
@@ -219,7 +309,7 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
       const swing = Math.abs(m.mid - stats.lastPrice) / stats.lastPrice
       if (swing > 0.05) {
         halt(`תנודה-קיצונית ${((swing) * 100).toFixed(2)}% במחזור-אחד — עצירה-בטיחותית`, true)
-        return { placed: 0, canceled: 0, filledShadow: 0, decisions: [...decisions, 'auto-halt: תנודה-קיצונית'] }
+        return { placed: 0, canceled: 0, filledShadow: 0, filledLive: 0, decisions: [...decisions, 'auto-halt: תנודה-קיצונית'] }
       }
     }
 
@@ -234,6 +324,15 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
       decisions.push(`תנודתיות ${volPct.toFixed(2)}% → מרווח-גריד ${stepPct.toFixed(2)}%`)
     }
 
+    // 3.5) קו-הזהות-החוץ → רצפת-מכירה (מדיניות-מדודה: אף-מכירה-מתחת-לערך-החוץ)
+    const marks = await market.getExternalMarks()
+    const identityLine = marks && marks.sbdUsd > 0 ? marks.steemUsd / marks.sbdUsd : null
+    const floor = identityLine ? identityLine * (1 + FLOOR_BUFFER_BPS / 10_000) : null
+    stats.identityLine = identityLine
+    stats.floor = floor
+    if (identityLine) decisions.push(`קו-זהות: ${identityLine.toFixed(4)} SBD/STEEM → רצפת-מכירה ${floor!.toFixed(4)} (steemUsd=$${marks!.steemUsd}, sbdUsd=$${marks!.sbdUsd})`)
+    else decisions.push(`קו-זהות: לא-נמדד (steemUsd=${marks ? marks.steemUsd.toFixed(4) : 'נ/ל'}, sbdUsd-חסר) → מדיניות-שמרנית: אין-מכירות-מתחת-ל-bestAsk`)
+
     // 4) ידיים — חשבונות-מהכספת; מפתח-חסר = יד-בצל
     const accounts = loadAccounts()
     const names = accounts.map((a) => a.name)
@@ -241,26 +340,172 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
     if (!bals.ok) throw new Error(`יתרות-לא-נקראו: ${bals.error}`)
     const live = mode()
 
-    // 4.5) מנהל-חשיפה (Task-107 — AutoHedge: max_inventory_exposure + rebalance):
-    // שקילות-המלאי-האמתי-של-הידיים; צד-כבד-מדי → תוכניות-הצד-השני-מקדימות-והכבד-נחסם.
-    // כנות: פסק-החשיפה נרשם-בכל-מחזור-שהושפע.
+    // 4.2) אמת-הפקודות-על-השרשרת (live): fail-closed — כשל-קריאה = מחזור-צפייה
+    const chainOrders = new Map<string, market.OpenOrder[]>()
+    if (live === 'live') {
+      for (const n of names) {
+        const oo = await market.getOpenOrders(n)
+        if (!oo.ok) throw new Error(`פקודות-פתוחות-לא-נקראו (${n}): ${oo.error}`)
+        chainOrders.set(n, oo.data)
+      }
+    }
+
+    // 4.5) מנהל-חשיפה (Task-107 + Task-113): מלאי-אמתי = נזיל + נעול-בפקודות.
+    // הלקח-החי: נעילות-הפקודות של-הרץ-היומי היו-בלתי-נראות-למנהל → מדידה-משובשת.
     const found = bals.data.filter((b) => b.found)
-    const totalSteem = found.reduce((s2, b) => s2 + b.steem, 0)
-    const totalSbd = found.reduce((s2, b) => s2 + b.sbd, 0)
+    const locked = new Map<string, { steem: number; sbd: number; sells: number; buysSbd: number }>()
+    for (const n of names) {
+      const oo = chainOrders.get(n) ?? []
+      locked.set(n, {
+        steem: oo.filter((o) => o.side === 'sell').reduce((s, o) => s + o.amountSteem, 0),
+        sbd: oo.filter((o) => o.side === 'buy').reduce((s, o) => s + o.amountSbd, 0),
+        sells: oo.filter((o) => o.side === 'sell').length,
+        buysSbd: 0,
+      })
+    }
+    const totalSteem = found.reduce((s2, b) => s2 + b.steem + (locked.get(b.account)?.steem ?? 0), 0)
+    const totalSbd = found.reduce((s2, b) => s2 + b.sbd + (locked.get(b.account)?.sbd ?? 0), 0)
     const steemVal = totalSteem * (m.mid ?? 0)
     const basePct = steemVal + totalSbd > 0 ? (steemVal / (steemVal + totalSbd)) * 100 : 50
     let skipSide: 'buy' | 'sell' | null = null
     if (basePct > CONFIG.maxSideSkewPct) skipSide = 'buy' // כבד-ב-STEEM — אין-קניות-נוספות עד-איזון
     else if (100 - basePct > CONFIG.maxSideSkewPct) skipSide = 'sell' // כבד-ב-SBD — אין-מכירות-נוספות
     if (skipSide) {
-      decisions.push(`מנהל-חשיפה: STEEM=${basePct.toFixed(1)}% מהמלאי (סף-${CONFIG.maxSideSkewPct}%) → פקודות-${skipSide === 'buy' ? 'קנייה' : 'מכירה'}-מושהות-עד-איזון (AutoHedge-rebalance)`)
+      decisions.push(`מנהל-חשיפה: STEEM=${basePct.toFixed(1)}% מהמלאי (נזיל+נעול, סף-${CONFIG.maxSideSkewPct}%) → פקודות-${skipSide === 'buy' ? 'קנייה' : 'מכירה'}-מושהות-עד-איזון (AutoHedge-rebalance)`)
       event('decision', { account: '*', side: skipSide, level: 0, price: m.mid!, amountSteem: 0, amountSbd: 0, mode: live, detail: `exposure-governor: basePct=${basePct.toFixed(1)}% skip=${skipSide}` })
     }
 
+    // 4.6) הגירת-צל→חי (Task-113): פקודות-צל-פתוחות-על-ידיים-עם-מפתח — משודרות-או-נסגרות.
+    // סוף-עידן-הצל-המטעה: שורות-צל-לא-מחזיקות-עוד-בני-דודות-אמיתיות-כבנות-עוגן.
+    if (live === 'live') {
+      const shadowOpen = db
+        .query("SELECT orderid, account, side, level, price, amount_steem, amount_sbd FROM grid_orders WHERE status='open' AND mode='shadow'")
+        .all() as Array<{ orderid: string; account: string; side: string; level: number; price: number; amount_steem: number; amount_sbd: number }>
+      for (const o of shadowOpen) {
+        const acct = accounts.find((a) => a.name === o.account)
+        if (!acct?.wif) continue // אין-מפתח → צל-כנה-נשאר
+        const band = stepPct / 100 / 2
+        const chainForAcct = chainOrders.get(o.account) ?? []
+        const twinOnChain = chainForAcct.some((c) => c.side === o.side && Math.abs(c.price - o.price) <= o.price * band)
+        if (twinOnChain) {
+          db.query("UPDATE grid_orders SET status='canceled' WHERE orderid=?").run(o.orderid)
+          event('cancel', { account: o.account, side: o.side, level: o.level, price: o.price, amountSteem: o.amount_steem, amountSbd: o.amount_sbd, mode: 'shadow', detail: 'הגירה: תאום-חי-קיים-בשרשרת — שורת-הצל-נסגרת' })
+          canceled++
+          continue
+        }
+        if (o.side === 'sell' && floor !== null && o.price < floor) {
+          db.query("UPDATE grid_orders SET status='canceled' WHERE orderid=?").run(o.orderid)
+          event('cancel', { account: o.account, side: o.side, level: o.level, price: o.price, amountSteem: o.amount_steem, amountSbd: o.amount_sbd, mode: 'shadow', detail: `הגירה: מחיר-צל-מתחת-לרצפת (${floor.toFixed(4)}) — לא-משודר` })
+          canceled++
+          continue
+        }
+        if (o.side === 'buy' && skipSide === 'buy') {
+          db.query("UPDATE grid_orders SET status='canceled' WHERE orderid=?").run(o.orderid)
+          event('cancel', { account: o.account, side: o.side, level: o.level, price: o.price, amountSteem: o.amount_steem, amountSbd: o.amount_sbd, mode: 'shadow', detail: 'הגירה: קנייה-חסומה-במנהל-החשיפה — לא-משודרת' })
+          canceled++
+          continue
+        }
+        const r = await broadcastLimitOrder(acct, { account: o.account, side: o.side as 'buy' | 'sell', level: o.level, price: o.price, amountSteem: o.amount_steem, amountSbd: o.amount_sbd })
+        if (r.ok) {
+          db.query("UPDATE grid_orders SET orderid=?, mode='live' WHERE orderid=?").run(`live:${r.orderid}:${o.account}`, o.orderid)
+          event('place', { account: o.account, side: o.side, level: o.level, price: o.price, amountSteem: o.amount_steem, amountSbd: o.amount_sbd, mode: 'live', detail: `הגירת-צל→חי; orderid=${r.orderid}` })
+          placed++
+          decisions.push(`הגירה: ${o.side} @${o.price.toFixed(4)} שודר-אמיתית (${o.account})`)
+        } else {
+          db.query("UPDATE grid_orders SET status='canceled' WHERE orderid=?").run(o.orderid)
+          event('error', { account: o.account, side: o.side, level: o.level, price: o.price, amountSteem: o.amount_steem, amountSbd: o.amount_sbd, mode: 'live', detail: `הגירה: שידור-נכשל → שורת-הצל-נסגרת: ${r.error}` })
+          canceled++
+        }
+      }
+    }
+
+    // 4.7) יישור-אמת-מול-השרשרת (Task-113): אימוץ · גילוי-מילויים · סגירת-יתומים · נגדים
+    const counterPlans: Plan[] = []
+    if (live === 'live') {
+      for (const n of names) {
+        const acct = accounts.find((a) => a.name === n)
+        if (!acct?.wif) continue
+        const chain = chainOrders.get(n) ?? []
+        const chainIds = new Set(chain.map((c) => c.orderid))
+
+        // אימוץ: פקודות-חיות-שלנו-שלא-במעקב (כולל-של-הרץ-היומי) → מעקב-מלא
+        for (const c of chain) {
+          const id = `live:${c.orderid}:${n}`
+          const known = db.query('SELECT 1 FROM grid_orders WHERE orderid=?').get(id)
+          if (!known) {
+            db.query('INSERT INTO grid_orders(orderid,account,side,level,price,amount_steem,amount_sbd,placed_at,status,mode) VALUES(?,?,?,?,?,?,?,?,?,?)').run(
+              id, n, c.side, 0, c.price, c.amountSteem, c.amountSbd, c.created, 'open', 'live',
+            )
+            event('adopt', { account: n, side: c.side, level: 0, price: c.price, amountSteem: c.amountSteem, amountSbd: c.amountSbd, mode: 'live', detail: `אומץ-מהשרשרת; orderid=${c.orderid}` })
+          }
+        }
+
+        // מילויים-אמיתיים: היסטוריית-החשבון → סגירת-נעלמים-כמילויים-ופקודות-נגד
+        const fillsRes = await market.getAccountFills(n, 300)
+        if (fillsRes.ok) {
+          const fillByOrder = new Map<number, market.ChainFill>()
+          for (const f of fillsRes.data) if (!fillByOrder.has(f.orderid)) fillByOrder.set(f.orderid, f)
+          const tracked = db
+            .query("SELECT orderid, account, side, level, price, amount_steem, amount_sbd FROM grid_orders WHERE status='open' AND mode='live' AND account=?")
+            .all(n) as Array<{ orderid: string; account: string; side: string; level: number; price: number; amount_steem: number; amount_sbd: number }>
+          for (const row of tracked) {
+            const chainId = Number(row.orderid.split(':')[1])
+            if (chainIds.has(chainId)) continue // עדיין-חיה
+            const f = fillByOrder.get(chainId)
+            if (f) {
+              db.query("UPDATE grid_orders SET status='filled', filled_at=? WHERE orderid=?").run(f.at, row.orderid)
+              const edgeBps = identityLine ? Math.round(((f.price - identityLine) / identityLine) * 10_000) : null
+              event('fill', { account: n, side: f.side, level: row.level, price: f.price, amountSteem: f.steem, amountSbd: f.sbd, mode: 'live', detail: `מילוי-אמיתי-מהשרשרת; edge-מול-קו-זהות=${edgeBps ?? 'נ/ל'}bps; נגד=${f.counterparty ?? '?'}` })
+              filledLive++
+              decisions.push(`מילוי-חי: ${f.side} ${f.steem.toFixed(1)}-STEEM @${f.price.toFixed(4)} (edge=${edgeBps ?? 'נ/ל'}bps)`)
+              // פקודה-נגדית (רשת-קלאסית — בחיים): מכירה-מומשה → קנייה-מתחת; קנייה-מומשה → מכירה-מעל
+              const back = 2 * stepPct
+              if (f.side === 'sell') {
+                const bp = f.price * (1 - back / 100)
+                const budget = Math.min(f.sbd, (bals.data.find((b) => b.account === n)?.sbd ?? 0) * (1 - CONFIG.reservePct / 100))
+                const qty = budget / bp
+                if (budget >= MIN_ORDER_SBD && qty >= MIN_ORDER_STEEM && skipSide !== 'buy') {
+                  counterPlans.push({ account: n, side: 'buy', level: -1, price: bp, amountSteem: qty, amountSbd: budget, origin: 'counter' })
+                }
+              } else {
+                let sp = f.price * (1 + back / 100)
+                if (floor !== null) sp = Math.max(sp, floor)
+                const bal = bals.data.find((b) => b.account === n)
+                const avail = (bal?.steem ?? 0) * (1 - CONFIG.reservePct / 100)
+                const qty = Math.min(f.steem, avail)
+                if (qty >= MIN_ORDER_STEEM && skipSide !== 'sell') {
+                  counterPlans.push({ account: n, side: 'sell', level: -1, price: sp, amountSteem: qty, amountSbd: qty * sp, origin: 'counter' })
+                }
+              }
+            } else {
+              db.query("UPDATE grid_orders SET status='canceled' WHERE orderid=?").run(row.orderid)
+              event('cancel', { account: n, side: row.side, level: row.level, price: row.price, amountSteem: row.amount_steem, amountSbd: row.amount_sbd, mode: 'live', detail: 'נעלם-מהשרשרת-בלי-מילוי — בוטל/פג-תוקף' })
+              canceled++
+            }
+          }
+          // כנות: מילויים-היסטוריים-של-פקודות-שלא-היו-במעקב — נרשמים, בלי-נגדים
+          const recent = fillsRes.data.filter((f) => Date.now() - new Date(f.at + 'Z').getTime() < 24 * 3600_000)
+          for (const f of recent) {
+            const everTracked = db.query('SELECT 1 FROM grid_orders WHERE orderid=?').get(`live:${f.orderid}:${n}`)
+            if (!everTracked && !chainIds.has(f.orderid)) {
+              event('fill', { account: n, side: f.side, level: 0, price: f.price, amountSteem: f.steem, amountSbd: f.sbd, mode: 'live', detail: 'מילוי-אמיתי-שלא-היה-במעקב (נרשם-מההיסטוריה, בלי-נגד)' })
+            }
+          }
+        } else {
+          decisions.push(`היסטוריית-מילויים-לא-נקראה (${n}): ${fillsRes.error} — סגירת-נעלמים-נדחית`)
+        }
+      }
+      stats.lastReconcileAt = new Date().toISOString()
+      stats.lastFillsLive = filledLive
+    }
+
     // 5) הקצאת-פסים-ללא-דריסות: רמה-L שייכת-לחשבון L%n (מוח-אחד, ידיים-מחולקות)
+    // Task-113: dup-בחיפוש-פס-מחיר מול-השרשרת-ומול-db-באותו-מצב; תקרת-מחויבות-לצד-מכירה.
     const n = accounts.length
     const step = m.mid * (stepPct / 100)
+    const band = step / 2
     const plans: Plan[] = []
+    const plannedSellByAcct = new Map<string, number>()
     for (let L = 0; L < CONFIG.levels; L++) {
       const acct = accounts[L % n].name
       const buyPrice = m.mid - step * (L + 1)
@@ -270,30 +515,48 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
         decisions.push(`${acct}: חשבון-לא-נמצא-בשרשרת — מדולג`)
         continue
       }
+      const chainForAcct = chainOrders.get(acct) ?? []
+      const hasNear = (side: string, price: number) =>
+        chainForAcct.some((c) => c.side === side && Math.abs(c.price - price) <= price * (band / m.mid)) ||
+        !!db
+          .query("SELECT 1 FROM grid_orders WHERE account=? AND side=? AND status='open' AND mode=? AND ABS(price-?)<=?*?")
+          .get(acct, side, live, price, price, band / m.mid)
+
       // מנהל-החשיפה: הצד-הכבד-נחסם (Task-107)
       if (skipSide === 'buy') {
         decisions.push(`${acct}: קנייה-דחויה-בידי-מנהל-החשיפה`)
       } else {
-      // קנייה: עדכני-לגבי-יתרת-SBD-זמינה (כולל-הפקודות-הפתוחות-של-הרמה-הזאת)
-      const sbdAvail = bal.sbd * (1 - CONFIG.reservePct / 100)
-      const buySbd = Math.min(CONFIG.orderSizeSbd, sbdAvail)
-      if (buySbd >= 0.5) {
-        plans.push({ account: acct, side: 'buy', level: L, price: buyPrice, amountSteem: buySbd / buyPrice, amountSbd: buySbd })
-      } else {
-        decisions.push(`${acct}: SBD-מתחת-לגודל-מינימלי (${bal.sbd.toFixed(2)} SBD, חירום ${CONFIG.reservePct}%)`)
-      }
+        // קנייה: עדכני-לגבי-יתרת-SBD-זמינה (כולל-הפקודות-הפתוחות-של-הרמה-הזאת)
+        const sbdAvail = bal.sbd * (1 - CONFIG.reservePct / 100)
+        const buySbd = Math.min(CONFIG.orderSizeSbd, sbdAvail)
+        if (buySbd >= Math.max(0.5, MIN_ORDER_SBD) && !hasNear('buy', buyPrice)) {
+          plans.push({ account: acct, side: 'buy', level: L, price: buyPrice, amountSteem: buySbd / buyPrice, amountSbd: buySbd })
+        } else if (buySbd < Math.max(0.5, MIN_ORDER_SBD)) {
+          decisions.push(`${acct}: SBD-מתחת-לגודל-המינימלי (${bal.sbd.toFixed(2)} SBD, חירום ${CONFIG.reservePct}%)`)
+        }
       }
       if (skipSide === 'sell') {
         decisions.push(`${acct}: מכירה-דחויה-בידי-מנהל-החשיפה`)
       } else {
-      const steemAvail = bal.steem * (1 - CONFIG.reservePct / 100)
-      const sellSteem = Math.min(CONFIG.orderSizeSteem, steemAvail)
-      if (sellSteem >= 0.5) {
-        plans.push({ account: acct, side: 'sell', level: L, price: sellPrice, amountSteem: sellSteem, amountSbd: sellSteem * sellPrice })
-      } else {
-        decisions.push(`${acct}: STEEM-מתחת-לגודל-מינימלי (${bal.steem.toFixed(3)} STEEM, חירום ${CONFIG.reservePct}%)`)
+        // Task-113: תקרת-מחויבות — נעול-במכירות-+מתוכנן ≤ 90% מהנזיל-+הנעול
+        const lk = locked.get(acct) ?? { steem: 0, sbd: 0, sells: 0, buysSbd: 0 }
+        const commitCap = Math.max(0, (bal.steem + lk.steem) * COMMIT_PCT - lk.steem - (plannedSellByAcct.get(acct) ?? 0))
+        const sellFloor = floor ?? m.bestAsk ?? m.mid!
+        let sellPrice2 = Math.max(sellPrice, sellFloor) // מדיניות: לעולם-לא-מתחת-לרצפה
+        const steemAvail = Math.min(bal.steem * (1 - CONFIG.reservePct / 100), commitCap)
+        const sellSteem = Math.min(CONFIG.orderSizeSteem, steemAvail)
+        if (sellSteem >= MIN_ORDER_STEEM && !hasNear('sell', sellPrice2)) {
+          plans.push({ account: acct, side: 'sell', level: L, price: sellPrice2, amountSteem: sellSteem, amountSbd: sellSteem * sellPrice2 })
+          plannedSellByAcct.set(acct, (plannedSellByAcct.get(acct) ?? 0) + sellSteem)
+        } else if (sellSteem < MIN_ORDER_STEEM) {
+          decisions.push(`${acct}: STEEM-מתחת-לגודל-המינימלי/תקרת-המחויבות (נזיל ${bal.steem.toFixed(3)}, נעול ${lk.steem.toFixed(1)}, חירום ${CONFIG.reservePct}%)`)
+        }
       }
-      }
+    }
+    // נגדים-ממילויים-חיים — עם-אותו-פס-אנטי-כפילות
+    for (const cp of counterPlans) {
+      if (hasNear(cp.side, cp.price)) continue
+      plans.push(cp)
     }
 
     // 6) גשם-מילויים בצל: פקודות-פתוחות-שהמחיר-עבר-אותן → מולאו (מדומה, מתויג)
@@ -326,26 +589,71 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
       }
     }
 
-    // 7) קיזוז-סטיות: פקודות-צל-שהמחיר-התרחק-מהן-מעל-הסף → ביטול (יסגרו-מחדש-בתכנון)
-    if (live === 'shadow') {
+    // 7) קיזוז-סטיות — עתה גם בחיים (Task-113; מוגבל-אנטי-צ'רנר):
+    // פקודות-שהמחיר-התרחק-מהן-מעל-הסף → ביטול-אמיתי + הצבה-מחדש-במדרגה-הנוכחית.
+    {
       const drift = m.mid * (CONFIG.requoteDriftPct / 100)
-      const stale = db.query("SELECT orderid, side, price, account FROM grid_orders WHERE status='open' AND mode='shadow'").all() as Array<{ orderid: string; side: string; price: number; account: string }>
-      for (const o of stale) {
-        if (Math.abs(o.price - m.mid) > drift) {
+      let requoted = 0
+      const staleRows = db
+        .query("SELECT orderid, account, side, level, price, amount_steem, amount_sbd, mode FROM grid_orders WHERE status='open'")
+        .all() as Array<{ orderid: string; account: string; side: string; level: number; price: number; amount_steem: number; amount_sbd: number; mode: string }>
+      for (const o of staleRows) {
+        if (Math.abs(o.price - m.mid!) <= drift) continue
+        if (o.mode === 'shadow') {
           db.query("UPDATE grid_orders SET status='canceled' WHERE orderid=?").run(o.orderid)
           event('cancel', { account: o.account, side: o.side, level: 0, price: o.price, amountSteem: 0, amountSbd: 0, mode: 'shadow', detail: 'סטייה-מעל-סף-הקיזוז' })
           canceled++
+          continue
+        }
+        // חיים: רק-ידיים-עם-מפתח, תקרה-אנטי-צ'רנר, והצד-מותר-במנהל-החשיפה
+        if (requoted >= MAX_REQUOTE_PER_CYCLE) continue
+        const acct = accounts.find((a) => a.name === o.account)
+        if (!acct?.wif) continue
+        if ((o.side === 'buy' && skipSide === 'buy') || (o.side === 'sell' && skipSide === 'sell')) continue
+        // יעד-מדרגה (עם-רצפה-למכירה — קו-זהות, ואם-אין-מדידה: bestAsk הקיים)
+        const levelForTarget = o.level >= 0 ? o.level : 0
+        let target = o.side === 'sell' ? m.mid! + step * (levelForTarget + 1) : m.mid! - step * (levelForTarget + 1)
+        if (o.side === 'sell') target = Math.max(target, floor ?? m.bestAsk ?? m.mid!)
+        if (Math.abs(target - o.price) <= o.price * 0.0005) continue // כבר-ביעד
+        const chainId = Number(o.orderid.split(':')[1])
+        const twin = (chainOrders.get(o.account) ?? []).some((c) => c.side === o.side && Math.abs(c.price - target) <= target * (band / m.mid))
+        const c = await broadcastCancel(acct, chainId)
+        if (!c.ok) {
+          event('error', { account: o.account, side: o.side, level: o.level, price: o.price, amountSteem: 0, amountSbd: 0, mode: 'live', detail: `קיזוז: ביטול-נכשל: ${c.error}` })
+          continue
+        }
+        db.query("UPDATE grid_orders SET status='canceled' WHERE orderid=?").run(o.orderid)
+        canceled++
+        if (twin) {
+          // Task-113 זרימה-חכמה: היעד-תפוס-כבר-בשרשרת → ביטול-בלבד (המדרגה-תציב-מחדש-בעצמה)
+          event('cancel', { account: o.account, side: o.side, level: o.level, price: o.price, amountSteem: o.amount_steem, amountSbd: o.amount_sbd, mode: 'live', detail: `קיזוז: היעד-${target.toFixed(4)}-תפוס — פקודה-רחוקה-בוטלה-בלבד` })
+          continue
+        }
+        const r = await broadcastLimitOrder(acct, { account: o.account, side: o.side as 'buy' | 'sell', level: o.level, price: target, amountSteem: o.amount_steem, amountSbd: o.amount_sbd })
+        if (r.ok) {
+          db.query('INSERT INTO grid_orders(orderid,account,side,level,price,amount_steem,amount_sbd,placed_at,status,mode) VALUES(?,?,?,?,?,?,?,?,?,?)').run(
+            `live:${r.orderid}:${o.account}`, o.account, o.side, o.level, target, o.amount_steem, o.amount_sbd, new Date().toISOString(), 'open', 'live',
+          )
+          event('place', { account: o.account, side: o.side, level: o.level, price: target, amountSteem: o.amount_steem, amountSbd: o.amount_sbd, mode: 'live', detail: `קיזוז-חי: ${o.price.toFixed(4)}→${target.toFixed(4)}; orderid=${r.orderid}` })
+          placed++
+          requoted++
+        } else {
+          event('error', { account: o.account, side: o.side, level: o.level, price: target, amountSteem: o.amount_steem, amountSbd: o.amount_sbd, mode: 'live', detail: `קיזוז: הצבה-מחדש-נכשלה: ${r.error}` })
         }
       }
+      if (requoted) decisions.push(`קיזוזי-חיים: ${requoted} פקודות-הותאמו-למדרגה`)
     }
 
     // 8) ביצוע-התוכניות
     for (const p of plans) {
       const acct = accounts.find((a) => a.name === p.account)!
       const dup = db
-        .query("SELECT 1 FROM grid_orders WHERE account=? AND side=? AND level=? AND status='open'")
-        .get(p.account, p.side, p.level)
+        .query("SELECT 1 FROM grid_orders WHERE account=? AND side=? AND level=? AND status='open' AND mode=?")
+        .get(p.account, p.side, p.level, live)
       if (dup) continue
+      // אנטי-כפילות-מול-השרשרת (כל-מקור): פס-מחיר
+      const chainTwin = (chainOrders.get(p.account) ?? []).some((c) => c.side === p.side && Math.abs(c.price - p.price) <= p.price * (band / m.mid))
+      if (live === 'live' && chainTwin) continue
       if (live === 'shadow') {
         const nid = `shadow:${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
         db.query('INSERT INTO grid_orders(orderid,account,side,level,price,amount_steem,amount_sbd,placed_at,status,mode) VALUES(?,?,?,?,?,?,?,?,?,?)').run(
@@ -359,7 +667,7 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
           db.query('INSERT INTO grid_orders(orderid,account,side,level,price,amount_steem,amount_sbd,placed_at,status,mode) VALUES(?,?,?,?,?,?,?,?,?,?)').run(
             `live:${r.orderid}:${p.account}`, p.account, p.side, p.level, p.price, p.amountSteem, p.amountSbd, new Date().toISOString(), 'open', 'live',
           )
-          event('place', { ...p, mode: 'live', detail: `שידור-אמיתי; orderid=${r.orderid}` })
+          event('place', { ...p, mode: 'live', detail: `שידור-אמיתי (${p.origin ?? 'ladder'}); orderid=${r.orderid}` })
           placed++
         } else {
           event('error', { ...p, mode: 'live', detail: `כשל-שידור: ${r.error}` })
@@ -374,7 +682,7 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
     stats.lastError = null
     stats.consecutiveErrors = 0
     setMeta('lastGoodCycle', stats.lastCycleAt)
-    return { placed, canceled, filledShadow, decisions }
+    return { placed, canceled, filledShadow, filledLive, decisions }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     stats.lastError = msg
@@ -383,50 +691,16 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
     stats.lastCycleMs = Date.now() - t0
     event('error', { account: '*', side: '-', level: 0, price: 0, amountSteem: 0, amountSbd: 0, mode: mode(), detail: msg })
     if (stats.consecutiveErrors >= 5) halt(`5-כשלים-רצופים: ${msg}`, true)
-    return { placed: 0, canceled: 0, filledShadow: 0, decisions: [`שגיאה: ${msg}`] }
-  }
-}
-
-// ── שידור-חי (דורש-מפתח-אמיתי; מבודד-כדי-שצל-לא-יישבר) ──────────────────────
-async function broadcastLimitOrder(acct: Account, p: Plan): Promise<{ ok: true; orderid: number } | { ok: false; error: string }> {
-  try {
-    const dhive = await import('@hiveio/dhive')
-    const client = new dhive.Client(
-      [process.env.STEEM_RPC ?? 'https://api.steemit.com'],
-      { chainId: '0000000000000000000000000000000000000000000000000000000000000000' },
-    )
-    const ops: dhive.Operation[] = [
-      [
-        'limit_order_create',
-        {
-          owner: acct.name,
-          orderid: Math.floor(Date.now() / 1000) % 2_147_483_647,
-          amount_to_sell:
-            p.side === 'buy'
-              ? `${p.amountSbd.toFixed(3)} SBD`
-              : `${p.amountSteem.toFixed(3)} STEEM`,
-          min_to_receive:
-            p.side === 'buy'
-              ? `${p.amountSteem.toFixed(3)} STEEM`
-              : `${p.amountSbd.toFixed(3)} SBD`,
-          fill_or_kill: false,
-          expiration: new Date(Date.now() + 28 * 24 * 3600_000).toISOString().slice(0, 19),
-        },
-      ],
-    ]
-    const key = dhive.PrivateKey.fromString(acct.wif!)
-    const tx = await client.broadcast.sendOperations(ops, key)
-    return { ok: true, orderid: (ops[0][1] as { orderid: number }).orderid }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    return { placed: 0, canceled: 0, filledShadow: 0, filledLive: 0, decisions: [`שגיאה: ${msg}`] }
   }
 }
 
 // ── סיכום-לתצוגה ─────────────────────────────────────────────────────────────
 export function summary() {
-  const open = db.query("SELECT account, side, COUNT(*) n, SUM(amount_sbd) sbd, SUM(amount_steem) steem FROM grid_orders WHERE status='open' GROUP BY account, side").all() as Array<{ account: string; side: string; n: number; sbd: number; steem: number }>
-  const fills = db.query("SELECT account, side, COUNT(*) n, SUM(amount_sbd) sbd FROM grid_orders WHERE status='filled' GROUP BY account, side").all() as Array<{ account: string; side: string; n: number; sbd: number }>
+  const open = db.query("SELECT account, side, mode, COUNT(*) n, SUM(amount_sbd) sbd, SUM(amount_steem) steem FROM grid_orders WHERE status='open' GROUP BY account, side, mode").all() as Array<{ account: string; side: string; mode: string; n: number; sbd: number; steem: number }>
+  const fills = db.query("SELECT account, side, mode, COUNT(*) n, SUM(amount_sbd) sbd FROM grid_orders WHERE status='filled' GROUP BY account, side, mode").all() as Array<{ account: string; side: string; mode: string; n: number; sbd: number }>
   const recent = db.query('SELECT * FROM grid_events ORDER BY id DESC LIMIT 30').all() as Array<Record<string, unknown>>
+  const lastLiveFills = db.query("SELECT at, account, side, price, amount_steem, amount_sbd, detail FROM grid_events WHERE kind='fill' AND mode='live' ORDER BY id DESC LIMIT 10").all() as Array<Record<string, unknown>>
   // רווח-מדומה-כן: זוגות-קנייה/מכירה-שמומשו-באותה-רמה — הפרש-מחיר
   const pairs = db
     .query("SELECT level, account, side, price FROM grid_orders WHERE status='filled' ORDER BY filled_at")
@@ -455,6 +729,10 @@ export function summary() {
     halt: haltInfo(),
     open,
     fills,
+    identityLine: stats.identityLine,
+    sellFloor: stats.floor,
+    lastReconcileAt: stats.lastReconcileAt,
+    lastLiveFills,
     shadowPnlSbd: Math.round(pnlSbd * 1000) / 1000,
     shadowPnlLabeled: 'simulated', // כנות-מלאה: מימושי-צל = סימולציה
     recent,

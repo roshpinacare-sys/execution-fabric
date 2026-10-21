@@ -190,10 +190,12 @@ export type ChainFill = {
   sbd: number
   counterparty: string | null
 }
-export async function getAccountFills(account: string, last = 300): Promise<RpcResult<ChainFill[]>> {
+export async function getAccountFills(account: string, last = 100): Promise<RpcResult<ChainFill[]>> {
+  // מדידה-חיה: ה-condenser מגביל get_account_history ל-100
+  const n = Math.max(1, Math.min(last, 100))
   const r = await rpc<Array<[number, { timestamp: string; op: [string, Record<string, unknown>] }]>>(
     'condenser_api.get_account_history',
-    [account, -1, last],
+    [account, -1, n],
   )
   if (!r.ok) return r
   const out: ChainFill[] = []
@@ -205,14 +207,16 @@ export async function getAccountFills(account: string, last = 300): Promise<RpcR
     const steem = parseFloat(steemStr) || 0
     const sbd = parseFloat(sbdStr) || 0
     if (!(steem > 0) || !(sbd > 0)) continue
-    // אם-אנחנו-ה-taker (current_owner=אנחנו) הפקודה-שלנו-היא current_orderid; כסביל — open_orderid
+    // אם-אנחנו-ה-taker (current_owner=אנחנו) מה-שאנחנו-משלמים-הוא current_pays; כסביל — open_pays.
+    // הצד-נקבע-לפי-מה-שאנחנו-משלמים: משלמים-SBD → קנינו-STEEM; משלמים-STEEM → מכרנו.
     const ourIsCurrent = String(body.current_owner ?? '') === account
+    const wePay = ourIsCurrent ? String(body.current_pays ?? '') : String(body.open_pays ?? '')
     const orderid = Number((ourIsCurrent ? body.current_orderid : body.open_orderid) ?? 0)
     if (!(orderid > 0)) continue
     out.push({
       at: item.timestamp,
       orderid,
-      side: ourIsCurrent ? 'sell' : 'buy', // כשהפקודה-שלנו-פגעה-בספר: current=הצד-שלנו
+      side: wePay.includes('SBD') ? 'buy' : 'sell',
       price: sbd / steem,
       steem,
       sbd,
@@ -224,27 +228,45 @@ export async function getAccountFills(account: string, last = 300): Promise<RpcR
 
 // ── קו-הזהות-החוץ (steemUsd/sbdUsd) — עוגן-מדיניות-המכירה ───────────────────
 // Task-113: מדיניות-מדודה (grid-beat R24): אף-מכירת-STEEM-מתחת-לקו-הזהות.
-// המקור-החיץ-ציבורי; כשל = מחיר-אחרון-ידוע (cache) ואם-אין → null → fail-honest:
-// המדיניות נופלת-למצב-השמרני (אין-מכירות-מתחת-ל-bestAsk הקיים).
+// מדידה-חיה: coingecko-מוגבל-קצב (429 נמדד) → STEEM מול-Binance (STEEMUSDT,
+// אומת-חי: 0.05575). sbdUsd-רק-ממקור-אמיתי: אין-מקור → sbdUsd=0 → הקורא
+// מדליק-רצפה-null (מצב-שמרני: אין-מכירות-מתחת-ל-bestAsk). אפס-המצאות.
 export type ExternalMarks = { steemUsd: number; sbdUsd: number; at: string } | null
 let marksCache: ExternalMarks = null
 let marksAt = 0
 export async function getExternalMarks(): Promise<ExternalMarks> {
   if (marksCache && Date.now() - marksAt < 10 * 60_000) return marksCache
+  let steemUsd = 0
+  let sbdUsd = 0
   try {
-    const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=steem,steem-dollars&vs_currencies=usd', {
+    const res = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=STEEMUSDT', {
       signal: AbortSignal.timeout(8000),
       cache: 'no-store',
     })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const j = (await res.json()) as { steem?: { usd?: number }; 'steem-dollars'?: { usd?: number } }
-    const steemUsd = j.steem?.usd ?? 0
-    const sbdUsd = j['steem-dollars']?.usd ?? 0
-    if (!(steemUsd > 0) || !(sbdUsd > 0)) throw new Error('marks incomplete')
-    marksCache = { steemUsd, sbdUsd, at: new Date().toISOString() }
-    marksAt = Date.now()
-    return marksCache
+    if (res.ok) {
+      const j = (await res.json()) as { price?: string }
+      steemUsd = parseFloat(j.price ?? '0')
+    }
   } catch {
-    return marksCache // כנות: ייתכן-null — הקורא חייב-להתמודד
+    /* ניסיון-הבא-מקור */
   }
+  try {
+    const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=steem-dollars,steem&vs_currencies=usd', {
+      signal: AbortSignal.timeout(8000),
+      cache: 'no-store',
+    })
+    if (res.ok) {
+      const j = (await res.json()) as { steem?: { usd?: number }; 'steem-dollars'?: { usd?: number } }
+      const s = j.steem?.usd ?? 0
+      const d = j['steem-dollars']?.usd ?? 0
+      if (s > 0 && steemUsd <= 0) steemUsd = s
+      if (d > 0) sbdUsd = d
+    }
+  } catch {
+    /* כנות: sbdUsd-ישאר-0 */
+  }
+  if (steemUsd <= 0) return marksCache // אין-מדידה-חיה → null/ישן
+  marksCache = { steemUsd, sbdUsd, at: new Date().toISOString() }
+  marksAt = Date.now()
+  return marksCache
 }

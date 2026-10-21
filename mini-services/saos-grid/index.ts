@@ -15,9 +15,9 @@ let bootMs = Date.now()
 async function tickCycle(): Promise<void> {
   try {
     const r = await engine.cycle()
-    if (r.placed || r.canceled || r.filledShadow || r.decisions.length) {
+    if (r.placed || r.canceled || r.filledShadow || r.filledLive || r.decisions.length) {
       console.log(
-        `[saos-grid] מחזור: הצבות=${r.placed} ביטולים=${r.canceled} מימושי-צל=${r.filledShadow} | ${r.decisions.slice(0, 3).join(' | ')}`,
+        `[saos-grid] מחזור: הצבות=${r.placed} ביטולים=${r.canceled} מימושי-צל=${r.filledShadow} מילויים-חיים=${r.filledLive} | ${r.decisions.slice(0, 3).join(' | ')}`,
       )
     }
   } catch (e) {
