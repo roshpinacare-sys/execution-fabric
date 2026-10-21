@@ -449,6 +449,19 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
         const chain = chainOrders.get(n) ?? []
         const chainIds = new Set(chain.map((c) => c.orderid))
 
+        // Task-114 — מנגנון-נגד-רוחות-רפאים (נמדד-בדם 22:50Z): קריאת-שרשרת-ריקה אינה
+        // ראיה-ש"הפקודות-נעלמו". כשהקורא-מחזיר-אפס-פקודות-בעוד-יש-לנו-שורות-חיות-במעקב,
+        // סגירת-יתומים ("נעלם-מהשרשרת") מוקפאת למחזור-זה — צפייה-בלבד. בלי-זה: הפנקס
+        // סוגר-פקודות-חיות-כביכול-נעלמו → מציב-מחדש → כפילויות-מצטברות-על-הספר
+        // (נמדד: 18→38-פקודות-תוך-דקות). fail-closed על-קריאה, לא-על-אמת.
+        const trackedLive = db
+          .query("SELECT COUNT(1) AS n FROM grid_orders WHERE status='open' AND mode='live' AND account=?")
+          .get(n) as { n: number }
+        if (chain.length === 0 && trackedLive.n > 0) {
+          decisions.push(`מנגנון-נגד-רוחות-רפאים: קריאת-השרשרת-ריקה-אך-יש ${trackedLive.n} פקודות-חיות-במעקב — סגירת-יתומים-מוקפאת (צפייה)`)
+          continue
+        }
+
         // אימוץ: פקודות-חיות-שלנו-שלא-במעקב (כולל-של-הרץ-היומי) → מעקב-מלא.
         // Task-113 הפרדת-סמכויות (נמדד-בדם): פקודות-שלא-הוצבו-על-ידי-המנוע-הזה
         // מסומנות level=-9 — מעקב-מילויים/ביטולים-בלבד, אף-קיזוז, אף-ביטול.

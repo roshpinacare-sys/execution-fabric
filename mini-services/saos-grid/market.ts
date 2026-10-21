@@ -145,11 +145,17 @@ export async function getOpenOrders(account: string): Promise<RpcResult<OpenOrde
     Array<{ orderid: number; seller: string; for_sale: number; sell_price: { base: string; quote: string }; real_price: string; created: string }>
   >('condenser_api.get_open_orders', [account])
   if (!r.ok) return r
+  // Task-114 (נמדד-בדם 22:50Z): על-פקודות-חיות השדה real_price חוזר "0.00000000000000000"
+  // (המדידה: 38-פקודות-על-השרשרת, getOpenOrders-החזירה-0) — המחיר-האמיתי-חי-ב-sell_price
+  // (base/quote). המחיר = quote/base — תמיד SBD-ל-STEEM; for_sale-הוא-הנכס-הנמכר (base) במילי.
   const out = (r.data ?? [])
     .map((o) => {
       const base = o.sell_price?.base ?? ''
-      const price = parseFloat(o.real_price ?? '0')
-      const forSale = Number(o.for_sale ?? 0) / 1000 // מילי→יחידות של-הנכס-הנמכר
+      const quote = o.sell_price?.quote ?? ''
+      const baseN = parseFloat(base) || 0
+      const quoteN = parseFloat(quote) || 0
+      const price = baseN > 0 && quoteN > 0 ? quoteN / baseN : 0
+      const forSale = Number(o.for_sale ?? 0) / 1000 // מילי→יחידות של-הנכס-הנמכר (base)
       if (base.includes('SBD')) {
         // מוכרים SBD לקנות STEEM — קנייה
         return {
