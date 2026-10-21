@@ -135,6 +135,27 @@ db.exec(`CREATE TABLE IF NOT EXISTS grid_orders (
 )`)
 db.exec(`CREATE TABLE IF NOT EXISTS grid_meta (k TEXT PRIMARY KEY, v TEXT)`)
 
+// Task-113 תיקון-חד-פעמי-עמיד: שורות-שאומצו-לפני-הפרדת-הסמכויות (level=0 אבל
+// לא-הוצבו-על-ידי-המנוע) → מסומנות level=-9 (מעקב-בלבד). זיהוי-הפקודות-שלנו:
+// כל-הצבה-שלנו רושמת-אירוע-place-עם orderid=<N> בפירוט. אידמפוטנטי.
+try {
+  const mine = new Set<number>()
+  for (const e of db.query("SELECT detail FROM grid_events WHERE kind='place' AND mode='live' AND detail LIKE '%orderid=%'").all() as Array<{ detail: string }>) {
+    const m = /orderid=(\d+)/.exec(String(e.detail))
+    if (m) mine.add(Number(m[1]))
+  }
+  const rows = db.query("SELECT orderid FROM grid_orders WHERE mode='live' AND status='open' AND level >= 0").all() as Array<{ orderid: string }>
+  let fixed = 0
+  for (const r of rows) {
+    const cid = Number(r.orderid.split(':')[1])
+    if (!mine.has(cid)) {
+      db.query("UPDATE grid_orders SET level=-9 WHERE orderid=?").run(r.orderid)
+      fixed++
+    }
+  }
+  if (fixed) console.log(`[saos-grid] תיקון-הפרדת-סמכויות: ${fixed} פקודות-מאומצות → מעקב-בלבד`)
+} catch { /* כנות: תיקון-לא-קריטי */ }
+
 function meta(k: string): string | null {
   return (db.query('SELECT v FROM grid_meta WHERE k=?').get(k) as { v: string } | null)?.v ?? null
 }
@@ -428,15 +449,17 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
         const chain = chainOrders.get(n) ?? []
         const chainIds = new Set(chain.map((c) => c.orderid))
 
-        // אימוץ: פקודות-חיות-שלנו-שלא-במעקב (כולל-של-הרץ-היומי) → מעקב-מלא
+        // אימוץ: פקודות-חיות-שלנו-שלא-במעקב (כולל-של-הרץ-היומי) → מעקב-מלא.
+        // Task-113 הפרדת-סמכויות (נמדד-בדם): פקודות-שלא-הוצבו-על-ידי-המנוע-הזה
+        // מסומנות level=-9 — מעקב-מילויים/ביטולים-בלבד, אף-קיזוז, אף-ביטול.
         for (const c of chain) {
           const id = `live:${c.orderid}:${n}`
           const known = db.query('SELECT 1 FROM grid_orders WHERE orderid=?').get(id)
           if (!known) {
             db.query('INSERT INTO grid_orders(orderid,account,side,level,price,amount_steem,amount_sbd,placed_at,status,mode) VALUES(?,?,?,?,?,?,?,?,?,?)').run(
-              id, n, c.side, 0, c.price, c.amountSteem, c.amountSbd, c.created, 'open', 'live',
+              id, n, c.side, -9, c.price, c.amountSteem, c.amountSbd, c.created, 'open', 'live',
             )
-            event('adopt', { account: n, side: c.side, level: 0, price: c.price, amountSteem: c.amountSteem, amountSbd: c.amountSbd, mode: 'live', detail: `אומץ-מהשרשרת; orderid=${c.orderid}` })
+            event('adopt', { account: n, side: c.side, level: -9, price: c.price, amountSteem: c.amountSteem, amountSbd: c.amountSbd, mode: 'live', detail: `אומץ-למעקב-בלבד (לא-לניהול); orderid=${c.orderid}` })
           }
         }
 
@@ -605,8 +628,10 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
           canceled++
           continue
         }
-        // חיים: רק-ידיים-עם-מפתח, תקרה-אנטי-צ'רנר, והצד-מותר-במנהל-החשיפה
+        // חיים: רק-ידיים-עם-מפתח, תקרה-אנטי-צ'רנר, והצד-מותר-במנהל-החשיפה.
+        // Task-113: פקודות-מאומצות (level=-9) — מעקב-בלבד, לעולם-לא-מקוזזות/מבוטלות-על-ידינו.
         if (requoted >= MAX_REQUOTE_PER_CYCLE) continue
+        if (o.level === -9) continue
         const acct = accounts.find((a) => a.name === o.account)
         if (!acct?.wif) continue
         if ((o.side === 'buy' && skipSide === 'buy') || (o.side === 'sell' && skipSide === 'sell')) continue
