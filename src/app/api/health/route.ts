@@ -73,7 +73,11 @@ async function reviveOrgans(): Promise<Record<string, string>> {
           return
         }
         m.spawns[o.name] = Date.now()
-        const child = spawn(BUN, ['run', 'dev'], { cwd: join(ROOT, o.cwd), stdio: 'ignore', env: process.env })
+        // Task 112: אפס-ירושת-PORT — נמדד-חי: העץ-הנצחי נושא PORT=3000 (next dev),
+        // וכל-איבר שקורא process.env.PORT נקשר-ל-3000 ונחסם-EADDRINUSE (טביעה: 5513 env).
+        const env = { ...process.env } as Record<string, string | undefined>
+        delete env.PORT
+        const child = spawn(BUN, ['run', 'dev'], { cwd: join(ROOT, o.cwd), stdio: 'ignore', env: env as NodeJS.ProcessEnv })
         child.on('error', (e) => logEvent('spawn-error', `${o.name}: ${e.message}`))
         m.lastProbes[o.name] = false
         out[o.name] = `respawned pid=${child.pid}`

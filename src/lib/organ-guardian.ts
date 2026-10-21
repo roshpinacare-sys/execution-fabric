@@ -84,7 +84,10 @@ async function checkOrgan(name: string, probeUrl: string, cwd: string): Promise<
   if (Date.now() - lastSpawn < 90_000) return
   m.spawns[name] = Date.now()
   try {
-    const child = spawn(BUN, ['run', 'dev'], { cwd, stdio: 'ignore', env: process.env })
+    // Task 112: אפס-ירושת-PORT (next dev נושא PORT=3000 — איברים-שקוראים-PORT נחסמים-EADDRINUSE)
+    const childEnv = { ...process.env } as Record<string, string | undefined>
+    delete childEnv.PORT
+    const child = spawn(BUN, ['run', 'dev'], { cwd, stdio: 'ignore', env: childEnv as NodeJS.ProcessEnv })
     child.on('error', (e) => {
       m.lastProbes[name].lastAction = `spawn-error: ${e.message}`
       logEvent('spawn-error', `${name}: ${e.message}`)
