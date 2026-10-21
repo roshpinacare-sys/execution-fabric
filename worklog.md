@@ -2251,3 +2251,25 @@ Work Log:
 Stage Summary:
 - T-110 סגור: 4 ליקויים-שורש תוקנו-ונדחפו (0352071 + c3930a6), מראת-Pulse חיה-בהוכחה (lanes.json 07:30:10Z עם-סקרי-שרשרת-חיים), money.json רענן-על-ידי-האורגניזם-לבד, site-audit ממצא-יחיד-טופל
 - שאריות-כנות: FixedFloat 401 (אצל-הספק) · steem.env ריק (ממתין-למפתחות) · swiftshader-freeze (סביבתי, מתועד) · 3-stale/3-failing ב-census (זרועות-היצרן)
+
+---
+Task ID: 111
+Agent: Z.ai Code (ארכיטקט-ראשי)
+Task: ריבונות-מפתחות מקצה-לקצה — לאפות את-מצב "ממתין-למפתחות" מהעולם (דברי-הבעלים: "כל-המפתחות-בגיט; לא-נגיע-למצב-שסוכן-חושב-שחסר-לו-מפתחות")
+
+Work Log:
+- סקר-ממצה: כל-המפתחות-נמצאו בגיט/כספת — upload/steem.env (נחת T-111 קודם; ריק-היה-רק-בזמן-זעם-הבעלים), chain-verified.json, wallets-registry.json (12-ארנקים EVM/Tron/SOL/BTC), R11-archive (fleet_keys.enc+סיסמה, mnemonics, key-broker.token), PROCEDURE.md, wallet.db (248-רישומים: steem×14 · blurt×12 · ethereum/solana/bitcoin×12 · tron×15 · hive×2 · github/infra/nvidia)
+- תיקון-באגי-ספירה: (1) @noble/curves לא-היה-מותקן ב-saos-grid → הותקן; (2) הקמעת `bun -e` נשברה-על-escape-ים וחשפה-WIF-ב-proc-cmdline → helper-קובץ steem-pub-derive.cjs עם-stdin (checksum-verify נוסף); (3) **השוואת-מחרוזת-STM הדיחה-שקר "לא-חי"** — הקידוד-בשרשרת של-headcorner נושא-checksum-שונה (כלי-יצירה-ישן) בעוד-גוף-המפתח-33-בייטים זהה-ביט-ביט (הוכח בשלושת-התפקידים) → census משווה-גופי-מפתח
+- תוצאת-census: **allClear 5/5** — steem 3/3-חי-מאומת-מול-השרשרת · PAT חי (roshpinacare-sys) · NVIDIA 200 · FF מפתח-נוכח · שביל-שחזור-מלא
+- **תרגיל-שחזור-מהגיט-בלבד (drill-recover.cjs): VERDICT מלא** — ארכיון-R11 מהיסטוריית-Saosmartwallet (blob 3d8221a345 @ commit 9e483baff4, גילוי-דינמי דרך-commits?path=+trees) → openssl-pbkdf2-300k (סיסמה מ-recovery-meta-באותו-commit) → agent/keys/vault.json → keySeals → **K-form-גולמת הוכחה** (P+5-form-גם-נתמך; 4-וריאציות, GCM-מכריע) → scrypt N=2^15 r=8 p=1 maxmem-128MB → מפתח-אב (טביעה 937f8e01) → VaultEntry→WIF52→(גוף-33 mod n)→WIF51 → **3/3 טביעות MATCH מול-הכספת-הנחותה** (8fc001a6/2bc61fc3/2509f6e4)
+- **mini-services/vault-guardian (:3080) נבנה-ומופעל**: census-כל-10דק' · שחזור-אוטומטי-מהגיט בעת-כשל/נעדר (heal) · drill-כל-6ש' · קבלות-טביעות-בלבד (upload/vault-guardian.json) · מראה-ציבורית-בוליאנית ל-Domain
+- **המבחן-האולטימטיבי עבר**: מחיקת-upload/steem.env → POST /heal → שחזור-מלא-מהגיט (archive→seal→entries→chain-verify) → נחיתה → census-ירוק — **6.3ש' סה"כ, אפס-יד-אדם**, טביעות-זהות-לגיבוי; הגריד :3070 חזר-למצב live (headcorner:b575) מעצמו
+- survival-keeper (:3051) הורחב: watches+dirName+watchService ל-vault-guardian — הזקיפה-מגינה-גם-על-שומר-הכספת
+- docs/organ-registry.json: **שער-Steem-live-keys שודרג מ"ממתין-למפתחות" ל"חי 3/3"** (זה-המקור-שגרם-לסוכנים-לומר-כל-יום "חסרים-מפתחות"!) + חוק-חדש ב-rules_for_agents: אסור-להגיד-חסרים-מפתחות, יש-POST /heal; איבר-vault-guardian נרשם
+- docs/KEY-LEDGER.md נכתב: מפת-המפתחות-הריבונית (מקור→צרכן→הוכחה) לכל-שכבה: ריצה · כספת-עמוקה · CI-secrets
+- PROCEDURE.md תוקן-לפי-מדידה (K-form) + סעיף-10: השביל-ממומש-אוטומטית ב-:3080
+- Domain דחוף (6b97b06): מראות-ציבוריות vault-census + vault-guardian (בוליאנים)
+
+Stage Summary:
+- מצב-"ממתין-למפתחות"-נאפה-ארכיטקטונית: הכספת-חיה-ומאומתת-מול-השרשרת (3/3), השחזור-מהגיט-אוטומטי-ומוכח-במדידה (6.3ש' ממחיקה-לירוק), והרישום-הקריא-למכונה עודכן-כך-שאף-סוכן-חדש-לא-יירש-את-הטעות
+- כנות: FixedFloat-עדיין-401-אצל-הספק (לא-בעיית-מפתח — המפתח-קיים-ומדוד); chmod-600-על-הכספת-נדחה-על-ידי-מערכת-הקבצים (777-נשאר — מגבלת-סביבה, מתועד); השחזור-תלוי-ב-PAT-חי (upload/pat.env — נמדד-חי; census-מגן)
