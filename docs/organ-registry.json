@@ -1,0 +1,41 @@
+{
+  "_doc": "רישום-האיברים-המכונה של-האורגניזם-הריבוני — דפוס-runbooks.json (agency-agents, MIT) מותאם-ריבונות: מניפסט-קריא-מכונה-אחד-שכל-סוכן-חדש-קורא-לפני-פעולה, כדי-שלא-יבנה-שכפול-או-דריסה. המקור-המכונן לטופולוגיה. אין-להקים-מנגנוני-החייאה-נוספים: הזקיפה-מודדת, השומר-בעץ-ה-3000-מחייה.",
+  "_updated_at": "2026-10-21T05:00:00Z",
+  "_task": "108",
+  "venue": {
+    "name": "saos-dex",
+    "root": "repos/saos-dex",
+    "port": 3010,
+    "base_path": "/saos-dex",
+    "health": "GET /saos-dex/api/health",
+    "state": "GET /saos-dex/api/dex/state",
+    "price_proof": "GET /saos-dex/api/dex/price-proof",
+    "role": "הבורסה-הריבונית — הוניו של-השוק. אסור-לסוכנים-לערוך-את-קודו; מוטציות-רק-דרך-שער-המפעיל (x-saos-operator)."
+  },
+  "organs": [
+    { "name": "app", "port": 3000, "health": "GET /api/health", "role": "הדשבורד-הריבוני — המשטח-הנראה-לבעלים (GridPanel · HotMarketPanel · CouncilPanel · FlowGuard)" },
+    { "name": "heart", "port": 3031, "health": "GET /health", "role": "לב-האורגניזם: פעימות-מסד, דחיפת-גיט, ריפוי-ריבייז-יתום, מעקב-טענות" },
+    { "name": "witness", "port": 3050, "health": "GET /health", "role": "עד-השרשרת: עיגון-ראיות וגובה-שרשרת (BlockHeader/SealRecord)" },
+    { "name": "guardian", "port": 3051, "health": "GET /health", "role": "הזקיפה: survival-keeper — מודד-את-כל-האיברים-כל-5ש' ומזניק-בנים-שנפלו; היא-האם-של-התהליכים" },
+    { "name": "metrics", "port": 3060, "health": "GET /health", "role": "המדיד: מטריקות-אורגניזם ודופק-זרימה" },
+    { "name": "grid", "port": 3070, "health": "GET /health", "state": "GET /grid", "backtest": "GET /backtest", "halt": "POST /halt · POST /resume", "role": "מנוע-הגריד-על-שוק-הפנים-האמיתי (STEEM/SBD דרך-RPC-ציבורי); צל-עד-מפתחות-חי-בכספת (upload/steem.env); RiskGovernor + /backtest" },
+    { "name": "arb", "port": 3071, "health": "GET /health", "state": "GET /state", "run_cards": "GET /run-cards?n=", "tool": "GET /tool", "halt": "POST /halt · POST /resume", "role": "איבר-השוק-החריף: 5-ידיים על-הספר-של-הדקס (arb-peg · grid-mm · mm-wsbd · depth-phive · depth-energy) + שער-כשירות-שווקים (markets.ts) — דפוס-AutoHedge jupiter_search מותאם" },
+    { "name": "council", "port": 3072, "health": "GET /health", "state": "GET /state", "cards": "GET /cards", "cycle": "POST /cycle", "deliberate": "POST /deliberate", "role": "מועצת-השולחן: ראיות→מנהל-מכני→Director-LLM (ייעוץ-בלבד) + פרוטוקול-הסלמה (NEXUS)" }
+  ],
+  "mini_services_misc": [
+    { "name": "chain-witness-state", "path": "mini-services/chain-witness", "note": "בתוך-העד (:3050)" },
+    { "name": "fabric-heartbeat", "path": "mini-services/fabric-heartbeat", "note": "דופק-טקסטיל-פנימי" }
+  ],
+  "external_gates": [
+    { "name": "FixedFloat", "status": "ממתין-לאימות-שירות-אצל-הספק (401 Not-have-permission) — העורק-מדווח-חי-בדשבורד; אין-להפעיל-בכוח", "vault": "upload/ff.env · upload/fffixedflot.txt" },
+    { "name": "HTX", "status": "סגור-סופית (KYC) — אין-לחזור-אליו" },
+    { "name": "Steem-live-keys", "status": "ממתין-למפתחות-active של-headcorner בכספת (upload/steem.env — עדיין-ריק); הגריד-עובר-חי-אוטומטית-בנחיתה", "vault": "upload/steem.env.template" }
+  ],
+  "rules_for_agents": [
+    "אל-תבנו מנועי-מסחר-מקבילים — הידיים-החיות-על-הספר הן-ב-:3070 (אמת-חוץ) ו-:3071 (הדקס); הוסיפו-אסטרטגיות-דרך-תצורה-והכספת",
+    "אל-תערכו את-קוד repos/saos-dex — מרחב-הסוכן-השני; אפס-עקיפה-של-שער-המפעיל",
+    "אין-להקים מנגנוני-החייאה-נוספים — הזקיפה (:3051) והשומר-בעץ-ה-3000 מחזיקים-את-הכל",
+    "כל-איבר-חדש נרשם-כאן + אצל-הזקיפה-ובשומר, עם-health-URL-וטיפוס",
+    "אפס-סודות-בפלט: כל-מפתח-חי-בכספת (upload/*) — נקרא-בזמן-ריצה, מטביעת-אצבע-בלבד-בדיווח"
+  ]
+}

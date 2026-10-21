@@ -20,6 +20,7 @@
 
 import { readFileSync, existsSync, appendFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
+import { gateMarkets, gateSummary, type MarketRow } from './markets'
 
 const PORT = Number(process.env.SAOS_ARB_PORT ?? 3071)
 const ROOT = join(import.meta.dir, '..', '..')
@@ -38,14 +39,40 @@ const MAX_CONSEC_ERRORS = 5
 const CARDS_KEEP = 400
 const TOPUP_EVERY_MS = 10 * 60_000
 
-// ידיים — מרחב-שמות-משלנו, אפס-התנגשות-עם-ארנת-החיילים/האוצר/המפעיל
+// ידיים — מרחב-שמות-משלנו, אפס-התנגשות-עם-ארנת-החיילים/האוצר/המפעיל.
+// Task 108: השוק-מתרחב-מ-2-ידיים-ל-5-בשער-כשירות-מדיד (markets.ts — דפוס-AutoHedge
+// jupiter_search): 'mm' = ספר-דו-צדדי-צפוף → מייקר-מלא; 'depth' = חד-צדדי/רחב →
+// בונה-עומק (קניות-postOnly-מתחת-למגע; מכירה-רק-ממלאי-אמת-שהצטברו-ביד-עצמה);
+// 'peg' = ארב-פאריטי-אמת-חוץ. תקרת-מלאי-בסיס-ליד (AutoHedge: max_inventory_exposure).
+type HandMode = 'peg' | 'mm' | 'depth'
+interface HandSpec {
+  hand: string
+  base: string
+  quote: string
+  mode: HandMode
+  levels: number
+  seedUsdsMu: number
+  seedBaseMu: number
+  baseCapMu: number // תקרת-מלאי-בסיס — מעל-זה היד-מפסיקה-לקנות
+  bidQtyMu: number // תקרת-גודל-פקודת-קנייה (µ-בסיס)
+}
 const HAND_PEG = 'arb-peg'
 const HAND_MM = 'grid-mm'
-const HANDS = [HAND_PEG, HAND_MM] as const
-type Hand = (typeof HANDS)[number]
+const SPECS: HandSpec[] = [
+  { hand: HAND_PEG, base: 'WSTEEM', quote: 'USDS', mode: 'peg', levels: 1, seedUsdsMu: 150_000, seedBaseMu: 60_000, baseCapMu: 100_000, bidQtyMu: 4_000 },
+  { hand: HAND_MM, base: 'SAOS', quote: 'USDS', mode: 'mm', levels: 2, seedUsdsMu: 150_000, seedBaseMu: 0, baseCapMu: 300_000, bidQtyMu: 4_000 },
+  { hand: 'mm-wsbd', base: 'WSBD', quote: 'USDS', mode: 'mm', levels: 2, seedUsdsMu: 100_000, seedBaseMu: 0, baseCapMu: 120_000, bidQtyMu: 4_000 },
+  { hand: 'depth-phive', base: 'PHIVE', quote: 'USDS', mode: 'depth', levels: 1, seedUsdsMu: 40_000, seedBaseMu: 0, baseCapMu: 200_000, bidQtyMu: 6_000 },
+  { hand: 'depth-energy', base: 'ENERGY', quote: 'USDS', mode: 'depth', levels: 1, seedUsdsMu: 40_000, seedBaseMu: 0, baseCapMu: 100_000, bidQtyMu: 4_000 },
+]
+const HANDS = SPECS.map((s) => s.hand)
+type Hand = string
+const specOf = (h: Hand): HandSpec => SPECS.find((s) => s.hand === h)!
 
 // זרע-ידוע (מתועד) — בסיס-ה-MTM-הכנה; מימון-אוטומטי-מהאוצר-עד-הזרע-בלבד
-const SEED = { [HAND_PEG]: { usdsMu: 150_000, wsteemMu: 60_000, saosMu: 0 }, [HAND_MM]: { usdsMu: 150_000, wsteemMu: 0, saosMu: 0 } }
+const SEED: Record<string, { usdsMu: number; baseMu: number }> = Object.fromEntries(
+  SPECS.map((s) => [s.hand, { usdsMu: s.seedUsdsMu, baseMu: s.seedBaseMu }]),
+)
 
 function operatorToken(): string | null {
   // כספת: upload/dex-operator.env (gitignored) — נקרא-בזמן-ריצה, אפס-חשיפה
@@ -82,6 +109,14 @@ interface RunCard {
   fills: Array<{ hand: Hand; orderId: number; side: string; price: number; qtyMu: number; edgeBpsVsParity: number | null }>
   hands: Record<string, { usdsMu: number; baseMu: number; lockedUsdsMu: number; lockedBaseMu: number }>
   mtmPnlMu: number // מול-זרע-ידוע — sim-µ, מתויג-כך
+  expansion?: {
+    gate: Array<{ base: string; quote: string; verdict: string; twoSided: boolean; spreadBps: number; reason: string }>
+    summary: {
+      total: number; twoSided: number; oneSided: number; off: number
+      mmMarkets: string[]; depthMarkets: string[]; avgTwoSidedSpreadBps: number | null
+    }
+    handsActive: number
+  }
   halted: boolean
   note: string
 }
@@ -145,19 +180,18 @@ interface PriceProof {
 interface MyOrders { ok?: boolean; orders?: Array<{ id: number; base: string; quote: string; side: string; price: number; amount: number; filled: number }> }
 type PrevOrders = Array<{ id: number; side: string; price: number; amount: number; filled: number }>
 
-let prevPegOrders: PrevOrders = []
-let prevMmOrders: PrevOrders = []
-let prevMmOrderIds: Set<number> = new Set()
+const prevOrders: Record<string, PrevOrders> = {}
 
 async function gather() {
-  const [dex, proof, grid, pegOrders, mmOrders] = await Promise.all([
+  const [dex, proof, grid, ...handOrders] = await Promise.all([
     jget<DexState>(`${DEX}/state`),
     jget<PriceProof>(`${DEX}/price-proof`),
     jget<{ price?: number }>(GRID),
-    jget<MyOrders>(`${DEX}/my-orders?issuer=${HAND_PEG}`),
-    jget<MyOrders>(`${DEX}/my-orders?issuer=${HAND_MM}`),
+    ...HANDS.map((h) => jget<MyOrders>(`${DEX}/my-orders?issuer=${h}`)),
   ])
-  return { dex, proof, grid, orders: { [HAND_PEG]: pegOrders, [HAND_MM]: mmOrders } as Record<Hand, MyOrders | null> }
+  const orders: Record<string, MyOrders | null> = {}
+  HANDS.forEach((h, i) => { orders[h] = (handOrders[i] as MyOrders | null) ?? null })
+  return { dex, proof, grid, orders }
 }
 
 function marketOf(st: DexState | null, base: string, quote: string) {
@@ -167,14 +201,24 @@ function marketOf(st: DexState | null, base: string, quote: string) {
 function walletOf(st: DexState | null, name: string) {
   const ws = st?.wallets ?? []
   const w = ws.find((x) => x.name === name)
+  const balances = w?.balances ?? {}
+  const locked = w?.locked ?? {}
   return {
-    usdsMu: w?.balances?.USDS ?? 0,
-    wsteemMu: w?.balances?.WSTEEM ?? 0,
-    saosMu: w?.balances?.SAOS ?? 0,
-    lockedUsds: w?.locked?.USDS ?? 0,
-    lockedWsteem: w?.locked?.WSTEEM ?? 0,
-    lockedSaos: w?.locked?.SAOS ?? 0,
+    balances,
+    locked,
+    usdsMu: balances.USDS ?? 0,
+    wsteemMu: balances.WSTEEM ?? 0,
+    saosMu: balances.SAOS ?? 0,
+    lockedUsds: locked.USDS ?? 0,
+    lockedWsteem: locked.WSTEEM ?? 0,
+    lockedSaos: locked.SAOS ?? 0,
   }
+}
+function balOf(st: DexState | null, name: string, asset: string): number {
+  return st?.wallets?.find((x) => x.name === name)?.balances?.[asset] ?? 0
+}
+function lockOf(st: DexState | null, name: string, asset: string): number {
+  return st?.wallets?.find((x) => x.name === name)?.locked?.[asset] ?? 0
 }
 
 // מימון-מהאוצר-עד-הזרע-בלבד:
@@ -191,10 +235,10 @@ async function ensureFunded(st: DexState | null, card: RunCard): Promise<void> {
   let did = false
   for (const h of HANDS) {
     const w = walletOf(st, h)
+    const spec = specOf(h)
     const need = [
       { asset: 'USDS', have: w.usdsMu, want: SEED[h].usdsMu },
-      { asset: 'WSTEEM', have: w.wsteemMu, want: SEED[h].wsteemMu },
-      { asset: 'SAOS', have: w.saosMu, want: SEED[h].saosMu },
+      { asset: spec.base, have: balOf(st, h, spec.base), want: SEED[h].baseMu },
     ]
     for (const n of need) {
       const gap = n.want - n.have
@@ -247,7 +291,7 @@ async function handArbPeg(card: RunCard, st: DexState | null, orders: MyOrders |
   // מימושים: פקודה-שנעלמה-מהחיים = מומשה-מלא
   const live = orders?.orders ?? []
   const liveIds = new Set(live.map((o) => o.id))
-  for (const prev of prevPegOrders) {
+  for (const prev of prevOrders[HAND_PEG] ?? []) {
     if (!liveIds.has(prev.id)) {
       const edge = Math.round(((prev.price - parity) / parity) * 10_000)
       card.fills.push({
@@ -257,7 +301,7 @@ async function handArbPeg(card: RunCard, st: DexState | null, orders: MyOrders |
       })
     }
   }
-  prevPegOrders = live as PrevOrders
+  prevOrders[HAND_PEG] = live as PrevOrders
 
   // מכירה-מעל-פאריטי-בלבד. שתי-מסילות:
   //   (א) פרמיה-חיה-מכסה-קצה → חציית-הצעת-המייקר (IOC — מימוש-מיידי)
@@ -296,58 +340,67 @@ async function handArbPeg(card: RunCard, st: DexState | null, orders: MyOrders |
   }
 }
 
-// ── יד-ב': גריד-מייקר על SAOS/USDS ──────────────────────────────────────────
-const MM_LEVELS = 2
+// ── ידי-מייקר/עומק (מוכללות — Task 108) ────────────────────────────────────
+// 'mm' — סולם-דו-צדדי-סביב-המגע; 'depth' — בונה-עומק: קניות-postOnly-מתחת-למגע,
+// ומכירה-אך-ורק-ממלאי-אמת-שהצטבר-ממימושים-של-היד-עצמה (אף-מכירה-באוויר).
+// תקרת-מלאי-בסיס (AutoHedge: max_inventory_exposure): מעל-התקרה — היד-מפסיקה-לקנות.
 function mmStepBps(spreadBps: number): number {
   const s = spreadBps > 0 ? Math.round(spreadBps / 2) : 40
   return Math.max(20, Math.min(200, s))
 }
-let lastMmMid: number | null = null
-async function handGridMm(card: RunCard, st: DexState | null, orders: MyOrders | null): Promise<void> {
+const lastMid: Record<string, number | null> = {}
+async function handMaker(card: RunCard, spec: HandSpec, st: DexState | null, orders: MyOrders | null): Promise<void> {
+  const h = spec.hand
   // מקור-מגע: ספר-חי → נקודת-ייחוס-מוכרזת → זיכרון-אחרון (ספר-ריק-אינו-תירוץ-לשתיקה)
-  const m = marketOf(st, 'SAOS', 'USDS')
-  const w = walletOf(st, HAND_MM)
+  const m = marketOf(st, spec.base, spec.quote)
+  const usds = balOf(st, h, 'USDS')
+  const baseHeld = balOf(st, h, spec.base)
   const mid = m?.bestBid && m?.bestAsk ? Math.round((m.bestBid + m.bestAsk) / 2)
-    : m?.fair ?? st?.state?.assets?.SAOS?.refPrice ?? lastMmMid
+    : m?.fair ?? st?.state?.assets?.[spec.base]?.refPrice ?? lastMid[h] ?? null
   if (!mid) {
-    card.actions.push({ hand: HAND_MM, what: 'skip', detail: 'אין-מקור-מגע-ל-SAOS', ok: false })
+    card.actions.push({ hand: h, what: 'skip', detail: `אין-מקור-מגע-ל-${spec.base}`, ok: false })
     return
   }
-  lastMmMid = mid
+  lastMid[h] = mid
   const step = mmStepBps(m?.spreadBps ?? 0)
   const live = orders?.orders ?? []
   const liveIds = new Set(live.map((o) => o.id))
-  for (const prev of prevMmOrders) {
+  for (const prev of prevOrders[h] ?? []) {
     if (!liveIds.has(prev.id)) {
-      card.fills.push({ hand: HAND_MM, orderId: prev.id, side: prev.side, price: prev.price, qtyMu: Math.max(prev.amount - prev.filled, 0), edgeBpsVsParity: null })
+      card.fills.push({ hand: h, orderId: prev.id, side: prev.side, price: prev.price, qtyMu: Math.max(prev.amount - prev.filled, 0), edgeBpsVsParity: null })
     }
   }
-  prevMmOrders = live as PrevOrders
+  prevOrders[h] = live as PrevOrders
 
   const bids = live.filter((o) => o.side === 'buy').length
   const asks = live.filter((o) => o.side === 'sell').length
   let placed = 0
-  // סולם-קנייה-מתחת-למגע (postOnly — מייקר-טהור)
-  for (let i = 1; i <= MM_LEVELS && bids < MM_LEVELS; i++) {
-    const px = Math.floor(mid * (1 - (step * i) / 10_000))
-    if (m?.bestBid && px >= m.bestBid) continue // לא-חוצה — טהרת-מייקר
-    const qtyMu = Math.min(4_000, Math.floor((w.usdsMu * 1000) / px / 2))
-    if (qtyMu < 500) break
-    const r = await dexPost('order', { action: 'order', base: 'SAOS', quote: 'USDS', side: 'buy', price: px, amount: qtyMu, issuer: HAND_MM, postOnly: true })
-    card.actions.push({ hand: HAND_MM, what: `mm-bid-L${i}`, detail: `px=${px}µ mid=${mid}µ step=${step}bps`, ok: r.ok })
-    if (r.ok) placed++
+  const capReached = spec.baseCapMu > 0 && baseHeld >= spec.baseCapMu
+  // סולם-קנייה-מתחת-למגע (postOnly — מייקר-טהור); נחסם-בתקרת-מלאי
+  if (capReached) {
+    card.actions.push({ hand: h, what: 'cap-reached', detail: `מלאי-${spec.base}=${baseHeld}µ ≥ תקרה=${spec.baseCapMu}µ — היד-מפסיקה-לקנות (AutoHedge: max_inventory_exposure)`, ok: true })
+  } else {
+    for (let i = 1; i <= spec.levels && bids < spec.levels; i++) {
+      const px = Math.floor(mid * (1 - (step * i) / 10_000))
+      if (m?.bestBid && px >= m.bestBid) continue // לא-חוצה — טהרת-מייקר
+      const qtyMu = Math.min(spec.bidQtyMu, Math.floor((usds * 1000) / px / 2))
+      if (qtyMu < 500) break
+      const r = await dexPost('order', { action: 'order', base: spec.base, quote: spec.quote, side: 'buy', price: px, amount: qtyMu, issuer: h, postOnly: true })
+      card.actions.push({ hand: h, what: `bid-L${i}`, detail: `px=${px}µ mid=${mid}µ step=${step}bps qty=${qtyMu}µ`, ok: r.ok })
+      if (r.ok) placed++
+    }
   }
   // סולם-מכירה-מעל-המגע — רק-ממלאי-אמת (אף-מכירה-באוויר)
-  for (let i = 1; i <= MM_LEVELS && asks < MM_LEVELS; i++) {
+  for (let i = 1; i <= spec.levels && asks < spec.levels; i++) {
     const px = Math.ceil(mid * (1 + (step * i) / 10_000))
     if (m?.bestAsk && px <= m.bestAsk) continue
-    const holdMu = Math.min(w.saosMu, 4_000)
+    const holdMu = Math.min(baseHeld, spec.bidQtyMu)
     if (holdMu < 500) break
-    const r = await dexPost('order', { action: 'order', base: 'SAOS', quote: 'USDS', side: 'sell', price: px, amount: holdMu, issuer: HAND_MM, postOnly: true })
-    card.actions.push({ hand: HAND_MM, what: `mm-ask-L${i}`, detail: `px=${px}µ mid=${mid}µ step=${step}bps hold=${holdMu}µ`, ok: r.ok })
+    const r = await dexPost('order', { action: 'order', base: spec.base, quote: spec.quote, side: 'sell', price: px, amount: holdMu, issuer: h, postOnly: true })
+    card.actions.push({ hand: h, what: `ask-L${i}`, detail: `px=${px}µ mid=${mid}µ step=${step}bps hold=${holdMu}µ`, ok: r.ok })
     if (r.ok) placed++
   }
-  if (placed === 0) card.actions.push({ hand: HAND_MM, what: 'mm-rest', detail: `bids=${bids} asks=${asks} — הסולם-כבר-מצוטט`, ok: true })
+  if (placed === 0 && !capReached) card.actions.push({ hand: h, what: 'rest', detail: `bids=${bids} asks=${asks} — הסולם-כבר-מצוטט`, ok: true })
 }
 
 // ── מחזור ────────────────────────────────────────────────────────────────────
@@ -367,17 +420,17 @@ function appendCard(card: RunCard): void {
 }
 
 function mtmPnl(st: DexState | null, card: RunCard): number {
-  // מידה-כנה: נזיל + מלאי-מסומן-במחיר-הפנימי-החי, מול-זרע-ידוע (sim-µ מתויג)
+  // מידה-כנה: נזיל + מלאי-מסומן-במחיר-הפנימי-החי, מול-זרע-ידוע (sim-µ מתויג).
+  // Task 108: אין-עוד-מחיר-ברירת-מחדל-מומצא (2500-הישן) — אין-סימון, אין-תרומה.
   let total = 0
-  const saosMark = marketOf(st, 'SAOS', 'USDS')?.fair ?? 2500
-  const wsteemMark = card.book.internalMidMu ?? 0
   for (const h of HANDS) {
-    const w = walletOf(st, h)
-    const baseMu = h === HAND_PEG ? w.wsteemMu : w.saosMu
-    const mark = h === HAND_PEG ? wsteemMark : saosMark
+    const spec = specOf(h)
+    const mark = spec.mode === 'peg' ? card.book.internalMidMu ?? 0
+      : marketOf(st, spec.base, spec.quote)?.fair ?? st?.state?.assets?.[spec.base]?.refPrice ?? lastMid[h] ?? 0
+    if (!mark) continue
+    const baseMu = balOf(st, h, spec.base)
     const seed = SEED[h]
-    const seedBase = h === HAND_PEG ? seed.wsteemMu : seed.saosMu
-    total += w.usdsMu + Math.floor((baseMu * mark) / 1000) - (seed.usdsMu + Math.floor((seedBase * mark) / 1000))
+    total += balOf(st, h, 'USDS') + Math.floor((baseMu * mark) / 1000) - (seed.usdsMu + Math.floor((seed.baseMu * mark) / 1000))
   }
   return total
 }
@@ -428,8 +481,10 @@ async function cycle(): Promise<void> {
   try {
     await ensureFunded(st, card)
     await handArbPeg(card, st, g.orders[HAND_PEG])
-    if (card.actions.filter((a) => a.hand === HAND_PEG && a.ok).length < 3) {
-      await handGridMm(card, st, g.orders[HAND_MM])
+    // Task 108: הידיים-המורחבות — רצות-אחרי-הפג; אישורי-ידיים-נפרדים, אפס-דריסות
+    for (const spec of SPECS) {
+      if (spec.mode === 'peg') continue
+      await handMaker(card, spec, st, g.orders[spec.hand] ?? null)
     }
   } catch (e) {
     consecErrors++
@@ -440,15 +495,25 @@ async function cycle(): Promise<void> {
   const st2 = await jget<DexState>(`${DEX}/state`)
   if (st2) {
     for (const h of HANDS) {
-      const w = walletOf(st2, h)
+      const spec = specOf(h)
       card.hands[h] = {
-        usdsMu: w.usdsMu,
-        baseMu: h === HAND_PEG ? w.wsteemMu : w.saosMu,
-        lockedUsdsMu: w.lockedUsds,
-        lockedBaseMu: h === HAND_PEG ? w.lockedWsteem : w.lockedSaos,
+        usdsMu: balOf(st2, h, 'USDS'),
+        baseMu: balOf(st2, h, spec.base),
+        lockedUsdsMu: lockOf(st2, h, 'USDS'),
+        lockedBaseMu: lockOf(st2, h, spec.base),
       }
     }
     card.mtmPnlMu = mtmPnl(st2, card)
+  }
+  // שער-כשירות-השווקים (Task 108 — דפוס-AutoHedge jupiter_search): נמדד-מהספר-החי
+  const stLive = st2 ?? st
+  const rows = ((stLive as unknown as { state?: { markets?: MarketRow[] } })?.state?.markets
+    ?? (stLive as unknown as { markets?: MarketRow[] })?.markets ?? []) as MarketRow[]
+  const gates = gateMarkets(rows)
+  card.expansion = {
+    gate: gates.map((g) => ({ base: g.base, quote: g.quote, verdict: g.verdict, twoSided: g.twoSided, spreadBps: g.spreadBps, reason: g.reasons[0] ?? '' })),
+    summary: gateSummary(gates),
+    handsActive: HANDS.length,
   }
   appendCard(card)
   const fillsN = card.fills.length
@@ -512,6 +577,7 @@ Bun.serve({
           { name: 'hotmarket.state', desc: 'מצב-השוק-החריף המלא (truth/book/hands/actions/fills/MTM)', call: 'GET /state' },
           { name: 'hotmarket.run_cards', desc: 'רכיבי-ריצה-מאומתים אחרונים (?n=)', call: 'GET /run-cards?n=20' },
           { name: 'hotmarket.truth', desc: 'אמת-החוץ-המדידה: steemUsd רב-מקורות + פאריטי + פרמיה', call: 'GET /state (שדה lastCard.truth)' },
+          { name: 'hotmarket.expansion', desc: 'שער-כשירות-השווקים (דפוס-AutoHedge jupiter_search): verdict-פר-שוק + רוחב-הספר + 5-הידיים-הסוחרות', call: 'GET /state (שדה lastCard.expansion)' },
           { name: 'dex.state', desc: 'מצב-הדקס-הריבוני (קריאה-ציבורית)', call: `GET ${DEX}/state` },
           { name: 'dex.price_proof', desc: 'הוכחת-מחיר: פנים-מול-חוץ', call: `GET ${DEX}/price-proof` },
         ],

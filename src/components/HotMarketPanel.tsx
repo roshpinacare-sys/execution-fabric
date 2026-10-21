@@ -34,6 +34,11 @@ interface LastCard {
   actions: Action[]
   fills: Fill[]
   mtmPnlMu: number
+  expansion?: {
+    gate: Array<{ base: string; quote: string; verdict: string; twoSided: boolean; spreadBps: number; reason: string }>
+    summary: { total: number; twoSided: number; oneSided: number; off: number; mmMarkets: string[]; depthMarkets: string[]; avgTwoSidedSpreadBps: number | null }
+    handsActive: number
+  } | null
   note: string
 }
 interface ArbState {
@@ -228,6 +233,29 @@ export function HotMarketPanel() {
               </div>
             ) : (
               <div className="text-xs text-zinc-400">טבלת-השווקים-טרם-נטענה מהדקס{d.dexError ? ` (${d.dexError})` : ''}</div>
+            )}
+
+            {/* שער-כשירות-השווקים (Task 108 — דפוס-AutoHedge jupiter_search מותאם) */}
+            {card?.expansion?.summary && (
+              <div className="rounded-md border p-3">
+                <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs font-medium">
+                  <Activity className="size-3.5 text-orange-500" aria-hidden /> שער-כשירות-השווקים
+                  <Badge variant="outline" className="text-[10px] font-normal text-zinc-500">
+                    {card.expansion.summary.twoSided}/{card.expansion.summary.total} דו-צדדיים · פרישה-ממוצעת {card.expansion.summary.avgTwoSidedSpreadBps ?? '—'}bps · {card.expansion.handsActive} ידיים-סוחרות
+                  </Badge>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {card.expansion.gate.map((g) => (
+                    <Badge
+                      key={`${g.base}/${g.quote}`}
+                      variant="outline"
+                      className={`px-1.5 py-0 text-[10px] ${g.verdict === 'mm' ? 'border-emerald-600/40 text-emerald-700 dark:text-emerald-300' : g.verdict === 'depth' ? 'border-amber-600/40 text-amber-700 dark:text-amber-300' : 'border-zinc-400/40 text-zinc-500'}`}
+                    >
+                      {g.base}: {g.verdict === 'mm' ? 'מייקר-מלא' : g.verdict === 'depth' ? 'בונה-עומק' : 'כבוי'} · {g.spreadBps}bps
+                    </Badge>
+                  ))}
+                </div>
+              </div>
             )}
 
             {/* ההחלטה-האחרונה — רכיב-ריצה-מאומת */}

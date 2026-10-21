@@ -1691,7 +1691,7 @@ export default function Home() {
       </header>
 
       {/* תוכן */}
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 pb-24 lg:pb-6 grid grid-cols-1 lg:grid-cols-5 gap-6">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 pb-24 lg:pb-6 grid grid-cols-1 lg:grid-cols-5 gap-6 overflow-x-hidden">
         {/* עמודת-צד: שיגור + שרשרת */}
         <div className="lg:col-span-2 space-y-6">
           <Card id="sec-dispatch" className="scroll-mt-20">
@@ -1806,7 +1806,7 @@ export default function Home() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="rounded-md border" dir="ltr">
+              <div className="overflow-x-auto rounded-md border" dir="ltr">
                 <table className="w-full text-[11px] font-mono">
                   <tbody>
                     {(
@@ -2450,7 +2450,7 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
               )}
 
               {ledger && ledger.recent.length > 0 && (
-                <div className="max-h-52 overflow-y-auto rounded-md border" dir="ltr">
+                <div className="max-h-52 overflow-x-auto overflow-y-auto rounded-md border" dir="ltr">
                   <table className="w-full text-[11px] font-mono">
                     <tbody>
                       {ledger.recent.map((e) => (

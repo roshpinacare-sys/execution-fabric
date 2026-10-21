@@ -18,6 +18,15 @@ export type CouncilCard = {
   directives: string[]
   thesisBreakers: string[]
   dataGaps: string[]
+  // Task 108: פרוטוקול-ההסלמה (agency-agents NEXUS §11.3) — פסק-danger חייב-בלוק-הסלמה:
+  // טריגר-מדיד · אפשרויות-פתרון · סמכות-הכרעה · דדליין. בלי-זה — הכרטיס-מוזרק-מכנית.
+  escalation: {
+    severity: 'danger'
+    trigger: string
+    resolutionOptions: string[]
+    authority: string
+    deadline: string
+  } | null
   raw: string
   llmMs: number
 }
@@ -34,6 +43,9 @@ const SYSTEM = `אתה מועצת-השולחן הריבונית של אורגנ�
 5. אין-דיוק-כוזב: אין-להמציא-מספרים-שלא-בראיות; אם-מקור-מת — אמור-זאת.
 6. ייעוץ-בלבד: אינך-יורה-פקודות. הנחיותיך הן-ייעוץ-למפעיל-ולמנהל-המכני.
 7. עברית-תמציתית-וברורה. אפס-קלישאות.
+8. פרוטוקול-ההסלמה: כאשר פסק-מנהל-הסיכון הוא danger — חובה-בלוק escalation מלא:
+   טריגר-מדיד, לפחות-שתי-אפשרויות-פתרון-קונקרטיות, סמכות-ההכרעה, ודדליין-מפורש.
+   פסק-danger בלי-הסלמה הוא-כרטיס-פסול.
 
 עליך-להשיב JSON תקין-בלבד, בלי-שום-טקסט-חוץ-מה-JSON, במבנה:
 {"verdict": "משפט-עברי-קצר-של-פסק-הדין",
@@ -43,7 +55,8 @@ const SYSTEM = `אתה מועצת-השולחן הריבונית של אורגנ�
  "risk": "החסרון-הכמותי: מה-יכול-להישבר-ובאיזה-גודל",
  "directives": ["הנחיה-ייעודית-1", "הנחיה-ייעודית-2"],
  "thesisBreakers": ["שובר-תזה-מדיד-1", "שובר-תזה-מדיד-2"],
- "dataGaps": ["מה-חסר-לך-בראיות-ולמה-זה-משנה"]}`
+ "dataGaps": ["מה-חסר-לך-בראיות-ולמה-זה-משנה"],
+ "escalation": null או {"severity": "danger", "trigger": "הממצא-המסוכן-המדיד", "resolutionOptions": ["אופציה-1", "אופציה-2"], "authority": "מי-רשאי-להכריע", "deadline": "מתי-חייבת-הכרעה"}}`
 
 function evidencePrompt(e: EvidenceBundle, r: GovernorRuling): string {
   const compact = {
@@ -107,6 +120,18 @@ function parseCard(raw: string, llmMs: number): CouncilCard {
   const arr = (v: unknown): string[] =>
     Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).slice(0, 6) : []
   const conf = typeof d.confidence === 'number' && d.confidence >= 0 && d.confidence <= 1 ? Math.round(d.confidence * 100) / 100 : null
+  // חילוץ-הגנתי-של-בלוק-ההסלמה (NEXUS)
+  let escalation: CouncilCard['escalation'] = null
+  const esc = d.escalation as Record<string, unknown> | null | undefined
+  if (esc && typeof esc === 'object' && !Array.isArray(esc)) {
+    escalation = {
+      severity: 'danger',
+      trigger: typeof esc.trigger === 'string' ? esc.trigger.slice(0, 400) : '',
+      resolutionOptions: arr(esc.resolutionOptions),
+      authority: typeof esc.authority === 'string' ? esc.authority.slice(0, 200) : 'מנהל-הסיכון-המכני · הבעלים-לחריגות-חוץ',
+      deadline: typeof esc.deadline === 'string' ? esc.deadline.slice(0, 120) : '',
+    }
+  }
   return {
     id: 0,
     at: new Date().toISOString(),
@@ -118,6 +143,7 @@ function parseCard(raw: string, llmMs: number): CouncilCard {
     directives: arr(d.directives),
     thesisBreakers: arr(d.thesisBreakers),
     dataGaps: arr(d.dataGaps),
+    escalation,
     raw: raw.slice(0, 4_000),
     llmMs,
   }

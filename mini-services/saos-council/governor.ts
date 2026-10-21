@@ -62,6 +62,18 @@ export function rule(e: EvidenceBundle, dexFailStreak: number, arbHaltedNow: boo
     }
   }
 
+  // 2b) בריאות-הארב-ורוחב-השוק (Task 108 — הראיות-שהמועצה-עצמה-ביקשה)
+  const a = e.arb
+  if (!a && e.sources.arb.ok) warn('איבר-הארב-נגיש אך ראיותיו-ריקות — חילוץ-נכשל')
+  if (a) {
+    if (a.halted) findings.push('איבר-הארב-מושהה (halt-flag חי)')
+    if (a.feedStale === true) warn('פיד-אמת-החוץ של-הארב מיושן — הפאריטי-שעליו-סוחרים עלול-להיות-רענון-שקר')
+    if (a.expansion && a.expansion.total) {
+      findings.push(`רוחב-הספר: ${a.expansion.twoSided ?? '?'}/${a.expansion.total} שווקים-דו-צדדיים; בוני-עומק-על: ${(a.expansion.depthMarkets ?? []).join(', ') || '—'}; ידיים-פעילות: ${a.expansion.handsActive ?? '?'}`)
+    }
+    if (a.mtmPnlMu !== null) findings.push(`MTM-הארב (sim-µ מתויג): ${a.mtmPnlMu}µ; מימושים-אחרונים: ${Object.entries(a.fillsByHand).map(([h, k]) => `${h}×${k}`).join(', ') || '0'}`)
+  }
+
   // 3) סוחרים-על-שוק-מת? (החלטה-מכנית-בלבד: השתקה-מונעת-של-הארב)
   if (THRESHOLDS.dexDeadWhileArbTrades) {
     if (!e.sources.dex.ok && e.sources.arb.ok && !arbHaltedNow && dexFailStreak >= 3) {

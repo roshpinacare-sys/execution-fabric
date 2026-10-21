@@ -125,6 +125,18 @@ async function councilCycle(): Promise<void> {
     const card = res as CouncilCard
     state.lastCardError = null
     state.lastCouncilMs = card.llmMs
+    // אכיפת-פרוטוקול-ההסלמה (Task 108 — NEXUS §11.3): פסק-danger בלי-בלוק-הסלמה
+    // מוזרק-מכנית-מהממצאים — אין-כרטיס-danger-שנמלט-מהכללים
+    if (ruling.verdict === 'danger' && !card.escalation) {
+      card.escalation = {
+        severity: 'danger',
+        trigger: ruling.findings.find((f) => f.startsWith('DANGER')) ?? ruling.findings[0] ?? '',
+        resolutionOptions: card.directives.length ? card.directives : ['בחינת-שורש-בקוד-האיבר-הכושל', 'השתקה-מכנית-מוגבלת-ודיווח-בכנות'],
+        authority: 'מנהל-הסיכון-המכני · הבעלים-לחריגות-חוץ',
+        deadline: new Date(Date.now() + 30 * 60_000).toISOString(),
+      }
+      ev('governor', `הסלמה-הוזרקה-מכנית (ה-Director-החסיר-אותה): ${card.escalation.trigger.slice(0, 120)}`)
+    }
     const r = db.query('INSERT INTO council_cards(at,verdict,confidence,payload) VALUES(?,?,?,?)').run(
       card.at, card.verdict, card.confidence, JSON.stringify(card),
     )

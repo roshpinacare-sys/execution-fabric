@@ -18,8 +18,10 @@ type Ruling = { verdict: string; findings: string[]; thresholds: { maxSideSkewPc
 type Evidence = {
   at: string
   sources: Record<string, SourceState>
-  quant: { openTotalSbd: number; exposureSkewPct: number | null; fillsTotal: number }
+  quant: { openTotalSbd: number; exposureSkewPct: number | null; fillsTotal: number; arbFillsTotal?: number; arbHandsActive?: number | null; arbMtmPnlMu?: number | null }
+  dex?: { twoSided: number | null; markets: number | null; avgTwoSidedSpreadBps: number | null } | null
 }
+type Escalation = { severity: string; trigger: string; resolutionOptions: string[]; authority: string; deadline: string }
 type Card = {
   id: number
   at: string
@@ -31,6 +33,7 @@ type Card = {
   directives: string[]
   thesisBreakers: string[]
   dataGaps: string[]
+  escalation?: Escalation | null
   llmMs: number
 }
 type Backtest = {
@@ -107,7 +110,7 @@ export function CouncilPanel() {
               {v.label}
             </Badge>
           )}
-          <Badge variant="outline" className="font-normal text-muted-foreground">Task 107 · AutoHedge+agency-agents מותאם</Badge>
+          <Badge variant="outline" className="font-normal text-muted-foreground">Task 107-108 · AutoHedge+agency-agents+NEXUS מותאם</Badge>
         </CardTitle>
         <CardDescription>
           ראיות-חיות מכל-איבר → פסק-מכני-קשיח → מועצת-Director (ייעוץ-בלבד, אף-פקודה-לא-יוצאת)
@@ -161,6 +164,17 @@ export function CouncilPanel() {
                   warn={ev.quant?.exposureSkewPct !== null && ev.quant?.exposureSkewPct !== undefined && Math.abs(ev.quant.exposureSkewPct) >= (ruling?.thresholds?.rebalanceSkewPct ?? 65)}
                 />
                 <Metric label="מימושים" value={String(ev.quant?.fillsTotal ?? '—')} />
+                <Metric
+                  label="רוחב-הספר"
+                  value={ev.dex?.twoSided != null && ev.dex?.markets != null ? `${ev.dex.twoSided}/${ev.dex.markets} דו-צדדיים` : '—'}
+                  warn={ev.dex?.twoSided != null && ev.dex?.markets != null && ev.dex.twoSided < ev.dex.markets}
+                />
+                <Metric label="ידיים-על-הדקס" value={ev.quant?.arbHandsActive != null ? String(ev.quant.arbHandsActive) : '—'} />
+                <Metric
+                  label="MTM-הארב (sim-µ)"
+                  value={ev.quant?.arbMtmPnlMu != null ? `${ev.quant.arbMtmPnlMu > 0 ? '+' : ''}${ev.quant.arbMtmPnlMu.toLocaleString('he-IL')}µ` : '—'}
+                  warn={(ev.quant?.arbMtmPnlMu ?? 0) < 0}
+                />
                 <div className="rounded-md border bg-muted/40 p-2">
                   <div className="text-[11px] text-muted-foreground">מקורות-הראיות</div>
                   <div className="mt-0.5 flex flex-wrap gap-1">
@@ -211,6 +225,25 @@ export function CouncilPanel() {
                         <li key={i}>{d}</li>
                       ))}
                     </ul>
+                  </div>
+                )}
+                {card.escalation && (
+                  <div className="mt-2 rounded-md border border-rose-600/40 bg-rose-600/10 p-2">
+                    <div className="mb-1 flex flex-wrap items-center gap-1.5 text-xs font-semibold text-rose-700 dark:text-rose-300">
+                      <ShieldAlert className="h-3.5 w-3.5" aria-hidden />
+                      בלוק-הסלמה (NEXUS) · סמכות: {card.escalation.authority}
+                      {card.escalation.deadline && (
+                        <span className="font-normal text-muted-foreground">· דדליין {new Date(card.escalation.deadline).toLocaleTimeString('he-IL')}</span>
+                      )}
+                    </div>
+                    {card.escalation.trigger && <p className="text-xs leading-relaxed text-rose-800 dark:text-rose-200">טריגר-מדיד: {card.escalation.trigger}</p>}
+                    {card.escalation.resolutionOptions?.length > 0 && (
+                      <ul className="mt-1 list-inside list-decimal space-y-0.5 text-xs text-muted-foreground">
+                        {card.escalation.resolutionOptions.map((o, i) => (
+                          <li key={i}>{o}</li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 )}
                 {(card.thesisBreakers?.length > 0 || card.dataGaps?.length > 0) && (
