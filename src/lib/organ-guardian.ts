@@ -38,6 +38,7 @@ const ORGANS: Array<{ name: string; probe: string; cwd: string }> = [
   { name: 'grid', probe: 'http://127.0.0.1:3070/health', cwd: join(ROOT, 'mini-services', 'saos-grid') }, // Task 105
   { name: 'arb', probe: 'http://127.0.0.1:3071/health', cwd: join(ROOT, 'mini-services', 'saos-arb') }, // Task 106
   { name: 'dex', probe: 'http://127.0.0.1:3010/saos-dex/api/dex/state', cwd: join(ROOT, 'repos', 'saos-dex') }, // Task 106 — השוק-שלנו
+  { name: 'council', probe: 'http://127.0.0.1:3072/health', cwd: join(ROOT, 'mini-services', 'saos-council') }, // Task 107 — מועצת-השולחן (AutoHedge+agency-agents מותאם)
 ]
 
 function logEvent(kind: string, msg: string): void {
@@ -98,7 +99,7 @@ export function ensureOrganGuardian(): void {
   if (m.timer) return
   m.timer = setInterval(() => void tick(), 60_000)
   void tick()
-  logEvent('boot', 'שומר-האיברים הוצת-בעץ-ה-3000-הנצחי (grid/arb/dex)')
+  logEvent('boot', 'שומר-האיברים הוצת-בעץ-ה-3000-הנצחי (grid/arb/dex/council)')
 }
 
 export function guardianStatus(): Record<string, unknown> {

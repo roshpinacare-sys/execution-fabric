@@ -1,0 +1,38 @@
+{
+  "_doc": "סגל-מועצת-השולחן הריבונית — אומץ-משני-מקורות-והותאם-לריבונות: מבנה-הצינור מ-AutoHedge (The-Swarm-Corporation: Director→Quant→Sentiment→Risk→Execution) וחוקי-המשמעת מ-agency-agents (msitarzewski, חטיבת-finance: Investment-Researcher + Financial-Analyst). התאמה-ריבונית: ה-Sentiment כאן הוא דופק-שוק-נגזר-ממספרים-אמיתיים (לא-חדשות), וה-Execution מכני-בלבד (ה-LLM-מייעץ-ואינו-יורה).",
+  "_license_sources": "AutoHedge: Apache-2.0 · agency-agents: MIT",
+  "pipeline": [
+    {
+      "role": "quant",
+      "kind": "mechanical",
+      "source": "AutoHedge QUANT_PROMPT (מותאם)",
+      "hebrew": "מנתח-כמותי: מספרים-אמיתיים-בלבד מאיברי-הגוף — מחיר-אמת, חשיפה, מימושים, פרמיה. אסור-להמציא-מספר; אסור-לדייק-מעבר-לנמדד."
+    },
+    {
+      "role": "market-pulse",
+      "kind": "mechanical",
+      "source": "AutoHedge SENTIMENT_PROMPT (הותאם-ריבונית)",
+      "hebrew": "דופק-השוק: תחליף-כנה-לרגשות-חדשות — נגזר-מהתנהגות-הספר-עצמו (כשלי-מקור, מימושים, זרימה). כשל-מקור הוא-ראיה, לא-תקלה-להסתרה."
+    },
+    {
+      "role": "risk-governor",
+      "kind": "mechanical",
+      "source": "AutoHedge RISK_PROMPT + MarketMakingConfig (max_inventory_exposure / rebalance_threshold / min_profit_threshold)",
+      "hebrew": "מנהל-סיכון: פסק-מכני-קשיח-קודם-לכל-שיחה. גבולות-מקודדים: חשיפה-צדית, כשלים-רצופים, שוק-מת. אין-שיקול-דעת-כאן."
+    },
+    {
+      "role": "director",
+      "kind": "llm",
+      "source": "AutoHedge DIRECTOR_PROMPT + agency-agents finance חוקי-משמעת",
+      "rules": [
+        "הצג-את-שני-הצדדים בריגורות-שווה: תזת-פרי ותזת-דוב — תמיכה-בלבד-בצד-אחד היא-שיווק, לא-מחקר (agency-agents: 'Always present both sides')",
+        "תזה-ניתנת-להפרכה: לכל-פסק-דין יש שוברי-תזה מדידים — אירועים-או-מספרים-שיהפכו-אותו (agency-agents: 'The best research is falsifiable')",
+        "כמת-את-החסרון: 'אפשר-לרדת' אינו-הערכת-סיכון; דרוש-תרחיש-חסרון-עם-גודל-מדיד (agency-agents: 'Quantify the downside')",
+        "הנחות-לפני-מסקנות: הצג-את-ההנחות-ואת-הנתונים-שחסרים-לך-במפורש (agency-agents: 'State your assumptions before your conclusions')",
+        "אין-דיוק-כוזב: אם-הנתון-גס, המספר-גס — 'דיוק-בלי-דיוק הוא רעש'",
+        "כנות-על-פערים: כשמקור-מת-או-חסר, זה-נאמר-בשמו-בגוף-הפסק — לא-מוסתר",
+        "ייעוץ-בלבד: המועצה-אינה-יורה-פקודות; היא-ממליצה-והמנהל-המכני-אוכף"
+      ]
+    }
+  ]
+}

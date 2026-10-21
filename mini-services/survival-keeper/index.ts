@@ -61,6 +61,7 @@ const METRICS_URL = 'http://127.0.0.1:3060/health' // Task 102 — איבר-המ
 const GRID_URL = 'http://127.0.0.1:3070/health' // Task 105 — איבר-הגריד (יד-המסחר-של-הגוף)
 const DEX_URL = 'http://127.0.0.1:3010/saos-dex/api/dex/state' // Task 106 — הדקס-הריבוני (השוק-שלנו)
 const ARB_URL = 'http://127.0.0.1:3071/health' // Task 106 — איבר-השוק-החריף (גריד+ארב על הדקס)
+const COUNCIL_URL = 'http://127.0.0.1:3072/health' // Task 107 — מועצת-השולחן (AutoHedge+agency-agents מותאם)
 
 interface WatchState {
   up: boolean
@@ -93,7 +94,7 @@ interface Event {
   msg: string
 }
 
-const watches: Record<'app' | 'heartbeat' | 'witness' | 'metrics' | 'grid' | 'dex' | 'arb', WatchState> = {
+const watches: Record<'app' | 'heartbeat' | 'witness' | 'metrics' | 'grid' | 'dex' | 'arb' | 'council', WatchState> = {
   app: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null },
   heartbeat: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null },
   witness: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null },
@@ -101,6 +102,7 @@ const watches: Record<'app' | 'heartbeat' | 'witness' | 'metrics' | 'grid' | 'de
   grid: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null }, // Task 105
   dex: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null }, // Task 106
   arb: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null }, // Task 106
+  council: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null }, // Task 107
 }
 
 const mirror: MirrorState = {
@@ -205,7 +207,7 @@ async function watchApp(): Promise<void> {
 
 // הלב, העד ואיבר-המדידה: מעקב + החייאה-עצמית
 async function watchService(
-  name: 'heartbeat' | 'witness' | 'metrics' | 'grid' | 'dex' | 'arb',
+  name: 'heartbeat' | 'witness' | 'metrics' | 'grid' | 'dex' | 'arb' | 'council',
   url: string,
 ): Promise<void> {
   const w = watches[name]
@@ -234,6 +236,7 @@ async function watchService(
     : name === 'grid' ? 'saos-grid' // Task 105
     : name === 'dex' ? path.join('repos', 'saos-dex') // Task 106 — הדקס-הריבוני (מהגיט; דוקטרינת-REVIVE)
     : name === 'arb' ? 'saos-arb' // Task 106 — איבר-השוק-החריף
+    : name === 'council' ? 'saos-council' // Task 107 — מועצת-השולחן
     : 'chain-witness'
   const dir = path.isAbsolute(dirName) ? dirName : path.join(PROJECT_ROOT, 'mini-services', dirName)
   try {
@@ -404,6 +407,7 @@ async function check(): Promise<void> {
     watchService('grid', GRID_URL), // Task 105 — הגריד נשמר-כמו-כולם
     watchService('dex', DEX_URL), // Task 106 — השוק-שלנו נשמר-כמו-כולם
     watchService('arb', ARB_URL), // Task 106 — השוק-החריף נשמר-כמו-כולם
+    watchService('council', COUNCIL_URL), // Task 107 — המועצה נשמרת-כמו-כולם
   ])
 }
 

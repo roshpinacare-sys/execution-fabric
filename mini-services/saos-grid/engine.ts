@@ -19,6 +19,7 @@ export type GridConfig = {
   reservePct: number // יתרת-חירום-שלא-נסחרת (%)
   maxOpenPerAccount: number
   requoteDriftPct: number // סטייה-מהמחיר-שמצדיקה-ביטול-והצבה-מחדש
+  maxSideSkewPct: number // Task-107 (AutoHedge: max_inventory_exposure) — אף-צד-לא-יותר-מ-%־זה מהחשיפה
 }
 export const CONFIG: GridConfig = {
   levels: num(envOf('GRID_LEVELS'), 4),
@@ -28,6 +29,7 @@ export const CONFIG: GridConfig = {
   reservePct: num(envOf('RESERVE_PCT'), 10),
   maxOpenPerAccount: num(envOf('MAX_OPEN_PER_ACCOUNT'), 10),
   requoteDriftPct: num(envOf('REQUOTE_DRIFT_PCT'), 1.5),
+  maxSideSkewPct: num(envOf('GRID_MAX_SIDE_SKEW_PCT'), 80),
 }
 function num(v: string | undefined, d: number): number {
   const n = parseFloat(v ?? '')
@@ -239,6 +241,22 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
     if (!bals.ok) throw new Error(`יתרות-לא-נקראו: ${bals.error}`)
     const live = mode()
 
+    // 4.5) מנהל-חשיפה (Task-107 — AutoHedge: max_inventory_exposure + rebalance):
+    // שקילות-המלאי-האמתי-של-הידיים; צד-כבד-מדי → תוכניות-הצד-השני-מקדימות-והכבד-נחסם.
+    // כנות: פסק-החשיפה נרשם-בכל-מחזור-שהושפע.
+    const found = bals.data.filter((b) => b.found)
+    const totalSteem = found.reduce((s2, b) => s2 + b.steem, 0)
+    const totalSbd = found.reduce((s2, b) => s2 + b.sbd, 0)
+    const steemVal = totalSteem * (m.mid ?? 0)
+    const basePct = steemVal + totalSbd > 0 ? (steemVal / (steemVal + totalSbd)) * 100 : 50
+    let skipSide: 'buy' | 'sell' | null = null
+    if (basePct > CONFIG.maxSideSkewPct) skipSide = 'buy' // כבד-ב-STEEM — אין-קניות-נוספות עד-איזון
+    else if (100 - basePct > CONFIG.maxSideSkewPct) skipSide = 'sell' // כבד-ב-SBD — אין-מכירות-נוספות
+    if (skipSide) {
+      decisions.push(`מנהל-חשיפה: STEEM=${basePct.toFixed(1)}% מהמלאי (סף-${CONFIG.maxSideSkewPct}%) → פקודות-${skipSide === 'buy' ? 'קנייה' : 'מכירה'}-מושהות-עד-איזון (AutoHedge-rebalance)`)
+      event('decision', { account: '*', side: skipSide, level: 0, price: m.mid!, amountSteem: 0, amountSbd: 0, mode: live, detail: `exposure-governor: basePct=${basePct.toFixed(1)}% skip=${skipSide}` })
+    }
+
     // 5) הקצאת-פסים-ללא-דריסות: רמה-L שייכת-לחשבון L%n (מוח-אחד, ידיים-מחולקות)
     const n = accounts.length
     const step = m.mid * (stepPct / 100)
@@ -252,6 +270,10 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
         decisions.push(`${acct}: חשבון-לא-נמצא-בשרשרת — מדולג`)
         continue
       }
+      // מנהל-החשיפה: הצד-הכבד-נחסם (Task-107)
+      if (skipSide === 'buy') {
+        decisions.push(`${acct}: קנייה-דחויה-בידי-מנהל-החשיפה`)
+      } else {
       // קנייה: עדכני-לגבי-יתרת-SBD-זמינה (כולל-הפקודות-הפתוחות-של-הרמה-הזאת)
       const sbdAvail = bal.sbd * (1 - CONFIG.reservePct / 100)
       const buySbd = Math.min(CONFIG.orderSizeSbd, sbdAvail)
@@ -260,12 +282,17 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
       } else {
         decisions.push(`${acct}: SBD-מתחת-לגודל-מינימלי (${bal.sbd.toFixed(2)} SBD, חירום ${CONFIG.reservePct}%)`)
       }
+      }
+      if (skipSide === 'sell') {
+        decisions.push(`${acct}: מכירה-דחויה-בידי-מנהל-החשיפה`)
+      } else {
       const steemAvail = bal.steem * (1 - CONFIG.reservePct / 100)
       const sellSteem = Math.min(CONFIG.orderSizeSteem, steemAvail)
       if (sellSteem >= 0.5) {
         plans.push({ account: acct, side: 'sell', level: L, price: sellPrice, amountSteem: sellSteem, amountSbd: sellSteem * sellPrice })
       } else {
         decisions.push(`${acct}: STEEM-מתחת-לגודל-מינימלי (${bal.steem.toFixed(3)} STEEM, חירום ${CONFIG.reservePct}%)`)
+      }
       }
     }
 
