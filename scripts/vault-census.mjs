@@ -29,6 +29,13 @@ const verdicts = [];
 const v = (area, ok, detail) => { verdicts.push({ area, ok, detail }); return { area, ok, detail }; };
 
 // ── 1. STEEM: הכספת-החיה — אימות-מול-השרשרת בפועל ──────────────────────────
+// [T-111·fix trace 1a15e3bf30e79311] השוואת-גוף-מפתח (33 בייטים) ולא-מחרוזת:
+// הקידוד-בשרשרת של-headcorner נושא-checksum שונה (כלי-יצירה-ישן) בעוד-גוף-הנקודה
+// על-העקומה זהה-ביט-ביט — חתימות-מאומתות. השוואת-מחרוזת גרמה לשקר "חסר/לא-חי".
+const A58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function stmBody(s) {
+  try { let n = 0n; for (const c of String(s).slice(3)) { const i = A58.indexOf(c); if (i < 0) return s; } n = 0n; for (const c of String(s).slice(3)) n = n * 58n + BigInt(A58.indexOf(c)); let h = n.toString(16); if (h.length % 2) h = '0' + h; const b = Buffer.from(h, 'hex'); return b.subarray(0, 33).toString('hex'); } catch { return s; }
+}
 async function censusSteem() {
   const path = join(UP, 'steem.env');
   if (!existsSync(path)) return v('steem', false, 'upload/steem.env נעדר — הרץ את PROCEDURE.md (upload/vault-rescue)');
@@ -37,44 +44,42 @@ async function censusSteem() {
   const accounts = (env.GRID_ACCOUNTS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
   const roles = [];
   for (const a of accounts) {
-    const key = env[`${a.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_ACTIVE_WIF`];
-    if (!key || key.length < 40) { v('steem', false, `${a}: אין-WIF-active בכספת`); continue; }
-    // אימות-שרשרת: נגזרת-פומבית מול סמכות-החיה (סמנטיקת-steem-js: גוף-33 mod n)
-    try {
-      const pub = await deriveSteemPub(key);
-      const res = await fetch('https://api.steemit.com', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', method: 'condenser_api.get_accounts', params: [[a]], id: 1 }), signal: AbortSignal.timeout(12_000) });
-      const acc = (await res.json()).result?.[0];
-      const live = !!acc && acc.active.key_auths.some((k) => k[0] === pub);
-      roles.push({ account: a, fingerprint: fp(key), pubPrefix: pub.slice(0, 12), liveAuthority: live });
-      v('steem', live, live ? `${a}: מפתח-active חי-מאומת-מול-השרשרת (${pub.slice(0, 12)}…)` : `${a}: המפתח-בכספת אינו בסמכות-החיה — הרץ-שחזור`);
-    } catch (e) { v('steem', false, `${a}: אימות-נכשל (${String(e).slice(0, 40)})`); }
+    const prefix = a.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+    let res = await fetch('https://api.steemit.com', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', method: 'condenser_api.get_accounts', params: [[a]], id: 1 }), signal: AbortSignal.timeout(12_000) });
+    const acc = (await res.json()).result?.[0];
+    if (!acc) { v('steem', false, `${a}: לא-נמצא-בשרשרת`); continue; }
+    const roleChecks = [];
+    for (const role of ['ACTIVE', 'POSTING', 'MEMO']) {
+      const key = env[`${prefix}_${role}_WIF`];
+      if (!key || key.length < 40) { roleChecks.push({ role: role.toLowerCase(), present: false, liveAuthority: false }); continue; }
+      try {
+        const pub = await deriveSteemPub(key);
+        const live = role === 'MEMO'
+          ? stmBody(acc.memo_key) === stmBody(pub)
+          : acc[role.toLowerCase()].key_auths.some((k) => stmBody(k[0]) === stmBody(pub));
+        roleChecks.push({ role: role.toLowerCase(), present: true, fingerprint: fp(key), pubPrefix: pub.slice(0, 12), liveAuthority: live });
+      } catch (e) { roleChecks.push({ role: role.toLowerCase(), present: true, liveAuthority: false, error: String(e).slice(0, 40) }); }
+    }
+    roles.push(...roleChecks.map((r) => ({ account: a, ...r })));
+    const present = roleChecks.filter((r) => r.present);
+    const liveN = present.filter((r) => r.liveAuthority).length;
+    v('steem', present.length > 0 && liveN === present.length,
+      liveN === present.length
+        ? `${a}: ${liveN}/${present.length} תפקידים-חיים-מאומתים-מול-השרשרת (השוואת-גוף-מפתח)`
+        : `${a}: ${liveN}/${present.length} בלבד-חיים — הרץ-שחזור (PROCEDURE.md)`);
   }
   return { roles };
 }
 
 // steem pubkey מ-WIF — תומך-ב-5-form הקנוני וב-52-char bitcoin-form (גוף-33 mod n)
-const A58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-const SECP_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
-function b58d(s) { let n = 0n; for (const c of s) { const i = A58.indexOf(c); if (i < 0) throw new Error('b58'); n = n * 58n + BigInt(i); } let h = n.toString(16); if (h.length % 2) h = '0' + h; return Buffer.from(h, 'hex'); }
+// [T-111·fix trace 1a15e3bf30e79311] WIF עובר ב-stdin אל helper-קובץ — לא ב-argv ולא
+// בהקמעה (הקמעת `bun -e` נשברה על-escape-ים וחשפה מפתח ב-/proc/*/cmdline).
 async function deriveSteemPub(wif) {
-  const { execSync } = await import('node:child_process');
-  const script = `
-    const { secp256k1 } = require('@noble/curves/secp256k1.js');
-    const { sha256 } = require('@noble/hashes/sha2.js');
-    const { ripemd160 } = require('@noble/hashes/ripemd160.js');
-    const A58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-    const N = ${SECP_N}n;
-    function b58d(s){let n=0n;for(const c of s){n=n*58n+BigInt(A58.indexOf(c));}let h=n.toString(16);if(h.length%2)h='0'+h;return Buffer.from(h,'hex');}
-    function b58e(b){let n=BigInt('0x'+Buffer.from(b).toString('hex'));let o='';while(n>0n){o=A58[Number(n%58n)]+o;n/=58n;}for(const c of b){if(c===0)o='1'+o;else break;}return o;}
-    const raw = b58d(${JSON.stringify(wif)});
-    let scalar;
-    if (raw.length === 38 && raw[0] === 0x80 && raw[33] === 0x01) scalar = Buffer.from((BigInt('0x'+raw.subarray(1,34).toString('hex')) % N).toString(16).padStart(64,'0'),'hex');
-    else scalar = raw.subarray(1,33);
-    const c33 = secp256k1.getPublicKey(scalar, true);
-    const chk = ripemd160(sha256(c33)).slice(0,4);
-    console.log('STM' + b58e(Buffer.concat([c33, chk])));
-  `;
-  return execSync(`cd ${join(ROOT, 'mini-services/saos-grid')} && bun -e ${JSON.stringify(script)}`, { encoding: 'utf8' }).trim();
+  const { execFileSync } = await import('node:child_process');
+  const out = execFileSync('bun', ['scripts/steem-pub-derive.cjs'], { input: wif + '\n', encoding: 'utf8', cwd: join(ROOT, 'mini-services/saos-grid') });
+  const pub = out.trim();
+  if (!/^STM[1-9A-HJ-NP-Za-km-z]{50,52}$/.test(pub)) throw new Error('derive-failed');
+  return pub;
 }
 
 // ── 2. GITHUB PAT ────────────────────────────────────────────────────────────

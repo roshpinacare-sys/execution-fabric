@@ -6,6 +6,8 @@
       "name": "saos-grid",
       "dependencies": {
         "@hiveio/dhive": "1",
+        "@noble/curves": "1.9.7",
+        "@noble/hashes": "1.8.0",
       },
     },
   },
@@ -13,6 +15,10 @@
     "@ecency/bytebuffer": ["@ecency/bytebuffer@6.0.0", "", { "dependencies": { "long": "~3" } }, "sha512-rGPjzD7a7cPtMHjpJEtLMt/RmqX8XK25tN5qjuu9iaDMK/Ril86CecU5DN/TXEMUQMY1p6b2cVvKBLTdFMr2DA=="],
 
     "@hiveio/dhive": ["@hiveio/dhive@1.3.6", "", { "dependencies": { "@ecency/bytebuffer": "^6.0.0", "bigi": "^1.4.2", "bs58": "^4.0.1", "core-js": "^3.6.4", "cross-fetch": "^3.0.4", "ecurve": "^1.0.6", "https": "^1.0.0", "jsbi": "^3.1.4", "node-fetch": "^2.6.0", "ripemd160": "^2.0.2", "secp256k1": "^3.8.0", "verror": "^1.10.0", "whatwg-fetch": "^3.0.0" } }, "sha512-d+uNzuIArqoI30IKGpV93JRU/p3LPUY3pmrQqmNb8Iiowd5KxCZ4LIT8gIFQw16OoGKuQ2tY3LXkUBxNb1gWhQ=="],
+
+    "@noble/curves": ["@noble/curves@1.9.7", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-gbKGcRUYIjA3/zCCNaWDciTMFI0dCkvou3TL8Zmy5Nc7sJ47a0jtOeZoTaMxkuqRo9cRhjOdZJXegxYE5FN/xw=="],
+
+    "@noble/hashes": ["@noble/hashes@1.8.0", "", {}, "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="],
 
     "assert-plus": ["assert-plus@1.0.0", "", {}, "sha512-NfJ4UzBCcQGLDlQq7nHxH+tv3kyZ0hHQqF5BO6J7tNJeP5do1llPr8dZ8zHonfhAu0PHAdMkSo+8o0wxg9lZWw=="],
 
