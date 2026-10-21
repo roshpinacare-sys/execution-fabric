@@ -237,7 +237,10 @@ async function watchService(
     : 'chain-witness'
   const dir = path.isAbsolute(dirName) ? dirName : path.join(PROJECT_ROOT, 'mini-services', dirName)
   try {
-    const child = Bun.spawn(['bun', 'run', 'dev'], {
+    // לקח-חי (Task 106): spawn עם 'bun' רק-מסתמך-על-PATH-של-ההורה (ENOENT נמדד);
+    // וגם posix_spawn-ישיר-של-הבינארי-נכשל-ENOENT-מהתהליך-הזה (נמדד-חי) —
+    // מעטפת-/bin/sh פותרת (שלוש-שכבות-ניסיון-מתועדות: יחסי → מוחלט → מעטפת).
+    const child = Bun.spawn(['/bin/sh', '-c', `cd '${dir}' && exec /usr/local/bin/bun run dev`], {
       cwd: dir,
       stdin: 'ignore',
       stdout: 'ignore',
