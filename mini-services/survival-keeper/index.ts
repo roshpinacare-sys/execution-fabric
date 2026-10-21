@@ -58,6 +58,7 @@ const APP_URL = 'http://127.0.0.1:3000'
 const HEARTBEAT_URL = 'http://127.0.0.1:3031/health'
 const WITNESS_URL = 'http://127.0.0.1:3050/health'
 const METRICS_URL = 'http://127.0.0.1:3060/health' // Task 102 — איבר-המדידה (הוחזר מהמתים)
+const GRID_URL = 'http://127.0.0.1:3070/health' // Task 105 — איבר-הגריד (יד-המסחר-של-הגוף)
 
 interface WatchState {
   up: boolean
@@ -90,11 +91,12 @@ interface Event {
   msg: string
 }
 
-const watches: Record<'app' | 'heartbeat' | 'witness' | 'metrics', WatchState> = {
+const watches: Record<'app' | 'heartbeat' | 'witness' | 'metrics' | 'grid', WatchState> = {
   app: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null },
   heartbeat: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null },
   witness: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null },
   metrics: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null }, // Task 102
+  grid: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null }, // Task 105
 }
 
 const mirror: MirrorState = {
@@ -123,7 +125,7 @@ function loadState(): void {
       events?: Event[]
     }
     if (typeof s.ticks === 'number') ticks = s.ticks
-    for (const key of ['app', 'heartbeat', 'witness', 'metrics'] as const) {
+    for (const key of ['app', 'heartbeat', 'witness', 'metrics', 'grid'] as const) {
       const p = s.watches?.[key]
       if (p) Object.assign(watches[key], p, { up: false, fails: 0 }) // רעננות-חיים-מתחילה-מאפס; הראיות-נשמרות
     }
@@ -198,7 +200,7 @@ async function watchApp(): Promise<void> {
 }
 
 // הלב, העד ואיבר-המדידה: מעקב + החייאה-עצמית
-async function watchService(name: 'heartbeat' | 'witness' | 'metrics', url: string): Promise<void> {
+async function watchService(name: 'heartbeat' | 'witness' | 'metrics' | 'grid', url: string): Promise<void> {
   const w = watches[name]
   w.lastCheckAt = new Date().toISOString()
   const up = await probe(url)
@@ -220,7 +222,10 @@ async function watchService(name: 'heartbeat' | 'witness' | 'metrics', url: stri
     return
   }
   const dirName =
-    name === 'heartbeat' ? 'fabric-heartbeat' : name === 'metrics' ? 'saos-metrics' : 'chain-witness' // Task 102
+    name === 'heartbeat' ? 'fabric-heartbeat'
+    : name === 'metrics' ? 'saos-metrics'
+    : name === 'grid' ? 'saos-grid' // Task 105
+    : 'chain-witness'
   const dir = path.join(PROJECT_ROOT, 'mini-services', dirName)
   try {
     const child = Bun.spawn(['bun', 'run', 'dev'], {
@@ -384,6 +389,7 @@ async function check(): Promise<void> {
     watchService('heartbeat', HEARTBEAT_URL),
     watchService('witness', WITNESS_URL),
     watchService('metrics', METRICS_URL), // Task 102 — המדיד נשמר-כמו-כולם
+    watchService('grid', GRID_URL), // Task 105 — הגריד נשמר-כמו-כולם
   ])
 }
 

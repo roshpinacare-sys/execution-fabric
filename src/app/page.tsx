@@ -28,6 +28,7 @@ import { MagnitudeMeter } from '@/components/MagnitudeMeter'
 import { SovereigntyMeter } from '@/components/SovereigntyMeter'
 import { LivePulse } from '@/components/LivePulse'
 import { FlowGuard } from '@/components/FlowGuard'
+import { GridPanel } from '@/components/GridPanel'
 import { OperatorGate } from '@/components/OperatorGate'
 import {
   Network,
@@ -2473,6 +2474,9 @@ curl -s http://127.0.0.1:3000/api/batches/a1b2c3d4e5f6`}</code>
 
           {/* מגן-הזרימה (Task 104): איפה-הזרימה-נחסמת-עכשיו — פסק-דין-חי-מנומק; הסוף-של-סתימות-שקטות */}
           <FlowGuard />
+
+          {/* גריד-הריבונות (Task 105): היד-המסחרת-על-השוק-המקומי-של-Steem — צל→חי אוטומטי, אפס-דריסות */}
+          <GridPanel />
 
           {/* שער-התפעול-האוטונומי (Task 43): הדף כמשטח-תפעול — לאוטונומיה ולבעלים כאחד */}
           <OperatorGate />
