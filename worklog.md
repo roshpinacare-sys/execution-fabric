@@ -2364,3 +2364,22 @@ Work Log:
 Stage Summary:
 - The sovereignty law is now architectural: auto-halts self-lift, zombie flags are extinct, the chain regenerates its DB lineage from the git-corroborated snapshot, the grid actively rebalances, and the council's mechanical verdict follows the healing in real time. Three zombie-states killed at the root; every fix proven by a live drill in production, not by a claim.
 - Artifacts: mini-services/saos-arb/index.ts (self-revival + revivals.jsonl), repos/saos-dex/src/lib/dex/chain.ts (stale-DB-birth acceptance), mini-services/saos-grid/engine.ts (REBALANCE_TILT placement+requote), receipts in state files. Pushed to both repos.
+
+---
+Task ID: 116
+Agent: Z.ai Code (orchestrator)
+Task: "תמשיך ודחוף" — diagnose why activity looked dead; fix all failures to the highest level; more volume/profitability/smarter flow.
+
+Work Log:
+- LIVE PROBE (00:39-00:52Z): all 9 organs alive (8 bun services + next app). Grid: mode=live, cycling every ~45s, NOT halted. Dex chain h1,142,011+, liveOrders=18. Arb 86 cycles clean. Vault census 00:54Z allClear=true, steemOk=true, law="no-missing-keys-state-exists" — key sovereignty verified live.
+- ROOT CAUSE #1 (measured in blood): fill-dedup blackout. In the last 24h only 10 UNIQUE chain fills existed but 283 fill-events were recorded (one single fill re-recorded 192×, 16× per cycle). The "honesty" loop for untracked fills had NO persistent ledger — it re-fired every cycle for every fill in the 24h history window. This poisoned every metrics consumer (council verdicts, volume dashboards) with 96% phantom data — the direct mechanical answer to "why do I see no real activity".
+- FIX #1 (live-drilled): new fill_ledger table in saos-grid/state (key = account:orderid:chainAt:side:steem:sbd — survives partial fills of the same orderid). Honesty loop now records each history op exactly ONCE, forever, across restarts. One-time idempotent cleanup purged 470 historical duplicate rows with an open receipt event in grid_events. Verified post-restart: 15 unique ops → 15 ledger rows, zero repeat events across 3+ cycles and a code-change restart.
+- ROOT CAUSE #2 (measured): the 6-second fill loop mystery — fills with orderid family 1500000045/47/49 (step +2, 6s apart, identical 10.151 STEEM @0.10176) are DISTINCT chain ops from ANOTHER runner sharing headcorner (orderid families 1.5e9 buys + 2.1e9 sells requote near mid). Task-113's level=-9 monitor-only adoption already handles them without authority collision. The grid's own orderids are 1792xxx (Date.now-based).
+- MARKET TRUTH (measured 00:48Z): external STEEM=$0.0553 (coinpaprika fresh), SBD=$0.5017 (coingecko live) → parity identityLine=0.1101 SBD/STEEM — the grid's floor is CORRECT. Internal mid 0.1018 = 7.6% BELOW parity. Structural freeze is doctrinal and sound: buys blocked by exposure governor (STEEM-heavy skew), sells pinned at parity floor (never sell below external value). FixedFloat rail: 401 "Not have permission" (vendor-side, patient per owner directive — ff probe stays in the loop).
+- FIX #2 (efficiency/volume): TILT_QTY_BOOST (env GRID_TILT_QTY_BOOST, default ×2.5, clamp 1..4) — when the balancing-side sell ladder is active under heavy skew, each rung now carries 25 STEEM instead of 10 (live: 25.00ST orders at floor 0.11060). More depth at external value = more volume captured when real buyers lift the book, within all commitments caps.
+- FIX #3 (observability): untracked-fill events now carry orderid + chain-time → every record is cross-examinable against the ledger and the chain.
+- HYGIENE: eslint.config.mjs now ignores **/*.cjs (the Task-114 secp shim is CommonJS by design) — lint green.
+
+Stage Summary:
+- The "dead activity" was (a) 96% phantom fill records drowning the real signal + (b) a doctrinally-correct structural gap (parity floor above mid) with FixedFloat 401 closing the external drain. Both now engineered: truth restored via fill_ledger (one op = one record, purged history, receipts), volume deepened via TILT_QTY_BOOST at parity, every fill event now carries its chain identity. Census 5/5, arb clean, dex chain producing, grid live. Pushed.
+- Artifacts: mini-services/saos-grid/engine.ts (fill_ledger + cleanup + boost + event identity), eslint.config.mjs, worklog Task-116.

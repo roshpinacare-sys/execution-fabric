@@ -577,7 +577,7 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
             db.query('INSERT INTO fill_ledger(k,account,orderid,at,side,price,amount_steem,amount_sbd,recorded_at) VALUES(?,?,?,?,?,?,?,?,?)').run(
               lk, n, f.orderid, f.at, f.side, f.price, f.steem, f.sbd, new Date().toISOString(),
             )
-            event('fill', { account: n, side: f.side, level: 0, price: f.price, amountSteem: f.steem, amountSbd: f.sbd, mode: 'live', detail: 'מילוי-אמיתי-שלא-היה-במעקב (נרשם-מההיסטוריה, בלי-נגד; פנקס-Task-116)' })
+            event('fill', { account: n, side: f.side, level: 0, price: f.price, amountSteem: f.steem, amountSbd: f.sbd, mode: 'live', detail: `מילוי-אמיתי-שלא-היה-במעקב (נרשם-מההיסטוריה, בלי-נגד; פנקס-Task-116); orderid=${f.orderid}; שרשרת=${f.at}` })
           }
         } else {
           decisions.push(`היסטוריית-מילויים-לא-נקראה (${n}): ${fillsRes.error} — סגירת-נעלמים-נדחית`)
