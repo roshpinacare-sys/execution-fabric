@@ -345,11 +345,11 @@
     },
     "137": {
       "audioPath": "sovereign/site/audio/improvement-137.wav",
-      "sizeBytes": 1160976,
+      "sizeBytes": 1441296,
       "voice": "tongtong",
       "speed": 1,
-      "textChars": 89,
-      "narratedAt": "2026-10-21T06:06:15.666Z",
+      "textChars": 151,
+      "narratedAt": "2026-10-22T00:49:42.568Z",
       "worker": "sdk-tts:tongtong"
     },
     "143": {

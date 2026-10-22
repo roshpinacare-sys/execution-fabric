@@ -34,6 +34,10 @@ export type GridConfig = {
 // התיקון: בעת-חוסר-איזון, הצד-המאזן מתקרב-למרכז (×TILT) → המרה-פעילה-עד-איזון;
 // רצפת-המכירה (קו-זהות+buffer) נשמרת — אף-מכירה-מתחת-לערך-החוץ גם-בטייה.
 const REBALANCE_TILT = num(envOf('GRID_REBALANCE_TILT'), 0.34)
+// Task-116: הגברת-כמות-בצד-המאזן — כשהסטייה-קיצונית, סולם-המכירות-ברצפה הוא-הרגל
+// היחידה-שמנבילה-נזילות-בערך-חוץ; כמות-גדולה-יותר-לכל-רמה = יותר-ווליום-שנמדד
+// כשקונים-אמיתיים-מגיעים. חסום: ×4 מקסימום, תקרת-מחויבות-ויתרה-נשמרות.
+const TILT_QTY_BOOST = Math.min(4, Math.max(1, num(envOf('GRID_TILT_QTY_BOOST'), 2.5)))
 export const CONFIG: GridConfig = {
   levels: num(envOf('GRID_LEVELS'), 4),
   stepPct: num(envOf('GRID_STEP_PCT'), 0.75),
@@ -141,6 +145,32 @@ db.exec(`CREATE TABLE IF NOT EXISTS grid_orders (
   mode TEXT NOT NULL
 )`)
 db.exec(`CREATE TABLE IF NOT EXISTS grid_meta (k TEXT PRIMARY KEY, v TEXT)`)
+// Task-116: פנקס-מילויים-ראשי — זהות-אופ-היסטוריה. מדידה-חיה 00:34-00:42Z: 10-מילויים-
+// אמיתיים-נרשמו-283-פעמים (מילוי-אחד=192-רשומות) כי-לולאת-הכנות-לא-זכרה-מה-נרשם.
+// מפתח: חשבון+orderid+זמן-שרשרת+צד+כמויות — סובל-מילויים-חלקיים-חוזרים-של-אותו-orderid.
+db.exec(`CREATE TABLE IF NOT EXISTS fill_ledger (
+  k TEXT PRIMARY KEY,
+  account TEXT NOT NULL,
+  orderid INTEGER NOT NULL,
+  at TEXT NOT NULL,
+  side TEXT NOT NULL,
+  price REAL NOT NULL,
+  amount_steem REAL NOT NULL,
+  amount_sbd REAL NOT NULL,
+  recorded_at TEXT NOT NULL
+)`)
+// Task-116 ניקוי-חד-פעמי-עמיד: מחיקת-רשומות-המילוי-הכפולות-מהעבר (נשמר-הראשון-מכל
+// קבוצה-זהה), עם-קבלה-גלויה. אידמפוטנטי — אחרי-הניקוי-הראשון אפס-שינויים.
+try {
+  const del = db.query("DELETE FROM grid_events WHERE kind='fill' AND detail LIKE '%שלא-היה-במעקב%' AND id NOT IN (SELECT MIN(id) FROM grid_events WHERE kind='fill' AND detail LIKE '%שלא-היה-במעקב%' GROUP BY account, side, price, amount_steem, amount_sbd)").run()
+  if (del.changes > 0) {
+    console.log(`[saos-grid] Task-116 ניקוי-חד-פעמי: ${del.changes} רשומות-מילוי-כפולות-נמחקו (נשמר-ראשון-מכל-קבוצה)`)
+    db.query("INSERT INTO grid_events(at,account,side,level,price,amount_steem,amount_sbd,kind,mode,detail) VALUES(?,?,?,?,?,?,?,?,?,?)").run(
+      new Date().toISOString(), '*', 'buy', 0, 0, 0, 0, 'decision', 'live',
+      `Task-116-ניקוי-פנקס: ${del.changes} רשומות-כפולות-נמחקו; מעתה פנקס-fill_ledger מבטיח מילוי-אחד=רשומה-אחת`,
+    )
+  }
+} catch { /* כנות: ניקוי-לא-קריטי */ }
 
 // Task-113 תיקון-חד-פעמי-עמיד: שורות-שאומצו-לפני-הפרדת-הסמכויות (level=0 אבל
 // לא-הוצבו-על-ידי-המנוע) → מסומנות level=-9 (מעקב-בלבד). זיהוי-הפקודות-שלנו:
@@ -534,13 +564,20 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
               canceled++
             }
           }
-          // כנות: מילויים-היסטוריים-של-פקודות-שלא-היו-במעקב — נרשמים, בלי-נגדים
+          // כנות: מילויים-היסטוריים-של-פקודות-שלא-היו-במעקב — נרשמים, בלי-נגדים.
+          // Task-116: פנקס-fill_ledger — מילוי-אחד-בהיסטוריה = רשומה-אחת-לנצח.
+          // מדידה-חיה: בלי-הפנקס, מילוי-אחד-נרשם-192-פעמים וזיהם-מדדים-ומועצה.
           const recent = fillsRes.data.filter((f) => Date.now() - new Date(f.at + 'Z').getTime() < 24 * 3600_000)
           for (const f of recent) {
             const everTracked = db.query('SELECT 1 FROM grid_orders WHERE orderid=?').get(`live:${f.orderid}:${n}`)
-            if (!everTracked && !chainIds.has(f.orderid)) {
-              event('fill', { account: n, side: f.side, level: 0, price: f.price, amountSteem: f.steem, amountSbd: f.sbd, mode: 'live', detail: 'מילוי-אמיתי-שלא-היה-במעקב (נרשם-מההיסטוריה, בלי-נגד)' })
-            }
+            if (everTracked || chainIds.has(f.orderid)) continue
+            const lk = `${n}:${f.orderid}:${f.at}:${f.side}:${f.steem.toFixed(6)}:${f.sbd.toFixed(6)}`
+            const seen = db.query('SELECT 1 FROM fill_ledger WHERE k=?').get(lk)
+            if (seen) continue
+            db.query('INSERT INTO fill_ledger(k,account,orderid,at,side,price,amount_steem,amount_sbd,recorded_at) VALUES(?,?,?,?,?,?,?,?,?)').run(
+              lk, n, f.orderid, f.at, f.side, f.price, f.steem, f.sbd, new Date().toISOString(),
+            )
+            event('fill', { account: n, side: f.side, level: 0, price: f.price, amountSteem: f.steem, amountSbd: f.sbd, mode: 'live', detail: 'מילוי-אמיתי-שלא-היה-במעקב (נרשם-מההיסטוריה, בלי-נגד; פנקס-Task-116)' })
           }
         } else {
           decisions.push(`היסטוריית-מילויים-לא-נקראה (${n}): ${fillsRes.error} — סגירת-נעלמים-נדחית`)
@@ -598,7 +635,9 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
         const sellFloor = floor ?? m.bestAsk ?? m.mid!
         let sellPrice2 = Math.max(sellPrice, sellFloor) // מדיניות: לעולם-לא-מתחת-לרצפה
         const steemAvail = Math.min(bal.steem * (1 - CONFIG.reservePct / 100), commitCap)
-        const sellSteem = Math.min(CONFIG.orderSizeSteem, steemAvail)
+        // Task-116: הגברת-כמות-בצד-המאזן (טיית-פעילה) — יותר-עומק-בערך-חוץ
+        const boost = tiltSell ? TILT_QTY_BOOST : 1
+        const sellSteem = Math.min(CONFIG.orderSizeSteem * boost, steemAvail)
         if (sellSteem >= MIN_ORDER_STEEM && !hasNear('sell', sellPrice2)) {
           plans.push({ account: acct, side: 'sell', level: L, price: sellPrice2, amountSteem: sellSteem, amountSbd: sellSteem * sellPrice2 })
           plannedSellByAcct.set(acct, (plannedSellByAcct.get(acct) ?? 0) + sellSteem)
