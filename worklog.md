@@ -2383,3 +2383,22 @@ Work Log:
 Stage Summary:
 - The "dead activity" was (a) 96% phantom fill records drowning the real signal + (b) a doctrinally-correct structural gap (parity floor above mid) with FixedFloat 401 closing the external drain. Both now engineered: truth restored via fill_ledger (one op = one record, purged history, receipts), volume deepened via TILT_QTY_BOOST at parity, every fill event now carries its chain identity. Census 5/5, arb clean, dex chain producing, grid live. Pushed.
 - Artifacts: mini-services/saos-grid/engine.ts (fill_ledger + cleanup + boost + event identity), eslint.config.mjs, worklog Task-116.
+
+---
+Task ID: 117
+Agent: Z.ai Code (orchestrator)
+Task: "תמשיך ודחוף" — continue Task-116: smarter flow, doctrine violations, anchor hardening.
+
+Work Log:
+- Task-116 VERIFIED IN PRODUCTION: fill_ledger 15→30 rows (15 NEW real fills, each recorded EXACTLY once — the old code would have written hundreds of duplicates in the same span). Dedup law holds across restarts.
+- DOCTRINE VIOLATION CAUGHT LIVE (01:04Z): external-anchor crash (binance IP-ban + coingecko 429) → identityLine=null → old code's floor collapsed to bestAsk → real sells placed at 0.1026-0.1044, BELOW parity (0.1101) — violating "never sell below external value".
+- FIX (three layers, measured live 01:08Z): (1) market.ts multi-source STEEM anchor: binance→coingecko→coinpaprika (all three probed live; parity 0.1103 confirmed by two independent sources); (2) last-known-good anchor persisted to state/marks.json with 24h validity — floor survives feed outages (disk anchor marked stale, re-probes live every 60s); (3) engine fail-closed: NO anchor = absolute sell-ban (floor can never collapse to bestAsk again). Floor restored live: identity 0.11033, floor 0.11088, ladder L0-L3 at 25ST×4 at floor.
+- FIX (healing): below-floor purge in requote section — any OWN open sell below floor is lifted to floor regardless of drift threshold (the crash-window sells sat at 1.1% drift < 1.5% threshold and would never have healed). Purge bypasses the exposure-governor skip (lifting to floor IS the healing direction) but respects Task-113 authority separation (-9 orders untouched).
+- OTHER-RUNNER FACTS (measured, not attributed): ~200 STEEM of below-parity sells (49.5ST @0.1027-0.1030, orderid family 179263098x — same epoch scheme but ZERO place-events in our DB) + tiny 1.4ST family-21e9 sells + the 6-second 1.5e9 buy-bot (orderid 1500000045/47/49, 10.151ST @0.10176). Task-113 law holds: monitor-only, never touched. Fills recorded honestly with chain identity.
+- TREASURY TRUTH (chain-measured 01:12Z): headcorner liquid = 56.08 STEEM + 0.108 SBD. The buy-bot has exhausted the SBD (converted to ~200 STEEM at 7.6% below parity). Grid buys structurally impossible until the ladder sells at floor (100 STEEM × 0.1109 = +11 SBD potential) or operator funds. This is the honest constraint — no invented liquidity.
+- INTERNAL DRAIN RAIL REJECTED (honest engineering): /api/dex/wrap is operator-level 1:1 mint/burn, and dex price-proof verdicts USDS coverage 2% = "FAKE-PEG", WSTEEM backing NEGATIVE (-60,664Mu). Building a STEEM→WSTEEM→USDS drain on a fake-peg economy would realize fake value — refused. Honest realization channels: real book at ≥floor (live), FixedFloat external rail (401 vendor-side, probe stays in loop).
+- Council card 45 (00:54Z) verdict aligns: extreme-risk on sell-exposure — the tilt+floor mechanism IS the balancing action.
+
+Stage Summary:
+- The anchor-crash doctrine violation was caught live and killed at root: multi-source + disk anchor + fail-closed + below-floor purge. The floor now survives any single-feed outage for 24h and can never silently degrade to book-ask. Dedup verified holding in production. Internal drain rail honestly rejected (FAKE-PEG). Treasury truth documented (SBD exhausted by the buy-bot — ladder at floor is the recovery path). Pushed.
+- Artifacts: mini-services/saos-grid/market.ts (3-source anchor + marks.json persistence), mini-services/saos-grid/engine.ts (fail-closed + below-floor purge), worklog Task-117.
