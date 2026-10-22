@@ -129,6 +129,36 @@ function writeAtomic(p: string, data: string): void {
   renameSync(tmp, p)
 }
 
+// ── Task-115: החייה-עצמית לעצירות-אוטומטיות ─────────────────────────────────────
+// הלקח-החי (22:10Z): dex נפל-רגעית → halt-אוטומטי → dex חזר — והדגל-נשאר-לנצח.
+// השומר-החייא-את-התהליך-אך-לא-את-הדגל → איבר-שלם-מת-מת-זומבי. התיקון-מהשורש:
+// halt-אוטומטי = השהיה-מגנה שמתרוממת-מעצמה כשהגורם-חוזר (הוכחה-חיה בכל-החייה).
+// halt-ידני ('manual', kill-switch של-הבעלים) = נשאר-עד-המשך-מפורש — החייה-אוטונומית
+// אינה-עוקפת החלטת-בעלים (כנות-סמכות).
+function readHaltReason(): string {
+  try {
+    return (JSON.parse(readFileSync(HALT_PATH, 'utf-8')) as { reason?: string }).reason ?? 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+let lastRevivalAt: string | null = null
+let lastProtectLogAt = 0
+const logThrottled = (m: string, ms = 300_000): void => {
+  const now = Date.now()
+  if (now - lastProtectLogAt >= ms) {
+    lastProtectLogAt = now
+    log(m)
+  }
+}
+function writeRevival(msg: string): void {
+  lastRevivalAt = new Date().toISOString()
+  try {
+    appendFileSync(join(STATE_DIR, 'revivals.jsonl'), JSON.stringify({ at: lastRevivalAt, msg }) + '\n')
+  } catch { /* קבלה-מקומית */ }
+  log('▶️ ' + msg)
+}
+
 async function jget<T>(url: string, timeoutMs = 8000): Promise<T | null> {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), cache: 'no-store' })
@@ -436,7 +466,24 @@ function mtmPnl(st: DexState | null, card: RunCard): number {
 }
 
 async function cycle(): Promise<void> {
-  if (halted) return
+  if (halted) {
+    // Task-115: החייה-עצמית — halt-אוטומטי מתרומם-מעצמו כשהגורם-חוזר; kill-switch-ידני נשאר.
+    const reason = readHaltReason()
+    if (reason === 'manual') {
+      logThrottled('kill-switch-ידני-פעיל — נשאר-עצור (החייה-אוטונומית-אינה-עוקפת החלטת-בעלים)')
+      return
+    }
+    const g0 = await gather().catch(() => null)
+    if (!g0?.dex?.state) {
+      logThrottled(`השהיה-מגנה — dex עדיין-לא-נגיש (סיבת-halt: ${reason}; נבדק-שוב-במחזור-הבא)`)
+      return
+    }
+    try { unlinkSync(HALT_PATH) } catch { /* כבר-נקי */ }
+    halted = false
+    consecErrors = 0
+    lastError = null
+    writeRevival(`החייה-עצמית: הגורם (dex) חזר-לחיים — halt.auto('${reason}') הוסר; האיבר-ממשיך-מעצמו (אפס-אדם)`)
+  }
   const g = await gather()
   const st = g.dex
   if (!st || !st.state) {
@@ -529,6 +576,9 @@ function healthJson(): Record<string, unknown> {
     port: PORT,
     role: 'איבר-השוק-החריף: גריד+ארביטראז על הספר של הדקס-הריבוני, מחובר-לאמת-חוץ-מדידה',
     startedAt, cycles, lastCycleAt, halted,
+    haltReason: halted ? readHaltReason() : null,
+    lastRevivalAt,
+    selfRevival: 'auto-halts lift themselves when the cause lifts; manual kill-switch stays (Task-115)',
     consecErrors, lastError,
     hands: HANDS,
     minEdgeBps: MIN_EDGE_BPS,

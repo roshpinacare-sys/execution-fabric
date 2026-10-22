@@ -27,6 +27,13 @@ export type GridConfig = {
   requoteDriftPct: number // סטייה-מהמחיר-שמצדיקה-ביטול-והצבה-מחדש
   maxSideSkewPct: number // Task-107 (AutoHedge: max_inventory_exposure) — אף-צד-לא-יותר-מ-%־זה מהחשיפה
 }
+
+// Task-115: טיית-איזון פעילה (AutoHedge: rebalance_threshold פעיל ולא סביל).
+// הלקח-החי (00:1xZ): בסטייה-קיצונית (STEEM=97%) המנהל-רק-חוסם-את-הצד-ההפוך —
+// והסולם-המאזן נשאר במרחק-מלא-מהמרכז → לא-נמדד-כלום → הסטייה-קפואה-שעות → מועצה-danger.
+// התיקון: בעת-חוסר-איזון, הצד-המאזן מתקרב-למרכז (×TILT) → המרה-פעילה-עד-איזון;
+// רצפת-המכירה (קו-זהות+buffer) נשמרת — אף-מכירה-מתחת-לערך-החוץ גם-בטייה.
+const REBALANCE_TILT = num(envOf('GRID_REBALANCE_TILT'), 0.34)
 export const CONFIG: GridConfig = {
   levels: num(envOf('GRID_LEVELS'), 4),
   stepPct: num(envOf('GRID_STEP_PCT'), 0.75),
@@ -550,8 +557,11 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
     const plannedSellByAcct = new Map<string, number>()
     for (let L = 0; L < CONFIG.levels; L++) {
       const acct = accounts[L % n].name
-      const buyPrice = m.mid - step * (L + 1)
-      const sellPrice = m.mid + step * (L + 1)
+      // Task-115: טיית-איזון — הצד-המאזן מתקרב-למרכז כשהחשיפה-קיצונית
+      const tiltSell = basePct > CONFIG.maxSideSkewPct
+      const tiltBuy = 100 - basePct > CONFIG.maxSideSkewPct
+      const buyPrice = m.mid - step * (L + 1) * (tiltBuy ? REBALANCE_TILT : 1)
+      const sellPrice = m.mid + step * (L + 1) * (tiltSell ? REBALANCE_TILT : 1)
       const bal = bals.data.find((b) => b.account === acct)
       if (!bal?.found) {
         decisions.push(`${acct}: חשבון-לא-נמצא-בשרשרת — מדולג`)
