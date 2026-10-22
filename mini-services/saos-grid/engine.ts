@@ -125,6 +125,10 @@ export function fingerprint(): string {
 }
 
 // ── מצב-עמיד (sqlite WAL) ────────────────────────────────────────────────────
+// Task-120 חוק-היתום: פעולות-git שמחליפות קבצי-מצב (stash/checkout/rebase) משאירות
+// את חיבור-ה-DB של המודול-הישן על inode מחוק — הכתיבה-הבאה הולכת-לאיבוד. ריפוי:
+// העתקת ה-WAL/SHM מה-fd החי (/proc/PID/fd) אל-הדיסק ואז רילוד-תוכן (לא touch —
+// bun משווה-תוכן) כדי-שהמודול-החדש ייפתח על האמת. נמדד-חי 03:03Z.
 mkdirSync(join(import.meta.dir, 'state'), { recursive: true })
 const db = new Database(join(import.meta.dir, 'state', 'grid.db'))
 db.exec('PRAGMA journal_mode = WAL')
