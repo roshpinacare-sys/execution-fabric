@@ -401,6 +401,8 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
     if (skipSide) {
       decisions.push(`מנהל-חשיפה: STEEM=${basePct.toFixed(1)}% מהמלאי (נזיל+נעול, סף-${CONFIG.maxSideSkewPct}%) → פקודות-${skipSide === 'buy' ? 'קנייה' : 'מכירה'}-מושהות-עד-איזון (AutoHedge-rebalance)`)
       event('decision', { account: '*', side: skipSide, level: 0, price: m.mid!, amountSteem: 0, amountSbd: 0, mode: live, detail: `exposure-governor: basePct=${basePct.toFixed(1)}% skip=${skipSide}` })
+      // Task-115: איזון-פעיל — לא-רק-חסימה-סבילה; הצד-המאזן מתקרב-למרכז
+      decisions.push(`טיית-איזון (Task-115): הצד-המאזן (${skipSide === 'buy' ? 'מכירות' : 'קניות'}) מתקרב-למרכז ×${REBALANCE_TILT} — המרה-פעילה-עד-איזון; רצפת-קו-הזהות-נשמרת`)
     }
 
     // 4.6) הגירת-צל→חי (Task-113): פקודות-צל-פתוחות-על-ידיים-עם-מפתח — משודרות-או-נסגרות.
@@ -665,8 +667,13 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
         if (!acct?.wif) continue
         if ((o.side === 'buy' && skipSide === 'buy') || (o.side === 'sell' && skipSide === 'sell')) continue
         // יעד-מדרגה (עם-רצפה-למכירה — קו-זהות, ואם-אין-מדידה: bestAsk הקיים)
+        // Task-115: יעד-הקיזוז מקבל-את-אותה-טיית-איזון — פקודות-רחוקות-נמשכות-למרכז-בעת-חוסר-איזון
         const levelForTarget = o.level >= 0 ? o.level : 0
-        let target = o.side === 'sell' ? m.mid! + step * (levelForTarget + 1) : m.mid! - step * (levelForTarget + 1)
+        const rebalSell = basePct > CONFIG.maxSideSkewPct
+        const rebalBuy = 100 - basePct > CONFIG.maxSideSkewPct
+        let target = o.side === 'sell'
+          ? m.mid! + step * (levelForTarget + 1) * (rebalSell ? REBALANCE_TILT : 1)
+          : m.mid! - step * (levelForTarget + 1) * (rebalBuy ? REBALANCE_TILT : 1)
         if (o.side === 'sell') target = Math.max(target, floor ?? m.bestAsk ?? m.mid!)
         if (Math.abs(target - o.price) <= o.price * 0.0005) continue // כבר-ביעד
         const chainId = Number(o.orderid.split(':')[1])
