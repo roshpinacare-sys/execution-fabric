@@ -247,7 +247,10 @@ async function provisionOrgan(name: string, dir: string): Promise<{ provisioned:
   // ג'-דקס: סכמת-prisma חייבת-להיות-מסונכרנת לפני-עלייה
   if (name === 'dex') {
     const hasDb = existsSync(path.join(dir, 'db', 'dex.db'))
-    const p = await shellOut('bun run db:push 2>&1', dir, 300_000)
+    // Task-126 (שיעור-דם-חי 12:46+12:56): DATABASE_URL-יורש-מהפלטפורמה (מצביע-על-db-הראשי!)
+    // גובר-על-.env-וגרם-לשני-אירועי-השחתה-של-סכמת-הפנקס. דריסה-מוטמעת-בשורת-הפקודה
+    // מנצחת-כל-ירושה — ה-dex ידחוף-רק-אל-dex.db-שלו, לעולם-לא-אל-הפנקס-הראשי.
+    const p = await shellOut(`DATABASE_URL='file:${dir}/db/dex.db' bun run db:push 2>&1`, dir, 300_000)
     if (!p.ok) return { provisioned: false, detail: `db:push נכשל: ${p.out.split('\n').slice(-1)[0] ?? '?'}` }
     steps.push(hasDb ? 'db:push ✓' : 'db:push (db-חדש) ✓')
   }

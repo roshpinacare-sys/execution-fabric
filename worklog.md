@@ -2572,3 +2572,18 @@ Work Log:
 Stage Summary:
 - The system survived a platform-level rollback and now carries an immune response to it: any filesystem regression is detected at the next pulse and converged to origin/main without touching the live ledger; the dex's own repo is cloned by name (not the fabric); all 10 organs alive; the true chain (2336, witness-verified) is both on disk and on origin.
 - Artifacts: heartbeat convergence law (Task-126), repos/saos-dex restored from its own github, this worklog, chain at 2336 with full witness verification.
+
+---
+Task ID: 126-b
+Agent: Z.ai Code (orchestrator)
+Task: recovery continuation — main-ledger schema destruction (self-inflicted ×2), root-cause, hardening.
+
+Work Log:
+- SECOND CATASTROPHE CAUGHT AND ROOT-CAUSED (honesty law, no hiding): my own `bun run db:push` inside repos/saos-dex (12:46, then again 12:56 with a .env I added) pushed the DEX's prisma schema onto the MAIN ledger db — TWICE. Mechanism proven by env-trace: the agent shell session inherits DATABASE_URL=file:/home/z/my-project/db/custom.db (platform-provided); a REAL env var overrides both bun's .env loading and prisma's .env fallback, so the dex clone's own .env was silently ignored and --accept-data-loss dropped LedgerEntry both times. Evidence: /proc/<dex-pid>/environ correct (dex app itself never at fault); `bun -e` in the clone prints the main-db URL; prisma with DATABASE_URL= (empty) errors instead of falling back to .env.
+- DOUBLE RECOVERY, both blob-verified before swap: db restored from ceb648f (12:55) → re-clobbered at ~12:56 → restored again from 6ebd87a recovery commit (12:59). Each time: VACUUM-verified blob → file swap → POST /api/admin/db-reconnect → witness 2336/2336 verified no-break (head 4b3eee51, identical across both recoveries — zero chain loss).
+- HARDENING (defense in depth): (1) keeper provisionOrgan('dex') now runs db:push with inline `DATABASE_URL='file:<dexdir>/db/dex.db'` — inline env beats ANY inheritance; the keeper can never again push the dex schema at the main ledger (this exact code path was a loaded gun during every future revive). (2) repos/saos-dex/.env written with absolute isolated path (belt-and-suspenders for non-inheriting contexts). (3) dex.db received its own schema via a SAFE push (inline env) — dex.db went 0→5 tables; main db verified intact AFTER the push (2337 rows — the live chain already signing forward: 2336+1).
+- LEDGER ARTERY STATUS: chain at 2337 and growing (live write observed post-restore), witness green, app engine re-bound, taskCount 576.
+
+Stage Summary:
+- Two self-inflicted schema destructions were caught within minutes, root-caused to an inherited env var defeating .env precedence, fully recovered from git blobs with bit-identical chain heads, and the loaded gun (keeper dex provision) was disarmed with an inline-env law. The main ledger is now protected from every known path: platform rollback (pulse-start convergence law, Task-126) AND cross-project db:push inheritance (inline env law, Task-126-b).
+- Artifacts: survival-keeper provisionOrgan hardening, repos/saos-dex/.env isolation, dex.db schema push (isolated), this worklog, chain 2337 witness-verified.
