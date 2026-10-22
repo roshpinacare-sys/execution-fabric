@@ -18,8 +18,12 @@ export function proxy(req: NextRequest) {
     if (verdict.via === 'private-net') {
       const secSite = (req.headers.get('sec-fetch-site') || '').toLowerCase()
       const origin = req.headers.get('origin') || ''
-      const siteOrigin = req.nextUrl.origin
-      const crossSite = secSite === 'cross-site' || (origin && origin !== siteOrigin)
+      // Task-121 fix-2: השוואת-host-בלבד (ה-Origin-של-דפדפן-ראשון תמיד נושא את-הhost-של-הניווט,
+      // וה-Host-של-הבקשה זהה-לו — ישירות-או-מאחורי-ה-Caddy שמשמר-Host). nextUrl.origin איננו
+      // מהימן ב-dev (127.0.0.1 מול localhost). תוקף-חוצה-מקור: Origin-host ≠ Host-header.
+      const originHost = (() => { try { return new URL(origin).host } catch { return '' } })()
+      const hostHeader = req.headers.get('host') || ''
+      const crossSite = secSite === 'cross-site' || (!!origin && !!hostHeader && originHost !== hostHeader)
       if (crossSite) {
         return NextResponse.json(
           {
