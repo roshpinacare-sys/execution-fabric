@@ -419,6 +419,23 @@ function git(args: string[]): { ok: boolean; out: string } {
   return { ok: p.exitCode === 0, out: `${p.stdout ?? ''}${p.exitCode === 0 ? '' : '\n' + (p.stderr ?? '')}` }
 }
 
+// ===== עד-ראש-אמת (Task 130): ls-remote מול-origin עצמו =====
+// כש-API-הריצות-הרחוק חסום (api:404 — חסימת-חיוב, סמכות-בעלים בלבד, חוק-אדום),
+// השער-הרחוק לא הופך לעד-שקט: ls-remote מול-גיטהאב מוכיח את-עורק-הדחיפה מקצה-לקצה.
+function remoteHeadWitness(): string | null {
+  try {
+    const r = git(['ls-remote', 'origin', 'main'])
+    if (!r.ok) return null
+    const remoteHead = (r.out.split('\n')[0] ?? '').split('\t')[0]?.trim() ?? ''
+    if (!/^[0-9a-f]{40}$/i.test(remoteHead)) return null
+    const localHead = git(['rev-parse', 'HEAD']).out.trim()
+    if (remoteHead === localHead) return 'ok — origin/main==HEAD (עד-גיטהאב-חי; API-הריצות-חסום-חיוב — סמכות-בעלים)'
+    return `origin/main ${remoteHead.slice(0, 7)} != local ${localHead.slice(0, 7)} — ממתין-לפעימת-הדחיפה`
+  } catch {
+    return null
+  }
+}
+
 // ===== פתרון-קונפליקט-db עצמי (Task 27) — הוכחת-הכלה מהשרשרת, אפס-שערות =====
 
 // נתיבים-בקונפליקט (unmerged) בזמן-rebase. רשימה-ריקה = אין-קונפליקט-מסומן או-כשל-סטטוס.
@@ -937,7 +954,8 @@ async function remoteGatePulse(): Promise<void> {
       signal: AbortSignal.timeout(15_000),
     })
     if (!res.ok) {
-      state.lastRemoteGateResult = `api:${res.status}`
+      // לקח-חי (Task 130): חסימת-API לא-משתיקה-את-העד — ls-remote נותן עדות-אמת על-הרחוק
+      state.lastRemoteGateResult = remoteHeadWitness() ?? `api:${res.status}`
       return
     }
     const j = (await res.json()) as { total_count?: number; workflow_runs?: Array<{ status?: string; conclusion?: string | null; head_sha?: string; created_at?: string }> }
@@ -1542,7 +1560,9 @@ async function selftestPulse(): Promise<void> {
   try {
     const res = await fetch(`${APP_URL}/api/sovereign/ops/selftest`, {
       method: 'POST',
-      signal: AbortSignal.timeout(120_000), // selftest כולל drill — נותנים-רשת
+      // לקח-חי (Task 130): הדריל-עצמו לקח 123.6ש' בחיים — 120ש' חתכו-את-הפסק-הכנה באמצע-העדות
+      // ("socket closed" במקום-האמת). 240ש' נותנים-לאמת להגיע שלמה.
+      signal: AbortSignal.timeout(240_000),
     })
     if (res.status === 200) {
       const d = (await res.json()) as {
@@ -1698,7 +1718,10 @@ async function gapEvolutionPulse(distanceToTarget: number, gapTitle: string): Pr
       body: JSON.stringify({ mode: 'gap' }),
       signal: AbortSignal.timeout(180_000), // ירי-LLM אמיתי — נותנים-רשת
     })
-    const d = (await res.json().catch(() => ({}))) as { ok?: boolean; taskId?: string; error?: string; proposal?: { title?: string } }
+    // לקח-חי (Task 130): גוף-תשובה יכול-להיות null (JSON-null) — קריאת `d.error` על-null קורסת
+    // ("null is not an object (evaluating 'd.error')" — נמדד-חי בפעימת-הפער). הגנה-עצמית.
+    const rawGap: unknown = await res.json().catch(() => null)
+    const d = (rawGap && typeof rawGap === 'object' ? rawGap : {}) as { ok?: boolean; taskId?: string; error?: string; proposal?: { title?: string } }
     if (res.status === 201 && d.ok) {
       state.lastGapEvolutionResult = `הוזרמה-הצעת-סגירת-פער: "${d.proposal?.title ?? '?"'}" (taskId=${d.taskId ?? '?'}) — ממד: ${gapTitle}`
       log(`סגירת-פער-עצמית: ${state.lastGapEvolutionResult}`)

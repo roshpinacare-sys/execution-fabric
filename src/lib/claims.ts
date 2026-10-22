@@ -191,6 +191,8 @@ async function claimRemoteGate(h: HeartJson): Promise<{ status: ClaimStatus; evi
   // או 'completed/success…' (ירוק-כלשהו; הלב מדליק-אזהרה-משלו רק על FAILED-on-our-head וקודם-להכל).
   // הפער-כנה בין-השניים בראייה — הראש-המקומי-חדש מהריצה הוא-מצב-רגיל (דלתא-db לא-מפעילה-runs).
   if (r === 'ok') return { status: 'active', evidence: 'הריצה-הרחוקה ירוקה על-הראש-שלנו' }
+  // לקח-חי (Task 130): עד-גיטהאב-חי (ls-remote) — העורק הוכח מקצה-לקצה גם-כש-API-הריצות חסום-חיוב (סמכות-בעלים)
+  if (r.startsWith('ok —')) return { status: 'active', evidence: short(r) }
   if (r.startsWith('completed/success')) return { status: 'active', evidence: 'הריצה-הרחוקה ירוקה (ראש-מקומי חדש מהריצה — מצב-רגיל)' }
   return { status: 'degraded', evidence: short(r) }
 }
