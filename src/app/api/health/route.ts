@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { ensureOrganGuardian, guardianStatus } from '@/lib/organ-guardian'
+import { resolveOperator } from '@/lib/operator'
 import { spawn } from 'node:child_process'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -91,19 +92,30 @@ async function reviveOrgans(): Promise<Record<string, string>> {
   return out
 }
 
-export async function GET() {
-  // שומר-האיברים (Task 106): מוצת-על-כל-דופק-בריאות — הלב דופק כל-5ש', אפס-תלות-באתחול
-  try {
-    ensureOrganGuardian()
-  } catch {
-    /* השומר-אינו-מפיל-את-בריאות-האפליקציה */
-  }
-  // Task 112: החייאה-החיה-של-כל-האיברים — בתוך-העץ-הנצחי (ראה-כותרת-למעלה)
+export async function GET(req: Request) {
+  // Task-121 audit fix (fingerprint api/health:GET-public-organ-spawn-and-guardian-boot):
+  // קריאת-בריאות = פומבית-לקריאה בלבד. הפעלת-השומר והחייאת-איברים (spawn + setInterval +
+  // כתיבת-guardian.log) הן פעולות-מצב — נאכפות-עתה מאחורי resolveOperator (לולאה-מקומית
+  // או מפתח-בעלים). דופק-פנימי (heartbeat/guardian, אין-XFF → direct-local) ממשיך-לעבוד.
   let revival: Record<string, string> = {}
   try {
-    revival = await reviveOrgans()
+    const verdict = resolveOperator(req.headers)
+    if (verdict.allowed) {
+      // שומר-האיברים (Task 106): מוצת-על-דופק-בריאות-מורשה — הלב דופק כל-5ש', אפס-תלות-באתחול
+      try {
+        ensureOrganGuardian()
+      } catch {
+        /* השומר-אינו-מפיל-את-בריאות-האפליקציה */
+      }
+      // Task 112: החייאה-החיה-של-כל-האיברים — בתוך-העץ-הנצחי (ראה-כותרת-למעלה)
+      try {
+        revival = await reviveOrgans()
+      } catch {
+        /* החייאה-אינה-מפילה-את-בריאות-האפליקציה */
+      }
+    }
   } catch {
-    /* החייאה-אינה-מפילה-את-בריאות-האפליקציה */
+    /* שער-הסמכות-אינו-מפיל-בריאות */
   }
   try {
     await db.$queryRaw`SELECT 1`

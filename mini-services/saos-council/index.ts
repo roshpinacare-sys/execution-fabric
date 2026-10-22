@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import { gatherEvidence, type EvidenceBundle } from './evidence'
 import { rule, type GovernorRuling } from './governor'
 import { deliberate, type CouncilCard } from './council'
+import { organAuth, organTokenValue } from '../organ-auth'
 
 const PORT = Number(process.env.PORT ?? 3072)
 const EVIDENCE_MS = Number(process.env.EVIDENCE_MS ?? 60_000) // סבב-ראיות (חינם) — כל-דקה
@@ -60,6 +61,9 @@ const state = {
   lastError: null as string | null,
 }
 
+// Task-121 audit fix: שומר-טיסה-בודדה ל-/deliberate
+let councilRunning = false
+
 // ── פעולות-מכניות-מוגבלות ────────────────────────────────────────────────────
 async function mechanicalHaltArb(reason: string): Promise<void> {
   if (Date.now() - state.lastMechanicalHaltAt < HALT_COOLDOWN_MS) {
@@ -69,7 +73,12 @@ async function mechanicalHaltArb(reason: string): Promise<void> {
   state.lastMechanicalHaltAt = Date.now()
   state.mechanicalHaltCount++
   try {
-    const res = await fetch('http://127.0.0.1:3071/halt', { method: 'POST', signal: AbortSignal.timeout(4_000) })
+    // Task-121 audit fix: הקריאה-הפנימית-המורשית מצרפת-כותרת-הסמכות (שער-האיבר-בארב)
+    const res = await fetch('http://127.0.0.1:3071/halt', {
+      method: 'POST',
+      headers: { 'x-saos-organ': organTokenValue() },
+      signal: AbortSignal.timeout(4_000),
+    })
     ev('action', `השתקה-מכנית-של-הארב (${res.ok ? 'OK' : `HTTP-${res.status}`}): ${reason}`)
   } catch (e) {
     ev('action', `כשל-השתקת-ארב: ${e instanceof Error ? e.message : String(e)} — דווח-בכנות`)
@@ -215,7 +224,16 @@ const server = Bun.serve({
         return Response.json({ ok: true, verdict: state.lastGovernorVerdict, evidence: state.lastEvidenceAt })
       }
       if (p === '/deliberate' && req.method === 'POST') {
-        void councilCycle().then(() => ev('council', 'מועצה-מיידית-בדרישה-הושלמה'))
+        // Task-121 audit fix (fingerprint saos-council.deliberate.unauth-llm-spend.no-concurrency-guard):
+        // שער-סמכות + טיסה-בודדה: כל-POST הוא-הוצאה-אמיתית-של-ה-LLM — נדרש-סוכן-מורשה,
+        // ורק-סבב-אחד-רץ-בו-זמנית (בלי-guard סבבים-מתנגשים-ב-DB ובתקציב)
+        const deny = organAuth(req)
+        if (deny) return deny
+        if (councilRunning) return Response.json({ ok: false, error: 'council-busy' }, { status: 429 })
+        councilRunning = true
+        void councilCycle()
+          .then(() => ev('council', 'מועצה-מיידית-בדרישה-הושלמה'))
+          .finally(() => { councilRunning = false })
         return Response.json({ ok: true, note: 'מועצה-מוזנקת — הכרטיס-יחי-ב-/state תוך-דקות' })
       }
       return Response.json({ ok: false, error: 'not found' }, { status: 404 })

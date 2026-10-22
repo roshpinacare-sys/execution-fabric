@@ -11,6 +11,28 @@ export function proxy(req: NextRequest) {
   const verdict = resolveOperator(req.headers, req.headers.get('x-real-ip') || undefined)
 
   if (verdict.allowed) {
+    // Task-121 audit fix (fingerprint api/mutations:private-net-xff-csrf-no-origin-binding):
+    // כריכת-מקור למוטציות-רשת-פרטית: כתובת-ה-IP-היא-הוכחה-סביבתית-שהדפדפן נושא אותה בצלב-
+    // אתר (CSRF). דפדפן-ראשון-משלח Sec-Fetch-Site: cross-site או Origin-זר → נדחה. סקריפטים/
+    // curl בלי-כותרות-אלה ממשיכים-לעבוד; direct-local (לולאה-מקומית) נשאר-כפי-שהוא.
+    if (verdict.via === 'private-net') {
+      const secSite = (req.headers.get('sec-fetch-site') || '').toLowerCase()
+      const origin = req.headers.get('origin') || ''
+      const siteOrigin = req.nextUrl.origin
+      const crossSite = secSite === 'cross-site' || (origin && origin !== siteOrigin)
+      if (crossSite) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: 'cross-site-mutation-rejected',
+            via: verdict.via,
+            at: new Date().toISOString(),
+            hint: 'מוטציה-ממקור-צולב נדחית (Task-121): יש-לקרוא מאותו-מקור או לצרף x-operator-key',
+          },
+          { status: 403 },
+        )
+      }
+    }
     const res = NextResponse.next()
     res.headers.set('x-operator-via', verdict.via)
     return res

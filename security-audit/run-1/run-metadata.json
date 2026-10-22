@@ -1,0 +1,68 @@
+{
+  "run_id": "my-project-run-1",
+  "repo": "my-project",
+  "target": "/home/z/my-project",
+  "source_ref": "main @ e461e5d (worktree dirty with live state DBs only: db/custom.db, mini-services/*/state/*.db-shm|wal)",
+  "profile": "standard",
+  "scope_paths": [
+    "Caddyfile",
+    "src/app/api",
+    "src/lib",
+    "src/app/page.tsx",
+    "src/components",
+    "mini-services/saos-grid",
+    "mini-services/saos-dex",
+    "mini-services/saos-council",
+    "mini-services/saos-metrics",
+    "mini-services/fabric-heartbeat",
+    "mini-services/vault-guardian",
+    "mini-services/survival-keeper",
+    "mini-services/chain-witness",
+    "mini-services/saos-arb"
+  ],
+  "budget": null,
+  "execution_policy": "source-only",
+  "execution_policy_note": "The required OS-enforced sandbox (empty allowlisted env, no external network, scratch-only writes, explicit resource limits for target-controlled processes) is NOT available in this environment. Per SKILL.md universal execution safety, no target-controlled code is executed. All checks are method:source. Any decisive runtime fact is needs_validation with blocker sandbox_unavailable. Parent-side zero-dependency validators (validate-coverage-ledger.cjs, validate-findings.cjs) are trusted tooling, not target code.",
+  "selected_companion_files": [
+    "ATTACK-CLASSES.md",
+    "WEB-PROTOCOL-AND-AUTH.md",
+    "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+    "AI-AND-LLM.md",
+    "SUPPLY-CHAIN-AND-RELEASE.md",
+    "DATA-ISOLATION-AND-LIFECYCLE.md",
+    "CLIENT-SIDE.md",
+    "PROTOCOLS-RPC-AND-MESSAGING.md"
+  ],
+  "prior_runs": [],
+  "prior_run_note": "No prior compatible coverage-ledger.json or findings.json exists for this repo (checked /home/z/security-audit-skill/my-project/). This run seeds run-1; later runs must read run-1 artifacts as prior input.",
+  "shared_file_owners": {
+    "run-metadata.json": "parent",
+    "architecture.md": "parent",
+    "coverage-ledger.json": "parent",
+    "findings.json": "parent",
+    "REPORT.md": "parent",
+    "FINDINGS-DETAIL.md": "parent",
+    "NEEDS-VALIDATION.md": "parent"
+  },
+  "recon_mode": "parent-direct",
+  "recon_mode_justification": "The parent (Z.ai Code orchestrator) holds live, source-verified knowledge of this target from Tasks 107-120 recorded in the target's worklog.md, including every subsystem boundary, the gateway topology, organ ports, state-file lifecycle, and key-custody surfaces. Reconnaissance facts recorded in architecture.md were re-verified by direct source reads at run start (gateway matcher, api family inventory, middleware absence, operator-key sample). Reconnaissance agents were therefore not spent; the budget went to isolated hunters, a fresh post-wave critic, and fresh verifiers.",
+  "secret_material_law": "Hunters and verifiers must NEVER read, copy, print, or transmit secret VALUES (private keys, .env values, tokens). Paths, key NAMES, and counts only. Any finding that would require quoting a secret value is described by name and location only.",
+  "run_status": "complete",
+  "completed_at": "2026-10-22T04:53:13.492Z",
+  "results": {
+    "units": 14,
+    "covered": 5,
+    "candidate": 9,
+    "fingerprints": 14,
+    "confirmed": 9,
+    "needs_validation": 4,
+    "rejected": 0,
+    "validators": {
+      "coverage_ledger": "PASS",
+      "findings": "PASS"
+    },
+    "fixes_applied": 9,
+    "fixes_deferred": 1,
+    "owner_decisions": 4
+  }
+}

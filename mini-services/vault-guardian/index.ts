@@ -14,6 +14,7 @@
 import { join } from 'node:path';
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { drill, heal, runCensus, ROOT } from './recover';
+import { organAuth } from '../organ-auth';
 
 const PORT = Number(process.env.PORT ?? 3080);
 const CENSUS_MS = Number(process.env.CENSUS_MS ?? 10 * 60_000); // כל-10 דק'
@@ -123,16 +124,24 @@ const server = Bun.serve({
       try { return Response.json(JSON.parse(await Bun.file(RECEIPT).text())); } catch { return Response.json({ ok: false, error: 'no-receipt-yet' }, { status: 404 }); }
     }
     if (p === '/census' && req.method === 'POST') {
+      // Task-121 audit fix (fingerprint vault-guardian.heal-census-drill.zero-auth-custody-ops):
+      // פעולות-משמורת-מפתחות נדרשות-סמכות — כשל-סגור בהיעדר-טוקן
+      const deny = organAuth(req);
+      if (deny) return deny;
       await censusCycle();
       return Response.json({ ok: true, census: state.lastCensus, lastHeal: state.lastHeal });
     }
     if (p === '/heal' && req.method === 'POST') {
+      const deny = organAuth(req);
+      if (deny) return deny;
       const h = await heal();
       state.lastHeal = { at: new Date().toISOString(), needed: true, afterAllClear: (h as { after?: { allClear?: boolean } })?.after?.allClear ?? null };
       publishReceipt();
       return Response.json({ ok: true, ...(h as object) });
     }
     if (p === '/drill' && req.method === 'POST') {
+      const deny = organAuth(req);
+      if (deny) return deny;
       const d = await drill();
       state.lastDrill = { at: new Date().toISOString(), ok: (d as { ok?: boolean }).ok === true };
       publishReceipt();

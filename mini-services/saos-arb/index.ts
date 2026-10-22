@@ -21,6 +21,7 @@
 import { readFileSync, existsSync, appendFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { gateMarkets, gateSummary, type MarketRow } from './markets'
+import { organAuth } from '../organ-auth'
 
 const PORT = Number(process.env.SAOS_ARB_PORT ?? 3071)
 const ROOT = join(import.meta.dir, '..', '..')
@@ -606,12 +607,18 @@ Bun.serve({
       }
     }
     if (p === '/halt' && req.method === 'POST') {
+      // Task-121 audit fix (fingerprint saos-arb.halt-resume.no-authority.kill-switch-override):
+      // שער-סמכות — kill-switch אינו-אנונימי; ה-bind-מקומי איננו גבול (0.0.0.0 + שער-ה-Caddy)
+      const deny = organAuth(req)
+      if (deny) return deny
       halted = true
       writeAtomic(HALT_PATH, JSON.stringify({ at: new Date().toISOString(), reason: 'manual' }))
       log('🛑 kill-switch: הופעל-ידנית')
       return Response.json({ ok: true, halted: true })
     }
     if (p === '/resume' && req.method === 'POST') {
+      const deny = organAuth(req)
+      if (deny) return deny
       halted = false
       consecErrors = 0
       try { unlinkSync(HALT_PATH) } catch { /* כבר-נקי */ }

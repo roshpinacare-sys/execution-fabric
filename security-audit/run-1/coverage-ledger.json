@@ -1,0 +1,2077 @@
+[
+  {
+    "coverage_id": ".env%20presence%2C%20key%20configuration%20paths%2C%20vault-guardian%2C%20secretscan::src%2Flib%2Fsecretscan.ts%20%2B%20mini-services%2Fvault-guardian%20%2B%20process%20env%20plumbing::secrets::Secret%20custody%3A%20leakage%20channels%20into%20repo%2C%20logs%2C%20API%20responses%2C%20UI",
+    "canonical_refs": {
+      "surface": ".env presence, key configuration paths, vault-guardian, secretscan",
+      "boundary": "src/lib/secretscan.ts + mini-services/vault-guardian + process env plumbing",
+      "subsystem": "secrets",
+      "attack_class": "Secret custody: leakage channels into repo, logs, API responses, UI"
+    },
+    "surface": ".env presence, key configuration paths, vault-guardian, secretscan",
+    "boundary": "src/lib/secretscan.ts + mini-services/vault-guardian + process env plumbing",
+    "subsystem": "secrets",
+    "attack_class": "Secret custody: leakage channels into repo, logs, API responses, UI",
+    "starting_paths": [
+      "src/lib/secretscan.ts",
+      "mini-services/vault-guardian",
+      ".gitignore"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Cryptography and secrets",
+    "selected_companion_blocks": [
+      "SUPPLY-CHAIN-AND-RELEASE.md#Build-context inclusion",
+      "SUPPLY-CHAIN-AND-RELEASE.md#Core discipline",
+      "SUPPLY-CHAIN-AND-RELEASE.md#Universal moves",
+      "SUPPLY-CHAIN-AND-RELEASE.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "ATTACK-CLASSES.md#Cryptography and secrets",
+        "reason": "Merged into this dedicated unit; generic crypto block excluded to prevent duplicate coverage of U3."
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "hunter-03",
+    "reviewed_paths": [
+      "src/lib/secretscan.ts",
+      "mini-services/vault-guardian/index.ts",
+      "mini-services/vault-guardian/recover.ts",
+      ".gitignore",
+      ".zscripts/leak-scan.mjs",
+      "mini-services/saos-grid/engine.ts",
+      "scripts/vault-census.mjs",
+      "src/lib/operator.ts",
+      "docs/KEY-LEDGER.md"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-03",
+        "reviewed_paths": [
+          "src/lib/secretscan.ts",
+          "mini-services/vault-guardian/index.ts",
+          "mini-services/vault-guardian/recover.ts",
+          ".gitignore",
+          ".zscripts/leak-scan.mjs",
+          "mini-services/saos-grid/engine.ts",
+          "scripts/vault-census.mjs",
+          "src/lib/operator.ts",
+          "docs/KEY-LEDGER.md"
+        ],
+        "invariant": ".env and secret files not git-tracked",
+        "method": "source",
+        "result": ".gitignore covers .env*, upload/, .vault/, repos/; git ls-files confirms zero tracked; tracked state DBs get full-text leak-scan before every push",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-03",
+        "reviewed_paths": [
+          "src/lib/secretscan.ts",
+          "mini-services/vault-guardian/index.ts",
+          "mini-services/vault-guardian/recover.ts",
+          ".gitignore",
+          ".zscripts/leak-scan.mjs",
+          "mini-services/saos-grid/engine.ts",
+          "scripts/vault-census.mjs",
+          "src/lib/operator.ts",
+          "docs/KEY-LEDGER.md"
+        ],
+        "invariant": "secret env values never reach logs/API/broadcasts",
+        "method": "source",
+        "result": "no console.* prints env values; census emits fingerprints only; grid fingerprint() last-4 hex; vault-guardian returns booleans/fingerprints",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-03",
+        "reviewed_paths": [
+          "src/lib/secretscan.ts",
+          "mini-services/vault-guardian/index.ts",
+          "mini-services/vault-guardian/recover.ts",
+          ".gitignore",
+          ".zscripts/leak-scan.mjs",
+          "mini-services/saos-grid/engine.ts",
+          "scripts/vault-census.mjs",
+          "src/lib/operator.ts",
+          "docs/KEY-LEDGER.md"
+        ],
+        "invariant": "secretscan actually scans and never leaks",
+        "method": "source",
+        "result": "16 prefix patterns, returns names+counts only, wired into handoffs",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-03",
+        "reviewed_paths": [
+          "src/lib/secretscan.ts",
+          "mini-services/vault-guardian/index.ts",
+          "mini-services/vault-guardian/recover.ts",
+          ".gitignore",
+          ".zscripts/leak-scan.mjs",
+          "mini-services/saos-grid/engine.ts",
+          "scripts/vault-census.mjs",
+          "src/lib/operator.ts",
+          "docs/KEY-LEDGER.md"
+        ],
+        "invariant": "custody paths enumerated (names only)",
+        "method": "source",
+        "result": "OPERATOR_KEY (upload/ 0600), <ACCOUNT>_ACTIVE_WIF, <ACCOUNT>_<ROLE>_WIF, PAT upload/pat.env, FF key .env.local/.vault — names only",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-03",
+        "reviewed_paths": [
+          "src/lib/secretscan.ts",
+          "mini-services/vault-guardian/index.ts",
+          "mini-services/vault-guardian/recover.ts",
+          ".gitignore",
+          ".zscripts/leak-scan.mjs",
+          "mini-services/saos-grid/engine.ts",
+          "scripts/vault-census.mjs",
+          "src/lib/operator.ts",
+          "docs/KEY-LEDGER.md"
+        ],
+        "invariant": "credential helper never exposes token",
+        "method": "source",
+        "result": "emits only into git credential pipe for host=github.com; no echo/set -x",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-03",
+        "reviewed_paths": [
+          "src/lib/secretscan.ts",
+          "mini-services/vault-guardian/index.ts",
+          "mini-services/vault-guardian/recover.ts",
+          ".gitignore",
+          ".zscripts/leak-scan.mjs",
+          "mini-services/saos-grid/engine.ts",
+          "scripts/vault-census.mjs",
+          "src/lib/operator.ts",
+          "docs/KEY-LEDGER.md"
+        ],
+        "invariant": "recovery pipeline exposure bounded",
+        "method": "source",
+        "result": "candidate for repo-side envelope; locally: fingerprints only, temp dir removed, passphrase file removed after openssl",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "vault-guardian.single-repo-key-recovery-envelope"
+    ],
+    "unresolved": [],
+    "hardening": []
+  },
+  {
+    "coverage_id": "Caddyfile%23%3A81%20XTransformPort%3D%2A%20matcher::Caddyfile%23reverse_proxy%20localhost%3A%7Bquery.XTransformPort%7D::gateway::Gateway%20query-param%20port%20passthrough%20to%20internal%20organs",
+    "canonical_refs": {
+      "surface": "Caddyfile#:81 XTransformPort=* matcher",
+      "boundary": "Caddyfile#reverse_proxy localhost:{query.XTransformPort}",
+      "subsystem": "gateway",
+      "attack_class": "Gateway query-param port passthrough to internal organs"
+    },
+    "surface": "Caddyfile#:81 XTransformPort=* matcher",
+    "boundary": "Caddyfile#reverse_proxy localhost:{query.XTransformPort}",
+    "subsystem": "gateway",
+    "attack_class": "Gateway query-param port passthrough to internal organs",
+    "starting_paths": [
+      "Caddyfile"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Access control",
+    "selected_companion_blocks": [
+      "WEB-PROTOCOL-AND-AUTH.md#Host and forwarded-header trust",
+      "WEB-PROTOCOL-AND-AUTH.md#Core discipline",
+      "WEB-PROTOCOL-AND-AUTH.md#Universal moves",
+      "WEB-PROTOCOL-AND-AUTH.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "WEB-PROTOCOL-AND-AUTH.md#Web cache poisoning through unkeyed input",
+        "reason": "No cache exists in source between gateway and organs (direct reverse_proxy, no cache directive in Caddyfile)."
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "hunter-02",
+    "reviewed_paths": [
+      "Caddyfile",
+      "docs/SURVIVAL.md",
+      "docs/organ-registry.json",
+      "repos/saos-dex/deploy/Caddyfile.public",
+      "mini-services/saos-grid/index.ts",
+      "mini-services/saos-arb/index.ts",
+      "mini-services/saos-council/index.ts",
+      "mini-services/vault-guardian/index.ts",
+      "mini-services/chain-witness/index.ts",
+      "mini-services/saos-metrics/index.ts",
+      "mini-services/fabric-heartbeat/index.ts",
+      "mini-services/survival-keeper/index.ts",
+      "repos/saos-dex/src/app/api/dex/wrap/route.ts",
+      "repos/saos-dex/src/app/api/dex/desk-ledger/route.ts"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-02",
+        "reviewed_paths": [
+          "Caddyfile",
+          "docs/SURVIVAL.md",
+          "docs/organ-registry.json",
+          "repos/saos-dex/deploy/Caddyfile.public",
+          "mini-services/saos-grid/index.ts",
+          "mini-services/saos-arb/index.ts",
+          "mini-services/saos-council/index.ts",
+          "mini-services/vault-guardian/index.ts",
+          "mini-services/chain-witness/index.ts",
+          "mini-services/saos-metrics/index.ts",
+          "mini-services/fabric-heartbeat/index.ts",
+          "mini-services/survival-keeper/index.ts",
+          "repos/saos-dex/src/app/api/dex/wrap/route.ts",
+          "repos/saos-dex/src/app/api/dex/desk-ledger/route.ts"
+        ],
+        "invariant": "passthrough must not let unauthenticated callers select internal upstreams",
+        "method": "source",
+        "result": "Caddyfile:2-12 proxies any caller to localhost:{query.XTransformPort}, zero auth, zero allowlist; dex deploy/Caddyfile.public:9 documents intended posture (no public XTransformPort)",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-02",
+        "reviewed_paths": [
+          "Caddyfile",
+          "docs/SURVIVAL.md",
+          "docs/organ-registry.json",
+          "repos/saos-dex/deploy/Caddyfile.public",
+          "mini-services/saos-grid/index.ts",
+          "mini-services/saos-arb/index.ts",
+          "mini-services/saos-council/index.ts",
+          "mini-services/vault-guardian/index.ts",
+          "mini-services/chain-witness/index.ts",
+          "mini-services/saos-metrics/index.ts",
+          "mini-services/fabric-heartbeat/index.ts",
+          "mini-services/survival-keeper/index.ts",
+          "repos/saos-dex/src/app/api/dex/wrap/route.ts",
+          "repos/saos-dex/src/app/api/dex/desk-ledger/route.ts"
+        ],
+        "invariant": "every organ mutating endpoint validates a secret",
+        "method": "source",
+        "result": "refuted: grid /halt /resume /cycle, arb /halt /resume, council /cycle /deliberate, vault-guardian /census /heal /drill have NO authority check; chain-witness /witness /bench unauth; dex gated EXCEPT desk-ledger",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-02",
+        "reviewed_paths": [
+          "Caddyfile",
+          "docs/SURVIVAL.md",
+          "docs/organ-registry.json",
+          "repos/saos-dex/deploy/Caddyfile.public",
+          "mini-services/saos-grid/index.ts",
+          "mini-services/saos-arb/index.ts",
+          "mini-services/saos-council/index.ts",
+          "mini-services/vault-guardian/index.ts",
+          "mini-services/chain-witness/index.ts",
+          "mini-services/saos-metrics/index.ts",
+          "mini-services/fabric-heartbeat/index.ts",
+          "mini-services/survival-keeper/index.ts",
+          "repos/saos-dex/src/app/api/dex/wrap/route.ts",
+          "repos/saos-dex/src/app/api/dex/desk-ledger/route.ts"
+        ],
+        "invariant": "loopback binds confine organs",
+        "method": "source",
+        "result": "partial: grid/council/vault-guardian/dex bind 127.0.0.1; chain-witness/arb/metrics/heartbeat/keeper bind 0.0.0.0 (no hostname) — second gateway-independent path",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-02",
+        "reviewed_paths": [
+          "Caddyfile",
+          "docs/SURVIVAL.md",
+          "docs/organ-registry.json",
+          "repos/saos-dex/deploy/Caddyfile.public",
+          "mini-services/saos-grid/index.ts",
+          "mini-services/saos-arb/index.ts",
+          "mini-services/saos-council/index.ts",
+          "mini-services/vault-guardian/index.ts",
+          "mini-services/chain-witness/index.ts",
+          "mini-services/saos-metrics/index.ts",
+          "mini-services/fabric-heartbeat/index.ts",
+          "mini-services/survival-keeper/index.ts",
+          "repos/saos-dex/src/app/api/dex/wrap/route.ts",
+          "repos/saos-dex/src/app/api/dex/desk-ledger/route.ts"
+        ],
+        "invariant": "forwarded/host headers not trusted for authz",
+        "method": "source",
+        "result": "no organ authorizes on Host/XFF (dex middleware uses clientIp only for rate-limit bucketing)",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "gateway:XTransformPort-open-passthrough:81"
+    ],
+    "unresolved": [
+      "gateway_deployment_reachability (Caddy running this Caddyfile and :81 exposed past the host firewall are deployment facts)"
+    ],
+    "hardening": [
+      "raw error messages returned to unauthenticated callers (grid index.ts:149-151; /health /grid expose lastError/config/fills/fingerprints)",
+      "chain-witness /witness /bench unauth O(ledger) on 0.0.0.0 bind; arb/metrics/heartbeat/keeper bind 0.0.0.0 too",
+      "marks.json write non-atomic — tmp+rename would avoid anchor-less windows",
+      "master-key agreement search walks 4 parent dirs (dex)"
+    ]
+  },
+  {
+    "coverage_id": "fill_ledger%20growth%2C%20event%20logs%2C%20%2Fproc%20scans%2C%20probe%20loops%20across%20organs::mini-services%2Fsaos-grid%2Fengine.ts%20ledger%20writes%20%2B%20saos-metrics%20pulse.db::saos-metrics::Unbounded%20accumulation%20and%20cardinality%20in%20ledgers%20and%20logs",
+    "canonical_refs": {
+      "surface": "fill_ledger growth, event logs, /proc scans, probe loops across organs",
+      "boundary": "mini-services/saos-grid/engine.ts ledger writes + saos-metrics pulse.db",
+      "subsystem": "saos-metrics",
+      "attack_class": "Unbounded accumulation and cardinality in ledgers and logs"
+    },
+    "surface": "fill_ledger growth, event logs, /proc scans, probe loops across organs",
+    "boundary": "mini-services/saos-grid/engine.ts ledger writes + saos-metrics pulse.db",
+    "subsystem": "saos-metrics",
+    "attack_class": "Unbounded accumulation and cardinality in ledgers and logs",
+    "starting_paths": [
+      "mini-services/saos-grid/engine.ts",
+      "mini-services/saos-metrics",
+      "mini-services/fabric-heartbeat"
+    ],
+    "ordinary_attack_class_block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality",
+    "selected_companion_blocks": [
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Reachable fatal error or deadlock",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Core discipline",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Universal moves",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Validation rules"
+    ],
+    "excluded_blocks": [],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "hunter-04",
+    "reviewed_paths": [
+      "mini-services/saos-grid/engine.ts",
+      "mini-services/saos-grid/index.ts",
+      "mini-services/saos-grid/ff.ts",
+      "mini-services/saos-metrics/index.ts",
+      "mini-services/fabric-heartbeat/index.ts"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "mini-services/saos-grid/engine.ts",
+          "mini-services/saos-grid/index.ts",
+          "mini-services/saos-grid/ff.ts",
+          "mini-services/saos-metrics/index.ts",
+          "mini-services/fabric-heartbeat/index.ts"
+        ],
+        "invariant": "fill_ledger one row per unique chain fill",
+        "method": "source",
+        "result": "pass: PK account:orderid:chainAt:side:quantities; insert checks key; single-writer bind guard",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "mini-services/saos-grid/engine.ts",
+          "mini-services/saos-grid/index.ts",
+          "mini-services/saos-grid/ff.ts",
+          "mini-services/saos-metrics/index.ts",
+          "mini-services/fabric-heartbeat/index.ts"
+        ],
+        "invariant": "pulse.db retention-bounded and clamped reads",
+        "method": "source",
+        "result": "pass: 7d DELETE per loop, minutes clamp 10..10080, try/caught timer",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "mini-services/saos-grid/engine.ts",
+          "mini-services/saos-grid/index.ts",
+          "mini-services/saos-grid/ff.ts",
+          "mini-services/saos-metrics/index.ts",
+          "mini-services/fabric-heartbeat/index.ts"
+        ],
+        "invariant": "grid_events/grid_orders retention bound",
+        "method": "source",
+        "result": "candidate: event() INSERT every cycle; only DELETE is one-time Task-116 dedup; full-scan consumers (boot scan, summary GROUP BY); grid.db 1.4MB+4.1MB WAL in ~30h",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "mini-services/saos-grid/engine.ts",
+          "mini-services/saos-grid/index.ts",
+          "mini-services/saos-grid/ff.ts",
+          "mini-services/saos-metrics/index.ts",
+          "mini-services/fabric-heartbeat/index.ts"
+        ],
+        "invariant": "interval pulses cannot stack; timer errors non-fatal",
+        "method": "source",
+        "result": "pass: void-wrapped try/catch, AbortSignal timeouts, tickBusy guard, watchdog honest exit",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "mini-services/saos-grid/engine.ts",
+          "mini-services/saos-grid/index.ts",
+          "mini-services/saos-grid/ff.ts",
+          "mini-services/saos-metrics/index.ts",
+          "mini-services/fabric-heartbeat/index.ts"
+        ],
+        "invariant": "/proc fd-scan slice reviewable",
+        "method": "source",
+        "result": "not present in source (live-ops procedure only)",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "saos-grid.grid_events.grid_orders.unbounded-no-retention"
+    ],
+    "unresolved": [],
+    "hardening": []
+  },
+  {
+    "coverage_id": "mini-services%2Ffabric-heartbeat%2Findex.ts%20git%20pull%20--rebase%20%2B%20organ%20bounce%20loop::mini-services%2Ffabric-heartbeat%2Findex.ts%20pull%2Fcommit%2Fpush%20and%20restart%20authority::fabric-heartbeat::Privileged%20automation%20executing%20fetched%20code%20%28pull-and-restart%20pipeline%29",
+    "canonical_refs": {
+      "surface": "mini-services/fabric-heartbeat/index.ts git pull --rebase + organ bounce loop",
+      "boundary": "mini-services/fabric-heartbeat/index.ts pull/commit/push and restart authority",
+      "subsystem": "fabric-heartbeat",
+      "attack_class": "Privileged automation executing fetched code (pull-and-restart pipeline)"
+    },
+    "surface": "mini-services/fabric-heartbeat/index.ts git pull --rebase + organ bounce loop",
+    "boundary": "mini-services/fabric-heartbeat/index.ts pull/commit/push and restart authority",
+    "subsystem": "fabric-heartbeat",
+    "attack_class": "Privileged automation executing fetched code (pull-and-restart pipeline)",
+    "starting_paths": [
+      "mini-services/fabric-heartbeat"
+    ],
+    "ordinary_attack_class_block": "SUPPLY-CHAIN-AND-RELEASE.md#Untrusted code in a privileged workflow",
+    "selected_companion_blocks": [
+      "SUPPLY-CHAIN-AND-RELEASE.md#Automation identity overreach",
+      "SUPPLY-CHAIN-AND-RELEASE.md#Core discipline",
+      "SUPPLY-CHAIN-AND-RELEASE.md#Universal moves",
+      "SUPPLY-CHAIN-AND-RELEASE.md#Validation rules"
+    ],
+    "excluded_blocks": [],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "hunter-03",
+    "reviewed_paths": [
+      "mini-services/fabric-heartbeat/index.ts",
+      ".zscripts/leak-scan.mjs",
+      ".zscripts/git-credential-pat.sh",
+      ".gitignore"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-03",
+        "reviewed_paths": [
+          "mini-services/fabric-heartbeat/index.ts",
+          ".zscripts/leak-scan.mjs",
+          ".zscripts/git-credential-pat.sh",
+          ".gitignore"
+        ],
+        "invariant": "fetched code must not execute without provenance verification",
+        "method": "source",
+        "result": "candidate: pull --rebase origin main with no pinning/author/signature/path allowlist; Task-119 bounce forces bun --watch to load fetched modules; appGuard respawns bun run dev",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-03",
+        "reviewed_paths": [
+          "mini-services/fabric-heartbeat/index.ts",
+          ".zscripts/leak-scan.mjs",
+          ".zscripts/git-credential-pat.sh",
+          ".gitignore"
+        ],
+        "invariant": "pre-push gate independent of gated input",
+        "method": "source",
+        "result": "circularity: leak-scan executes from the working tree the same pull just updated; scans secret patterns only, never provenance",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-03",
+        "reviewed_paths": [
+          "mini-services/fabric-heartbeat/index.ts",
+          ".zscripts/leak-scan.mjs",
+          ".zscripts/git-credential-pat.sh",
+          ".gitignore"
+        ],
+        "invariant": "automation identity least-privilege and never logged",
+        "method": "source",
+        "result": "credential helper emits x-access-token only into git credential pipe for host=github.com; PAT scope is deployment fact",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-03",
+        "reviewed_paths": [
+          "mini-services/fabric-heartbeat/index.ts",
+          ".zscripts/leak-scan.mjs",
+          ".zscripts/git-credential-pat.sh",
+          ".gitignore"
+        ],
+        "invariant": "auto-pushed content cannot contain secrets",
+        "method": "source",
+        "result": "control present: leak-scan fail-closed gates git add -A; staged deltas + untracked full-text + passfile byte match",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-03",
+        "reviewed_paths": [
+          "mini-services/fabric-heartbeat/index.ts",
+          ".zscripts/leak-scan.mjs",
+          ".zscripts/git-credential-pat.sh",
+          ".gitignore"
+        ],
+        "invariant": "fetched content cannot inject command arguments",
+        "method": "source",
+        "result": "all spawns argv arrays with fixed args; organ names regex-constrained; no shell interpolation",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-03",
+        "reviewed_paths": [
+          "mini-services/fabric-heartbeat/index.ts",
+          ".zscripts/leak-scan.mjs",
+          ".zscripts/git-credential-pat.sh",
+          ".gitignore"
+        ],
+        "invariant": "origin content must not silently become live state",
+        "method": "source",
+        "result": "resyncFromOrigin replaces live db/custom.db with origin blob when ledger not superset (by-design origin-as-truth law)",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "fabric-heartbeat.pull-restart.unverified-origin-code-exec"
+    ],
+    "unresolved": [],
+    "hardening": []
+  },
+  {
+    "coverage_id": "mini-services%2Fsaos-council%20%2B%20src%2Flib%2Fllm-chain.ts%20LLM%20calls%20with%20chain-derived%20content::mini-services%2Fsaos-council%2Findex.ts%20prompt%20assembly%20and%20tool%20authority::saos-council::Indirect%20injection%20through%20chain%20content%20into%20council%20decisions",
+    "canonical_refs": {
+      "surface": "mini-services/saos-council + src/lib/llm-chain.ts LLM calls with chain-derived content",
+      "boundary": "mini-services/saos-council/index.ts prompt assembly and tool authority",
+      "subsystem": "saos-council",
+      "attack_class": "Indirect injection through chain content into council decisions"
+    },
+    "surface": "mini-services/saos-council + src/lib/llm-chain.ts LLM calls with chain-derived content",
+    "boundary": "mini-services/saos-council/index.ts prompt assembly and tool authority",
+    "subsystem": "saos-council",
+    "attack_class": "Indirect injection through chain content into council decisions",
+    "starting_paths": [
+      "mini-services/saos-council",
+      "src/lib/llm-chain.ts"
+    ],
+    "ordinary_attack_class_block": "AI-AND-LLM.md#Indirect injection through retrieved or ingested content",
+    "selected_companion_blocks": [
+      "AI-AND-LLM.md#Tool-argument injection into a downstream sink",
+      "AI-AND-LLM.md#Insecure output rendering",
+      "AI-AND-LLM.md#Core discipline",
+      "AI-AND-LLM.md#Universal moves",
+      "AI-AND-LLM.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "AI-AND-LLM.md#MCP and sub-agent trust classes",
+        "reason": "No MCP servers or sub-agent tool registry exists in source."
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "hunter-03",
+    "reviewed_paths": [
+      "mini-services/saos-council/index.ts",
+      "mini-services/saos-council/council.ts",
+      "mini-services/saos-council/evidence.ts",
+      "mini-services/saos-council/governor.ts",
+      "src/lib/llm-chain.ts",
+      "src/lib/executor.ts",
+      "src/app/api/council/route.ts",
+      "src/components/CouncilPanel.tsx"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-03",
+        "reviewed_paths": [
+          "mini-services/saos-council/index.ts",
+          "mini-services/saos-council/council.ts",
+          "mini-services/saos-council/evidence.ts",
+          "mini-services/saos-council/governor.ts",
+          "src/lib/llm-chain.ts",
+          "src/lib/executor.ts",
+          "src/app/api/council/route.ts",
+          "src/components/CouncilPanel.tsx"
+        ],
+        "invariant": "no lower-trust free-text source reaches council prompt",
+        "method": "source",
+        "result": "evidence.ts gathers typed numerics + bounded internal strings from loopback organs only; no post/memo text ingestion anywhere",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-03",
+        "reviewed_paths": [
+          "mini-services/saos-council/index.ts",
+          "mini-services/saos-council/council.ts",
+          "mini-services/saos-council/evidence.ts",
+          "mini-services/saos-council/governor.ts",
+          "src/lib/llm-chain.ts",
+          "src/lib/executor.ts",
+          "src/app/api/council/route.ts",
+          "src/components/CouncilPanel.tsx"
+        ],
+        "invariant": "LLM output carries no action authority",
+        "method": "source",
+        "result": "only side effect (POST :3071/halt) fired exclusively from governor.rule() deterministic thresholds; no card field read to trigger action",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-03",
+        "reviewed_paths": [
+          "mini-services/saos-council/index.ts",
+          "mini-services/saos-council/council.ts",
+          "mini-services/saos-council/evidence.ts",
+          "mini-services/saos-council/governor.ts",
+          "src/lib/llm-chain.ts",
+          "src/lib/executor.ts",
+          "src/app/api/council/route.ts",
+          "src/components/CouncilPanel.tsx"
+        ],
+        "invariant": "model output validated before use",
+        "method": "source",
+        "result": "parseCard type-checks + length-caps every field; llm-chain validates outputs with zod; no eval/exec consumes model output",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-03",
+        "reviewed_paths": [
+          "mini-services/saos-council/index.ts",
+          "mini-services/saos-council/council.ts",
+          "mini-services/saos-council/evidence.ts",
+          "mini-services/saos-council/governor.ts",
+          "src/lib/llm-chain.ts",
+          "src/lib/executor.ts",
+          "src/app/api/council/route.ts",
+          "src/components/CouncilPanel.tsx"
+        ],
+        "invariant": "model output rendering cannot execute markup",
+        "method": "source",
+        "result": "cards render via React JSX; single dead dangerouslySetInnerHTML unrelated to model text",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": [],
+    "hardening": []
+  },
+  {
+    "coverage_id": "mini-services%2Fsaos-dex%20HTTP%20routes%20%28%3A3010%20wrap%2Fmint%2Fburn%2Fprice-proof%29::mini-services%2Fsaos-dex%20wrap%20handler%20authority::saos-dex::1%3A1%20mint%2Fburn%20wrap%20reachable%20without%20authority%20check",
+    "canonical_refs": {
+      "surface": "mini-services/saos-dex HTTP routes (:3010 wrap/mint/burn/price-proof)",
+      "boundary": "mini-services/saos-dex wrap handler authority",
+      "subsystem": "saos-dex",
+      "attack_class": "1:1 mint/burn wrap reachable without authority check"
+    },
+    "surface": "mini-services/saos-dex HTTP routes (:3010 wrap/mint/burn/price-proof)",
+    "boundary": "mini-services/saos-dex wrap handler authority",
+    "subsystem": "saos-dex",
+    "attack_class": "1:1 mint/burn wrap reachable without authority check",
+    "starting_paths": [
+      "mini-services/saos-dex"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Access control",
+    "selected_companion_blocks": [
+      "DATA-ISOLATION-AND-LIFECYCLE.md#Import and restore authority expansion",
+      "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+      "DATA-ISOLATION-AND-LIFECYCLE.md#Universal moves",
+      "DATA-ISOLATION-AND-LIFECYCLE.md#Validation rules"
+    ],
+    "excluded_blocks": [],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "hunter-02",
+    "reviewed_paths": [
+      "repos/saos-dex/src/app/api/dex/wrap/route.ts",
+      "repos/saos-dex/src/app/api/dex/door/route.ts",
+      "repos/saos-dex/src/app/api/dex/desk-ledger/route.ts",
+      "repos/saos-dex/src/app/api/dex/price-proof/route.ts",
+      "repos/saos-dex/src/lib/operator-auth.ts",
+      "repos/saos-dex/src/lib/master-key.ts",
+      "repos/saos-dex/src/lib/dex/guard.ts",
+      "repos/saos-dex/src/lib/dex/kernel.ts",
+      "repos/saos-dex/src/lib/dex/chain.ts",
+      "repos/saos-dex/src/lib/dex/price-proof.ts",
+      "repos/saos-dex/src/middleware.ts",
+      "repos/saos-dex/package.json"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-02",
+        "reviewed_paths": [
+          "repos/saos-dex/src/app/api/dex/wrap/route.ts",
+          "repos/saos-dex/src/app/api/dex/door/route.ts",
+          "repos/saos-dex/src/app/api/dex/desk-ledger/route.ts",
+          "repos/saos-dex/src/app/api/dex/price-proof/route.ts",
+          "repos/saos-dex/src/lib/operator-auth.ts",
+          "repos/saos-dex/src/lib/master-key.ts",
+          "repos/saos-dex/src/lib/dex/guard.ts",
+          "repos/saos-dex/src/lib/dex/kernel.ts",
+          "repos/saos-dex/src/lib/dex/chain.ts",
+          "repos/saos-dex/src/lib/dex/price-proof.ts",
+          "repos/saos-dex/src/middleware.ts",
+          "repos/saos-dex/package.json"
+        ],
+        "invariant": "wrap requires authority before mutation",
+        "method": "source",
+        "result": "refuted as concern: operatorAuth fail-closed 503 when unconfigured, sha256+timingSafeEqual, master-key digest path; consoleGuard CSRF gate",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-02",
+        "reviewed_paths": [
+          "repos/saos-dex/src/app/api/dex/wrap/route.ts",
+          "repos/saos-dex/src/app/api/dex/door/route.ts",
+          "repos/saos-dex/src/app/api/dex/desk-ledger/route.ts",
+          "repos/saos-dex/src/app/api/dex/price-proof/route.ts",
+          "repos/saos-dex/src/lib/operator-auth.ts",
+          "repos/saos-dex/src/lib/master-key.ts",
+          "repos/saos-dex/src/lib/dex/guard.ts",
+          "repos/saos-dex/src/lib/dex/kernel.ts",
+          "repos/saos-dex/src/lib/dex/chain.ts",
+          "repos/saos-dex/src/lib/dex/price-proof.ts",
+          "repos/saos-dex/src/middleware.ts",
+          "repos/saos-dex/package.json"
+        ],
+        "invariant": "wrap mints 1:1 only against locked backing",
+        "method": "source",
+        "result": "confirmed safe: kernel wrap_mint debits native/credits wrapped into backing; external mint treasury-only with one-time claim rings; no unbacked HTTP mint",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-02",
+        "reviewed_paths": [
+          "repos/saos-dex/src/app/api/dex/wrap/route.ts",
+          "repos/saos-dex/src/app/api/dex/door/route.ts",
+          "repos/saos-dex/src/app/api/dex/desk-ledger/route.ts",
+          "repos/saos-dex/src/app/api/dex/price-proof/route.ts",
+          "repos/saos-dex/src/lib/operator-auth.ts",
+          "repos/saos-dex/src/lib/master-key.ts",
+          "repos/saos-dex/src/lib/dex/guard.ts",
+          "repos/saos-dex/src/lib/dex/kernel.ts",
+          "repos/saos-dex/src/lib/dex/chain.ts",
+          "repos/saos-dex/src/lib/dex/price-proof.ts",
+          "repos/saos-dex/src/middleware.ts",
+          "repos/saos-dex/package.json"
+        ],
+        "invariant": "price-proof read-only fail-honest",
+        "method": "source",
+        "result": "safe: 5+ feeds parallel allSettled + median/MAD outlier rejection; all down -> ok:false",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-02",
+        "reviewed_paths": [
+          "repos/saos-dex/src/app/api/dex/wrap/route.ts",
+          "repos/saos-dex/src/app/api/dex/door/route.ts",
+          "repos/saos-dex/src/app/api/dex/desk-ledger/route.ts",
+          "repos/saos-dex/src/app/api/dex/price-proof/route.ts",
+          "repos/saos-dex/src/lib/operator-auth.ts",
+          "repos/saos-dex/src/lib/master-key.ts",
+          "repos/saos-dex/src/lib/dex/guard.ts",
+          "repos/saos-dex/src/lib/dex/kernel.ts",
+          "repos/saos-dex/src/lib/dex/chain.ts",
+          "repos/saos-dex/src/lib/dex/price-proof.ts",
+          "repos/saos-dex/src/middleware.ts",
+          "repos/saos-dex/package.json"
+        ],
+        "invariant": "every DB-writing POST route carries authority",
+        "method": "source",
+        "result": "candidate: 29/30 gated; desk-ledger sig8 is unkeyed public sha256 prefix — attacker-computable; inserts verified:true receipts",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "saos-dex:desk-ledger-unkeyed-sig8-unauthenticated-write"
+    ],
+    "unresolved": [
+      "gateway_deployment_reachability"
+    ],
+    "hardening": []
+  },
+  {
+    "coverage_id": "mini-services%2Fsaos-grid%2Findex.ts%20HTTP%20routes%20%28%3A3070%29::mini-services%2Fsaos-grid%2Findex.ts%23bind%20host%20%2B%20route%20handlers::saos-grid::Organ%20API%20exposed%20via%20gateway%20passthrough%3B%20mutating%20endpoints%20authz",
+    "canonical_refs": {
+      "surface": "mini-services/saos-grid/index.ts HTTP routes (:3070)",
+      "boundary": "mini-services/saos-grid/index.ts#bind host + route handlers",
+      "subsystem": "saos-grid",
+      "attack_class": "Organ API exposed via gateway passthrough; mutating endpoints authz"
+    },
+    "surface": "mini-services/saos-grid/index.ts HTTP routes (:3070)",
+    "boundary": "mini-services/saos-grid/index.ts#bind host + route handlers",
+    "subsystem": "saos-grid",
+    "attack_class": "Organ API exposed via gateway passthrough; mutating endpoints authz",
+    "starting_paths": [
+      "mini-services/saos-grid/index.ts"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Access control",
+    "selected_companion_blocks": [
+      "PROTOCOLS-RPC-AND-MESSAGING.md#Peer identity to application-principal confusion",
+      "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+      "PROTOCOLS-RPC-AND-MESSAGING.md#Universal moves",
+      "PROTOCOLS-RPC-AND-MESSAGING.md#Validation rules"
+    ],
+    "excluded_blocks": [],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "hunter-02",
+    "reviewed_paths": [
+      "mini-services/saos-grid/index.ts",
+      "mini-services/saos-grid/engine.ts"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-02",
+        "reviewed_paths": [
+          "mini-services/saos-grid/index.ts",
+          "mini-services/saos-grid/engine.ts"
+        ],
+        "invariant": "route inventory complete and classified",
+        "method": "source",
+        "result": "GET /health /grid /ff /backtest read (leak lastError/config/fills); POST /halt /resume /cycle WRITE no auth; catch-all 500 returns raw e.message",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-02",
+        "reviewed_paths": [
+          "mini-services/saos-grid/index.ts",
+          "mini-services/saos-grid/engine.ts"
+        ],
+        "invariant": "engine state-changing endpoints require authority",
+        "method": "source",
+        "result": "candidate: halt/resume/cycle execute with no token/secret/host check; bind 127.0.0.1:3070 so gateway is only external path",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-02",
+        "reviewed_paths": [
+          "mini-services/saos-grid/index.ts",
+          "mini-services/saos-grid/engine.ts"
+        ],
+        "invariant": "forced cycles cannot cause unbounded chain writes",
+        "method": "source",
+        "result": "bounded per call (MAX_REQUOTE_PER_CYCLE=4, commit caps) but spam-able via gateway; no rate limit on :3070",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "saos-grid:3070-mutating-endpoints-without-authority-check"
+    ],
+    "unresolved": [
+      "gateway_deployment_reachability"
+    ],
+    "hardening": []
+  },
+  {
+    "coverage_id": "mini-services%2Fsaos-grid%2Fmarket.ts%20outbound%20fetches%20%28binance%2C%20coingecko%2C%20coinpaprika%2C%20fixedfloat%29::mini-services%2Fsaos-grid%2Fengine.ts%20floor%2Ffail-closed%20logic%20consuming%20feed%20JSON::saos-grid::Feed%20response%20trust%3A%20malformed%2Fhostile%20market%20data%20driving%20floor%20and%20trades",
+    "canonical_refs": {
+      "surface": "mini-services/saos-grid/market.ts outbound fetches (binance, coingecko, coinpaprika, fixedfloat)",
+      "boundary": "mini-services/saos-grid/engine.ts floor/fail-closed logic consuming feed JSON",
+      "subsystem": "saos-grid",
+      "attack_class": "Feed response trust: malformed/hostile market data driving floor and trades"
+    },
+    "surface": "mini-services/saos-grid/market.ts outbound fetches (binance, coingecko, coinpaprika, fixedfloat)",
+    "boundary": "mini-services/saos-grid/engine.ts floor/fail-closed logic consuming feed JSON",
+    "subsystem": "saos-grid",
+    "attack_class": "Feed response trust: malformed/hostile market data driving floor and trades",
+    "starting_paths": [
+      "mini-services/saos-grid/market.ts",
+      "mini-services/saos-grid/engine.ts"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Business logic",
+    "selected_companion_blocks": [
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Retry storm and fail-open amplification",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Core discipline",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Universal moves",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Validation rules"
+    ],
+    "excluded_blocks": [],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "hunter-02",
+    "reviewed_paths": [
+      "mini-services/saos-grid/market.ts",
+      "mini-services/saos-grid/engine.ts",
+      "mini-services/saos-grid/ff.ts",
+      "repos/saos-dex/src/lib/dex/price-proof.ts"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-02",
+        "reviewed_paths": [
+          "mini-services/saos-grid/market.ts",
+          "mini-services/saos-grid/engine.ts",
+          "mini-services/saos-grid/ff.ts",
+          "repos/saos-dex/src/lib/dex/price-proof.ts"
+        ],
+        "invariant": "feed values schema/type/range validated before driving floor",
+        "method": "source",
+        "result": "candidate: parsers accept any parseFloat()>0; Infinity passes (1e999); no upper bound/plausibility clamp/median cross-check (contrast dex price-proof median+MAD)",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-02",
+        "reviewed_paths": [
+          "mini-services/saos-grid/market.ts",
+          "mini-services/saos-grid/engine.ts",
+          "mini-services/saos-grid/ff.ts",
+          "repos/saos-dex/src/lib/dex/price-proof.ts"
+        ],
+        "invariant": "no anchor => absolutely no live sells (Task-117 fail-closed)",
+        "method": "source",
+        "result": "holds on ladder/counter/requote — BYPASSED in shadow-to-live migration: sell cancel conditioned on floor!==null && price<floor (engine.ts:492); floor===null -> shadow sell falls through to broadcastLimitOrder (engine.ts:504)",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-02",
+        "reviewed_paths": [
+          "mini-services/saos-grid/market.ts",
+          "mini-services/saos-grid/engine.ts",
+          "mini-services/saos-grid/ff.ts",
+          "repos/saos-dex/src/lib/dex/price-proof.ts"
+        ],
+        "invariant": "marks.json read/write safe",
+        "method": "source",
+        "result": "non-atomic writeFileSync; read validates >0, finite, age<24h; fixed path",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-02",
+        "reviewed_paths": [
+          "mini-services/saos-grid/market.ts",
+          "mini-services/saos-grid/engine.ts",
+          "mini-services/saos-grid/ff.ts",
+          "repos/saos-dex/src/lib/dex/price-proof.ts"
+        ],
+        "invariant": "FF response fields do not steer decisions",
+        "method": "source",
+        "result": "safe: probe only sets status booleans; HMAC correct; lastError surfaces up to 200 chars of response text (minor)",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "saos-grid:engine-shadow-to-live-migration-bypasses-anchor-fail-closed",
+      "saos-grid:market-single-source-anchor-no-cross-validation-or-bounds"
+    ],
+    "unresolved": [],
+    "hardening": []
+  },
+  {
+    "coverage_id": "organ-to-organ%20loopback%20HTTP%20%28grid%E2%86%92dex%2C%20heartbeat%E2%86%92organs%2C%20app%E2%86%92organs%29::fetch%20targets%20assuming%20loopback%20peer%20equals%20trusted%20internal%20principal::mini-services::Peer%20identity%20confusion%20via%20gateway%20passthrough%20%28external%20caller%20appears%20internal%29",
+    "canonical_refs": {
+      "surface": "organ-to-organ loopback HTTP (grid→dex, heartbeat→organs, app→organs)",
+      "boundary": "fetch targets assuming loopback peer equals trusted internal principal",
+      "subsystem": "mini-services",
+      "attack_class": "Peer identity confusion via gateway passthrough (external caller appears internal)"
+    },
+    "surface": "organ-to-organ loopback HTTP (grid→dex, heartbeat→organs, app→organs)",
+    "boundary": "fetch targets assuming loopback peer equals trusted internal principal",
+    "subsystem": "mini-services",
+    "attack_class": "Peer identity confusion via gateway passthrough (external caller appears internal)",
+    "starting_paths": [
+      "mini-services",
+      "src/lib/hub.ts",
+      "src/lib/organ-guardian.ts"
+    ],
+    "ordinary_attack_class_block": "PROTOCOLS-RPC-AND-MESSAGING.md#Peer identity to application-principal confusion",
+    "selected_companion_blocks": [
+      "PROTOCOLS-RPC-AND-MESSAGING.md#Replay, ordering, and transaction attack classes",
+      "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+      "PROTOCOLS-RPC-AND-MESSAGING.md#Universal moves",
+      "PROTOCOLS-RPC-AND-MESSAGING.md#Validation rules"
+    ],
+    "excluded_blocks": [],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "hunter-04",
+    "reviewed_paths": [
+      "Caddyfile",
+      "src/lib/hub.ts",
+      "src/lib/organ-guardian.ts",
+      "src/lib/metrics.ts",
+      "src/lib/flow.ts",
+      "src/lib/claims.ts",
+      "src/app/api/operations/route.ts",
+      "mini-services/saos-arb/index.ts",
+      "mini-services/saos-council/index.ts",
+      "mini-services/saos-council/council.ts",
+      "mini-services/vault-guardian/index.ts",
+      "mini-services/survival-keeper/index.ts",
+      "mini-services/chain-witness/index.ts",
+      "mini-services/saos-grid/index.ts",
+      "mini-services/fabric-heartbeat/index.ts",
+      "repos/saos-dex/src/lib/operator-auth.ts"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "Caddyfile",
+          "src/lib/hub.ts",
+          "src/lib/organ-guardian.ts",
+          "src/lib/metrics.ts",
+          "src/lib/flow.ts",
+          "src/lib/claims.ts",
+          "src/app/api/operations/route.ts",
+          "mini-services/saos-arb/index.ts",
+          "mini-services/saos-council/index.ts",
+          "mini-services/saos-council/council.ts",
+          "mini-services/vault-guardian/index.ts",
+          "mini-services/survival-keeper/index.ts",
+          "mini-services/chain-witness/index.ts",
+          "mini-services/saos-grid/index.ts",
+          "mini-services/fabric-heartbeat/index.ts",
+          "repos/saos-dex/src/lib/operator-auth.ts"
+        ],
+        "invariant": "app/organ calls mapped with authority assumption per hop",
+        "method": "source",
+        "result": "mapped: all internal callers assume loopback=trusted, none present credential",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "Caddyfile",
+          "src/lib/hub.ts",
+          "src/lib/organ-guardian.ts",
+          "src/lib/metrics.ts",
+          "src/lib/flow.ts",
+          "src/lib/claims.ts",
+          "src/app/api/operations/route.ts",
+          "mini-services/saos-arb/index.ts",
+          "mini-services/saos-council/index.ts",
+          "mini-services/saos-council/council.ts",
+          "mini-services/vault-guardian/index.ts",
+          "mini-services/survival-keeper/index.ts",
+          "mini-services/chain-witness/index.ts",
+          "mini-services/saos-grid/index.ts",
+          "mini-services/fabric-heartbeat/index.ts",
+          "repos/saos-dex/src/lib/operator-auth.ts"
+        ],
+        "invariant": "mutating organ endpoints enforce platform authority pattern",
+        "method": "source",
+        "result": "candidates: dex enforces fail-closed x-saos-operator; app enforces proxy gate; arb/council/vault-guardian/grid perform mutations with zero checks; Caddyfile passthrough bypasses bind scope",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "Caddyfile",
+          "src/lib/hub.ts",
+          "src/lib/organ-guardian.ts",
+          "src/lib/metrics.ts",
+          "src/lib/flow.ts",
+          "src/lib/claims.ts",
+          "src/app/api/operations/route.ts",
+          "mini-services/saos-arb/index.ts",
+          "mini-services/saos-council/index.ts",
+          "mini-services/saos-council/council.ts",
+          "mini-services/vault-guardian/index.ts",
+          "mini-services/survival-keeper/index.ts",
+          "mini-services/chain-witness/index.ts",
+          "mini-services/saos-grid/index.ts",
+          "mini-services/fabric-heartbeat/index.ts",
+          "repos/saos-dex/src/lib/operator-auth.ts"
+        ],
+        "invariant": "bind scope holds against gateway",
+        "method": "source",
+        "result": "bind scope is not a boundary while gateway exposed: passthrough reaches every localhost port regardless",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "Caddyfile",
+          "src/lib/hub.ts",
+          "src/lib/organ-guardian.ts",
+          "src/lib/metrics.ts",
+          "src/lib/flow.ts",
+          "src/lib/claims.ts",
+          "src/app/api/operations/route.ts",
+          "mini-services/saos-arb/index.ts",
+          "mini-services/saos-council/index.ts",
+          "mini-services/saos-council/council.ts",
+          "mini-services/vault-guardian/index.ts",
+          "mini-services/survival-keeper/index.ts",
+          "mini-services/chain-witness/index.ts",
+          "mini-services/saos-grid/index.ts",
+          "mini-services/fabric-heartbeat/index.ts",
+          "repos/saos-dex/src/lib/operator-auth.ts"
+        ],
+        "invariant": "mutating endpoints idempotent or replay-safe",
+        "method": "source",
+        "result": "partial: /halt /resume final-state; /resume defeats manual kill-switch; /deliberate non-idempotent LLM spend per call, no concurrency guard",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "saos-arb.halt-resume.no-authority.kill-switch-override",
+      "saos-council.deliberate.unauth-llm-spend.no-concurrency-guard",
+      "vault-guardian.heal-census-drill.zero-auth-custody-ops"
+    ],
+    "unresolved": [],
+    "hardening": []
+  },
+  {
+    "coverage_id": "src%2Fapp%2Fapi%23control-plane%20route%20families%20%28admin%2C%20operator%2C%20github%2C%20drill%2C%20worker%2C%20sovereign%2C%20sovereignty%2C%20tasks%2C%20hub%2C%20evolution%2C%20operations%2C%20fleets%29::src%2Flib%2Foperator.ts%23resolveOperator%20%28per-route%2C%20no%20src%2Fmiddleware.ts%29::src%2Fapp%2Fapi::State-changing%20routes%20without%20operator-key%20enforcement",
+    "canonical_refs": {
+      "surface": "src/app/api#control-plane route families (admin, operator, github, drill, worker, sovereign, sovereignty, tasks, hub, evolution, operations, fleets)",
+      "boundary": "src/lib/operator.ts#resolveOperator (per-route, no src/middleware.ts)",
+      "subsystem": "src/app/api",
+      "attack_class": "State-changing routes without operator-key enforcement"
+    },
+    "surface": "src/app/api#control-plane route families (admin, operator, github, drill, worker, sovereign, sovereignty, tasks, hub, evolution, operations, fleets)",
+    "boundary": "src/lib/operator.ts#resolveOperator (per-route, no src/middleware.ts)",
+    "subsystem": "src/app/api",
+    "attack_class": "State-changing routes without operator-key enforcement",
+    "starting_paths": [
+      "src/app/api",
+      "src/lib/operator.ts"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Access control",
+    "selected_companion_blocks": [
+      "WEB-PROTOCOL-AND-AUTH.md#Ordinary CSRF",
+      "WEB-PROTOCOL-AND-AUTH.md#Core discipline",
+      "WEB-PROTOCOL-AND-AUTH.md#Universal moves",
+      "WEB-PROTOCOL-AND-AUTH.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "WEB-PROTOCOL-AND-AUTH.md#Federated-identity attack classes",
+        "reason": "No JWT/OAuth/OIDC/SAML code exists in source (no next/auth config, no token verify calls in src/lib)."
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "hunter-01",
+    "reviewed_paths": [
+      "src/proxy.ts",
+      "src/lib/operator.ts",
+      "Caddyfile",
+      "package.json",
+      "src/app/api/operator/route.ts",
+      "src/app/api/health/route.ts",
+      "src/app/api/admin/db-reconnect/route.ts",
+      "src/app/api/drill/route.ts",
+      "src/app/api/evolution/route.ts",
+      "src/app/api/sovereign",
+      "src/app/api/tasks",
+      "src/app/api/handoffs",
+      "src/app/api/batches",
+      "src/app/api/fleets",
+      "src/app/api/worker/tick/route.ts",
+      "src/app/api/github/repos/route.ts",
+      "src/lib/organ-guardian.ts",
+      "src/lib/review-policy.ts"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-01",
+        "reviewed_paths": [
+          "src/proxy.ts",
+          "src/lib/operator.ts",
+          "Caddyfile",
+          "package.json",
+          "src/app/api/operator/route.ts",
+          "src/app/api/health/route.ts",
+          "src/app/api/admin/db-reconnect/route.ts",
+          "src/app/api/drill/route.ts",
+          "src/app/api/evolution/route.ts",
+          "src/app/api/sovereign",
+          "src/app/api/tasks",
+          "src/app/api/handoffs",
+          "src/app/api/batches",
+          "src/app/api/fleets",
+          "src/app/api/worker/tick/route.ts",
+          "src/app/api/github/repos/route.ts",
+          "src/lib/organ-guardian.ts",
+          "src/lib/review-policy.ts"
+        ],
+        "invariant": "central authority gate covers every /api state-changing request",
+        "method": "source",
+        "result": "next@16 proxy() matcher /api/:path* runs resolveOperator; no-XFF=direct-local allow, private XFF=allow, else timingSafeEqual x-operator-key; Caddy overwrites XFF={remote_host}; 56 route files: zero route-level checks (central design)",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-01",
+        "reviewed_paths": [
+          "src/proxy.ts",
+          "src/lib/operator.ts",
+          "Caddyfile",
+          "package.json",
+          "src/app/api/operator/route.ts",
+          "src/app/api/health/route.ts",
+          "src/app/api/admin/db-reconnect/route.ts",
+          "src/app/api/drill/route.ts",
+          "src/app/api/evolution/route.ts",
+          "src/app/api/sovereign",
+          "src/app/api/tasks",
+          "src/app/api/handoffs",
+          "src/app/api/batches",
+          "src/app/api/fleets",
+          "src/app/api/worker/tick/route.ts",
+          "src/app/api/github/repos/route.ts",
+          "src/lib/organ-guardian.ts",
+          "src/lib/review-policy.ts"
+        ],
+        "invariant": "GET handlers read-only",
+        "method": "source",
+        "result": "VIOLATED by GET /api/health: boots guardian setInterval + spawns bun per down organ + writes guardian.log; passes gate as public",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-01",
+        "reviewed_paths": [
+          "src/proxy.ts",
+          "src/lib/operator.ts",
+          "Caddyfile",
+          "package.json",
+          "src/app/api/operator/route.ts",
+          "src/app/api/health/route.ts",
+          "src/app/api/admin/db-reconnect/route.ts",
+          "src/app/api/drill/route.ts",
+          "src/app/api/evolution/route.ts",
+          "src/app/api/sovereign",
+          "src/app/api/tasks",
+          "src/app/api/handoffs",
+          "src/app/api/batches",
+          "src/app/api/fleets",
+          "src/app/api/worker/tick/route.ts",
+          "src/app/api/github/repos/route.ts",
+          "src/lib/organ-guardian.ts",
+          "src/lib/review-policy.ts"
+        ],
+        "invariant": "browser mutations carry non-ambient credential or origin binding",
+        "method": "source",
+        "result": "no Origin/Referer/Sec-Fetch-Site validation anywhere; private-net XFF is ambient credential; text/plain no-cors JSON accepted",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-01",
+        "reviewed_paths": [
+          "src/proxy.ts",
+          "src/lib/operator.ts",
+          "Caddyfile",
+          "package.json",
+          "src/app/api/operator/route.ts",
+          "src/app/api/health/route.ts",
+          "src/app/api/admin/db-reconnect/route.ts",
+          "src/app/api/drill/route.ts",
+          "src/app/api/evolution/route.ts",
+          "src/app/api/sovereign",
+          "src/app/api/tasks",
+          "src/app/api/handoffs",
+          "src/app/api/batches",
+          "src/app/api/fleets",
+          "src/app/api/worker/tick/route.ts",
+          "src/app/api/github/repos/route.ts",
+          "src/lib/organ-guardian.ts",
+          "src/lib/review-policy.ts"
+        ],
+        "invariant": "direct-local allow only reachable by true loopback",
+        "method": "source",
+        "result": "source cannot establish :3000 binding/firewall — needs_validation",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-01",
+        "reviewed_paths": [
+          "src/proxy.ts",
+          "src/lib/operator.ts",
+          "Caddyfile",
+          "package.json",
+          "src/app/api/operator/route.ts",
+          "src/app/api/health/route.ts",
+          "src/app/api/admin/db-reconnect/route.ts",
+          "src/app/api/drill/route.ts",
+          "src/app/api/evolution/route.ts",
+          "src/app/api/sovereign",
+          "src/app/api/tasks",
+          "src/app/api/handoffs",
+          "src/app/api/batches",
+          "src/app/api/fleets",
+          "src/app/api/worker/tick/route.ts",
+          "src/app/api/github/repos/route.ts",
+          "src/lib/organ-guardian.ts",
+          "src/lib/review-policy.ts"
+        ],
+        "invariant": "destructive gates check right state",
+        "method": "source",
+        "result": "holds: approve-before-execute atomic, artifact hash re-enforced, secret rescan, repo regex gates, static repair token POST-gated",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "api/health:GET-public-organ-spawn-and-guardian-boot",
+      "api/mutations:private-net-xff-csrf-no-origin-binding",
+      "api/direct-port-3000:no-xff-direct-local-allow-all"
+    ],
+    "unresolved": [],
+    "hardening": [
+      "OperatorGate sameOrigin misclassifies protocol-relative //host URLs (OperatorGate.tsx:32) — use new URL(url, location.origin).origin === location.origin",
+      "OperatorGate force regex vs server has(force) mismatch",
+      "db.ts log:[query] echoes SQL+params into local gitignored logs",
+      "dead ChartStyle dangerouslySetInnerHTML — delete or validate before wiring",
+      "github.ts:227 verifyRepo interpolates unencoded (all call sites regex-gated today)",
+      "ops/tick inner self-fetches drop x-operator-key (self-impact quirk)"
+    ]
+  },
+  {
+    "coverage_id": "src%2Fapp%2Fapi%23request%20params%2C%20query%2C%20body%20into%20route%20handlers::src%2Flib%2Fdb.ts%23Prisma%20client%20%2B%20fs%2Fexec%20sinks%20in%20src%2Flib::src%2Fapp%2Fapi::Injection%20from%20HTTP%20inputs%20into%20db%2Ffs%2Fexec%20sinks",
+    "canonical_refs": {
+      "surface": "src/app/api#request params, query, body into route handlers",
+      "boundary": "src/lib/db.ts#Prisma client + fs/exec sinks in src/lib",
+      "subsystem": "src/app/api",
+      "attack_class": "Injection from HTTP inputs into db/fs/exec sinks"
+    },
+    "surface": "src/app/api#request params, query, body into route handlers",
+    "boundary": "src/lib/db.ts#Prisma client + fs/exec sinks in src/lib",
+    "subsystem": "src/app/api",
+    "attack_class": "Injection from HTTP inputs into db/fs/exec sinks",
+    "starting_paths": [
+      "src/app/api",
+      "src/lib"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Injection",
+    "selected_companion_blocks": [
+      "ATTACK-CLASSES.md#Core discipline",
+      "ATTACK-CLASSES.md#Universal moves",
+      "ATTACK-CLASSES.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "ATTACK-CLASSES.md#Cryptography and secrets",
+        "reason": "Covered by dedicated unit U11 (secrets custody) to avoid duplicate coverage."
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "hunter-01",
+    "reviewed_paths": [
+      "src/lib/db.ts",
+      "src/lib/handoff.ts",
+      "src/lib/github.ts",
+      "src/lib/batch.ts",
+      "src/lib/executor.ts",
+      "src/lib/llm-chain.ts",
+      "src/lib/claims.ts",
+      "src/lib/restore-drill.ts",
+      "src/lib/history-drill.ts",
+      "src/lib/sovereignty.ts",
+      "src/lib/flow.ts",
+      "src/lib/magnitude.ts",
+      "src/lib/census.ts",
+      "src/lib/hub.ts",
+      "src/lib/fixedfloat.ts",
+      "src/lib/providers.ts",
+      "src/lib/sitebuild.ts",
+      "src/lib/narration.ts",
+      "src/lib/chain-export.ts",
+      "src/lib/chain-repair.ts",
+      "src/lib/organ-guardian.ts",
+      "src/app/api/health/route.ts",
+      "src/app/api/sovereign/ops/selftest/route.ts",
+      "src/app/api/sovereign/content",
+      "src/app/api/tasks/route.ts",
+      "src/app/api/handoffs",
+      "src/app/api/batches/route.ts"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-01",
+        "reviewed_paths": [
+          "src/lib/db.ts",
+          "src/lib/handoff.ts",
+          "src/lib/github.ts",
+          "src/lib/batch.ts",
+          "src/lib/executor.ts",
+          "src/lib/llm-chain.ts",
+          "src/lib/claims.ts",
+          "src/lib/restore-drill.ts",
+          "src/lib/history-drill.ts",
+          "src/lib/sovereignty.ts",
+          "src/lib/flow.ts",
+          "src/lib/magnitude.ts",
+          "src/lib/census.ts",
+          "src/lib/hub.ts",
+          "src/lib/fixedfloat.ts",
+          "src/lib/providers.ts",
+          "src/lib/sitebuild.ts",
+          "src/lib/narration.ts",
+          "src/lib/chain-export.ts",
+          "src/lib/chain-repair.ts",
+          "src/lib/organ-guardian.ts",
+          "src/app/api/health/route.ts",
+          "src/app/api/sovereign/ops/selftest/route.ts",
+          "src/app/api/sovereign/content",
+          "src/app/api/tasks/route.ts",
+          "src/app/api/handoffs",
+          "src/app/api/batches/route.ts"
+        ],
+        "invariant": "no HTTP-controlled string reaches Prisma raw SQL",
+        "method": "source",
+        "result": "only tagged-template db.$queryRaw`SELECT 1` (health/route.ts:109), parameterized by construction; zero $queryRawUnsafe/$executeRaw* in src tree",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-01",
+        "reviewed_paths": [
+          "src/lib/db.ts",
+          "src/lib/handoff.ts",
+          "src/lib/github.ts",
+          "src/lib/batch.ts",
+          "src/lib/executor.ts",
+          "src/lib/llm-chain.ts",
+          "src/lib/claims.ts",
+          "src/lib/restore-drill.ts",
+          "src/lib/history-drill.ts",
+          "src/lib/sovereignty.ts",
+          "src/lib/flow.ts",
+          "src/lib/magnitude.ts",
+          "src/lib/census.ts",
+          "src/lib/hub.ts",
+          "src/lib/fixedfloat.ts",
+          "src/lib/providers.ts",
+          "src/lib/sitebuild.ts",
+          "src/lib/narration.ts",
+          "src/lib/chain-export.ts",
+          "src/lib/chain-repair.ts",
+          "src/lib/organ-guardian.ts",
+          "src/app/api/health/route.ts",
+          "src/app/api/sovereign/ops/selftest/route.ts",
+          "src/app/api/sovereign/content",
+          "src/app/api/tasks/route.ts",
+          "src/app/api/handoffs",
+          "src/app/api/batches/route.ts"
+        ],
+        "invariant": "no user-influenced path component reaches fs write/read sinks",
+        "method": "source",
+        "result": "all fs write targets fixed or from validated numerics/slugified titles; handoff paths GitHub contents API with validateHandoffPath; no traversal trace",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-01",
+        "reviewed_paths": [
+          "src/lib/db.ts",
+          "src/lib/handoff.ts",
+          "src/lib/github.ts",
+          "src/lib/batch.ts",
+          "src/lib/executor.ts",
+          "src/lib/llm-chain.ts",
+          "src/lib/claims.ts",
+          "src/lib/restore-drill.ts",
+          "src/lib/history-drill.ts",
+          "src/lib/sovereignty.ts",
+          "src/lib/flow.ts",
+          "src/lib/magnitude.ts",
+          "src/lib/census.ts",
+          "src/lib/hub.ts",
+          "src/lib/fixedfloat.ts",
+          "src/lib/providers.ts",
+          "src/lib/sitebuild.ts",
+          "src/lib/narration.ts",
+          "src/lib/chain-export.ts",
+          "src/lib/chain-repair.ts",
+          "src/lib/organ-guardian.ts",
+          "src/app/api/health/route.ts",
+          "src/app/api/sovereign/ops/selftest/route.ts",
+          "src/app/api/sovereign/content",
+          "src/app/api/tasks/route.ts",
+          "src/app/api/handoffs",
+          "src/app/api/batches/route.ts"
+        ],
+        "invariant": "no HTTP input reaches child_process argv or shell",
+        "method": "source",
+        "result": "all spawn/exec call sites fixed binaries+argv (bun run dev spawn, git read-only with constant args, restore-drill const REPO_URL, git show shas from local rev-list)",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-01",
+        "reviewed_paths": [
+          "src/lib/db.ts",
+          "src/lib/handoff.ts",
+          "src/lib/github.ts",
+          "src/lib/batch.ts",
+          "src/lib/executor.ts",
+          "src/lib/llm-chain.ts",
+          "src/lib/claims.ts",
+          "src/lib/restore-drill.ts",
+          "src/lib/history-drill.ts",
+          "src/lib/sovereignty.ts",
+          "src/lib/flow.ts",
+          "src/lib/magnitude.ts",
+          "src/lib/census.ts",
+          "src/lib/hub.ts",
+          "src/lib/fixedfloat.ts",
+          "src/lib/providers.ts",
+          "src/lib/sitebuild.ts",
+          "src/lib/narration.ts",
+          "src/lib/chain-export.ts",
+          "src/lib/chain-repair.ts",
+          "src/lib/organ-guardian.ts",
+          "src/app/api/health/route.ts",
+          "src/app/api/sovereign/ops/selftest/route.ts",
+          "src/app/api/sovereign/content",
+          "src/app/api/tasks/route.ts",
+          "src/app/api/handoffs",
+          "src/app/api/batches/route.ts"
+        ],
+        "invariant": "no user-built fetch URL (SSRF)",
+        "method": "source",
+        "result": "fetch targets are loopback constants, static third-party endpoints, whitelisted FF methods, or regex-validated+encoded GitHub URLs; no complete SSRF trace",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-01",
+        "reviewed_paths": [
+          "src/lib/db.ts",
+          "src/lib/handoff.ts",
+          "src/lib/github.ts",
+          "src/lib/batch.ts",
+          "src/lib/executor.ts",
+          "src/lib/llm-chain.ts",
+          "src/lib/claims.ts",
+          "src/lib/restore-drill.ts",
+          "src/lib/history-drill.ts",
+          "src/lib/sovereignty.ts",
+          "src/lib/flow.ts",
+          "src/lib/magnitude.ts",
+          "src/lib/census.ts",
+          "src/lib/hub.ts",
+          "src/lib/fixedfloat.ts",
+          "src/lib/providers.ts",
+          "src/lib/sitebuild.ts",
+          "src/lib/narration.ts",
+          "src/lib/chain-export.ts",
+          "src/lib/chain-repair.ts",
+          "src/lib/organ-guardian.ts",
+          "src/app/api/health/route.ts",
+          "src/app/api/sovereign/ops/selftest/route.ts",
+          "src/app/api/sovereign/content",
+          "src/app/api/tasks/route.ts",
+          "src/app/api/handoffs",
+          "src/app/api/batches/route.ts"
+        ],
+        "invariant": "user JSON schema-validated before use",
+        "method": "source",
+        "result": "zod batchInputSchema with caps; extractArtifact JSON.parses DB-stored output to string only; no route->sink injection trace",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": [],
+    "hardening": [
+      "OperatorGate sameOrigin misclassifies protocol-relative //host URLs (OperatorGate.tsx:32) — use new URL(url, location.origin).origin === location.origin",
+      "OperatorGate force regex vs server has(force) mismatch",
+      "db.ts log:[query] echoes SQL+params into local gitignored logs",
+      "dead ChartStyle dangerouslySetInnerHTML — delete or validate before wiring",
+      "github.ts:227 verifyRepo interpolates unencoded (all call sites regex-gated today)",
+      "ops/tick inner self-fetches drop x-operator-key (self-impact quirk)"
+    ]
+  },
+  {
+    "coverage_id": "src%2Fapp%2Fapi%2F%28dex-hot%7Cclaims%7Cbatches%7Carsenal%7Cmagnitude%7Cflow%29%2Froute.ts::src%2Flib%2Fexecutor.ts%20%2B%20src%2Flib%2Fclaims.ts%20trade%2Fburn%20authority::src%2Flib::Mint%2Fburn%2Fwrap%20and%20order-value%20business-logic%20violations",
+    "canonical_refs": {
+      "surface": "src/app/api/(dex-hot|claims|batches|arsenal|magnitude|flow)/route.ts",
+      "boundary": "src/lib/executor.ts + src/lib/claims.ts trade/burn authority",
+      "subsystem": "src/lib",
+      "attack_class": "Mint/burn/wrap and order-value business-logic violations"
+    },
+    "surface": "src/app/api/(dex-hot|claims|batches|arsenal|magnitude|flow)/route.ts",
+    "boundary": "src/lib/executor.ts + src/lib/claims.ts trade/burn authority",
+    "subsystem": "src/lib",
+    "attack_class": "Mint/burn/wrap and order-value business-logic violations",
+    "starting_paths": [
+      "src/app/api/dex-hot",
+      "src/app/api/claims",
+      "src/app/api/batches",
+      "src/lib/executor.ts",
+      "src/lib/claims.ts",
+      "src/lib/batch.ts"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Business logic",
+    "selected_companion_blocks": [
+      "ATTACK-CLASSES.md#Core discipline",
+      "ATTACK-CLASSES.md#Universal moves",
+      "ATTACK-CLASSES.md#Validation rules"
+    ],
+    "excluded_blocks": [],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "hunter-04",
+    "reviewed_paths": [
+      "src/app/api/dex-hot/route.ts",
+      "src/app/api/claims/route.ts",
+      "src/app/api/batches/route.ts",
+      "src/app/api/arsenal/route.ts",
+      "src/app/api/magnitude/route.ts",
+      "src/app/api/flow/route.ts",
+      "src/lib/executor.ts",
+      "src/lib/claims.ts",
+      "src/lib/batch.ts",
+      "src/lib/magnitude.ts",
+      "src/lib/flow.ts",
+      "src/lib/fixedfloat.ts",
+      "src/lib/ledger.ts",
+      "src/lib/llm-chain.ts",
+      "src/app/api/tasks/route.ts",
+      "src/proxy.ts",
+      "src/lib/operator.ts"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "src/app/api/dex-hot/route.ts",
+          "src/app/api/claims/route.ts",
+          "src/app/api/batches/route.ts",
+          "src/app/api/arsenal/route.ts",
+          "src/app/api/magnitude/route.ts",
+          "src/app/api/flow/route.ts",
+          "src/lib/executor.ts",
+          "src/lib/claims.ts",
+          "src/lib/batch.ts",
+          "src/lib/magnitude.ts",
+          "src/lib/flow.ts",
+          "src/lib/fixedfloat.ts",
+          "src/lib/ledger.ts",
+          "src/lib/llm-chain.ts",
+          "src/app/api/tasks/route.ts",
+          "src/proxy.ts",
+          "src/lib/operator.ts"
+        ],
+        "invariant": "state-changing POSTs operator-gated before handler logic",
+        "method": "source",
+        "result": "global proxy matcher /api/:path* gates all mutating methods through resolveOperator; Caddy XFF stamping prevents gateway callers appearing local",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "src/app/api/dex-hot/route.ts",
+          "src/app/api/claims/route.ts",
+          "src/app/api/batches/route.ts",
+          "src/app/api/arsenal/route.ts",
+          "src/app/api/magnitude/route.ts",
+          "src/app/api/flow/route.ts",
+          "src/lib/executor.ts",
+          "src/lib/claims.ts",
+          "src/lib/batch.ts",
+          "src/lib/magnitude.ts",
+          "src/lib/flow.ts",
+          "src/lib/fixedfloat.ts",
+          "src/lib/ledger.ts",
+          "src/lib/llm-chain.ts",
+          "src/app/api/tasks/route.ts",
+          "src/proxy.ts",
+          "src/lib/operator.ts"
+        ],
+        "invariant": "no negative/overflow amounts reach order construction",
+        "method": "source",
+        "result": "dex-hot/arsenal/flow read-only; magnitude divisions guarded; fixedfloat exact-body HMAC read-only; no order-value arithmetic on this surface",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "src/app/api/dex-hot/route.ts",
+          "src/app/api/claims/route.ts",
+          "src/app/api/batches/route.ts",
+          "src/app/api/arsenal/route.ts",
+          "src/app/api/magnitude/route.ts",
+          "src/app/api/flow/route.ts",
+          "src/lib/executor.ts",
+          "src/lib/claims.ts",
+          "src/lib/batch.ts",
+          "src/lib/magnitude.ts",
+          "src/lib/flow.ts",
+          "src/lib/fixedfloat.ts",
+          "src/lib/ledger.ts",
+          "src/lib/llm-chain.ts",
+          "src/app/api/tasks/route.ts",
+          "src/proxy.ts",
+          "src/lib/operator.ts"
+        ],
+        "invariant": "no replay of completed flow",
+        "method": "source",
+        "result": "claims/magnitude append one AUDIT entry per gated call; atomic claim updateMany with stale-reclaim; ledger UNIQUE(prev) serialized queue",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "src/app/api/dex-hot/route.ts",
+          "src/app/api/claims/route.ts",
+          "src/app/api/batches/route.ts",
+          "src/app/api/arsenal/route.ts",
+          "src/app/api/magnitude/route.ts",
+          "src/app/api/flow/route.ts",
+          "src/lib/executor.ts",
+          "src/lib/claims.ts",
+          "src/lib/batch.ts",
+          "src/lib/magnitude.ts",
+          "src/lib/flow.ts",
+          "src/lib/fixedfloat.ts",
+          "src/lib/ledger.ts",
+          "src/lib/llm-chain.ts",
+          "src/app/api/tasks/route.ts",
+          "src/proxy.ts",
+          "src/lib/operator.ts"
+        ],
+        "invariant": "no state-machine skip",
+        "method": "source",
+        "result": "batch zod-bounded, live repo verify, tasks QUEUED->RUNNING only via atomic claim, BATCH summary only when all tasks terminal",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "src/app/api/dex-hot/route.ts",
+          "src/app/api/claims/route.ts",
+          "src/app/api/batches/route.ts",
+          "src/app/api/arsenal/route.ts",
+          "src/app/api/magnitude/route.ts",
+          "src/app/api/flow/route.ts",
+          "src/lib/executor.ts",
+          "src/lib/claims.ts",
+          "src/lib/batch.ts",
+          "src/lib/magnitude.ts",
+          "src/lib/flow.ts",
+          "src/lib/fixedfloat.ts",
+          "src/lib/ledger.ts",
+          "src/lib/llm-chain.ts",
+          "src/app/api/tasks/route.ts",
+          "src/proxy.ts",
+          "src/lib/operator.ts"
+        ],
+        "invariant": "honest-title law",
+        "method": "source",
+        "result": "DONE signed only when measured outcome matches (claims overall=active; magnitude all sources up)",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": [],
+    "hardening": [
+      "executor writeResult retry can duplicate cosmetic ledger append on first-then-throw",
+      "claims GET spawns node leak-scan + 4 git subprocesses per call, no memoization (pre-auth work imbalance)",
+      "heartbeat appGuard respawn lacks backoff; all heartbeat git spawnSync without timeout",
+      "resyncFromOrigin can discard valid local-only chain tail",
+      "council_events/council_cards + vault-guardian-log.jsonl same no-retention pattern"
+    ]
+  },
+  {
+    "coverage_id": "src%2Fapp%2Fpage.tsx%20%2B%20src%2Fcomponents%2F%2A%2A%20rendering%20of%20chain%2FAPI%20data::React%20JSX%20auto-escaping%20%28no%20dangerouslySetInnerHTML%20%2F%20href%20sinks%29::src%2Fapp::DOM-based%20XSS%20from%20chain-derived%20content%20%28memos%2C%20tx%20ids%2C%20feed%20text%29",
+    "canonical_refs": {
+      "surface": "src/app/page.tsx + src/components/** rendering of chain/API data",
+      "boundary": "React JSX auto-escaping (no dangerouslySetInnerHTML / href sinks)",
+      "subsystem": "src/app",
+      "attack_class": "DOM-based XSS from chain-derived content (memos, tx ids, feed text)"
+    },
+    "surface": "src/app/page.tsx + src/components/** rendering of chain/API data",
+    "boundary": "React JSX auto-escaping (no dangerouslySetInnerHTML / href sinks)",
+    "subsystem": "src/app",
+    "attack_class": "DOM-based XSS from chain-derived content (memos, tx ids, feed text)",
+    "starting_paths": [
+      "src/app/page.tsx",
+      "src/components"
+    ],
+    "ordinary_attack_class_block": "CLIENT-SIDE.md#DOM-based XSS",
+    "selected_companion_blocks": [
+      "CLIENT-SIDE.md#Credentialed CORS trust",
+      "CLIENT-SIDE.md#Core discipline",
+      "CLIENT-SIDE.md#Universal moves",
+      "CLIENT-SIDE.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "CLIENT-SIDE.md#Service-worker registration and scope takeover",
+        "reason": "No service-worker registration exists in source (no navigator.serviceWorker, no sw.js)."
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "hunter-01",
+    "reviewed_paths": [
+      "src/app/page.tsx",
+      "src/app/layout.tsx",
+      "src/components/OperatorGate.tsx",
+      "src/components/MobileNav.tsx",
+      "src/components/ui/chart.tsx",
+      "src/components/GridPanel.tsx",
+      "src/components/HotMarketPanel.tsx",
+      "src/components/LivePulse.tsx",
+      "src/components/NetworkHub.tsx",
+      "src/components/CouncilPanel.tsx",
+      "src/components/ClaimsAuditor.tsx",
+      "src/components/FlowGuard.tsx",
+      "src/components/OperationsHub.tsx",
+      "src/components/AutonomyOps.tsx",
+      "src/components/SovereigntyMeter.tsx",
+      "src/components/MagnitudeMeter.tsx"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-01",
+        "reviewed_paths": [
+          "src/app/page.tsx",
+          "src/app/layout.tsx",
+          "src/components/OperatorGate.tsx",
+          "src/components/MobileNav.tsx",
+          "src/components/ui/chart.tsx",
+          "src/components/GridPanel.tsx",
+          "src/components/HotMarketPanel.tsx",
+          "src/components/LivePulse.tsx",
+          "src/components/NetworkHub.tsx",
+          "src/components/CouncilPanel.tsx",
+          "src/components/ClaimsAuditor.tsx",
+          "src/components/FlowGuard.tsx",
+          "src/components/OperationsHub.tsx",
+          "src/components/AutonomyOps.tsx",
+          "src/components/SovereigntyMeter.tsx",
+          "src/components/MagnitudeMeter.tsx"
+        ],
+        "invariant": "no escape hatch receives chain/API-derived data",
+        "method": "source",
+        "result": "single dangerouslySetInnerHTML in dead shadcn ChartStyle (ui/chart.tsx:83, zero usages); no eval/Function/document.write/innerHTML; chain content renders via JSX text nodes",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-01",
+        "reviewed_paths": [
+          "src/app/page.tsx",
+          "src/app/layout.tsx",
+          "src/components/OperatorGate.tsx",
+          "src/components/MobileNav.tsx",
+          "src/components/ui/chart.tsx",
+          "src/components/GridPanel.tsx",
+          "src/components/HotMarketPanel.tsx",
+          "src/components/LivePulse.tsx",
+          "src/components/NetworkHub.tsx",
+          "src/components/CouncilPanel.tsx",
+          "src/components/ClaimsAuditor.tsx",
+          "src/components/FlowGuard.tsx",
+          "src/components/OperationsHub.tsx",
+          "src/components/AutonomyOps.tsx",
+          "src/components/SovereigntyMeter.tsx",
+          "src/components/MagnitudeMeter.tsx"
+        ],
+        "invariant": "URL/iframe sinks not attacker-scheme fed; _blank opener isolation",
+        "method": "source",
+        "result": "3 URL sinks: GitHub commit href with validated repo regex + rel=noreferrer; audio src numeric id; static anchor list; no javascript:/data:/window.open/iframe",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-01",
+        "reviewed_paths": [
+          "src/app/page.tsx",
+          "src/app/layout.tsx",
+          "src/components/OperatorGate.tsx",
+          "src/components/MobileNav.tsx",
+          "src/components/ui/chart.tsx",
+          "src/components/GridPanel.tsx",
+          "src/components/HotMarketPanel.tsx",
+          "src/components/LivePulse.tsx",
+          "src/components/NetworkHub.tsx",
+          "src/components/CouncilPanel.tsx",
+          "src/components/ClaimsAuditor.tsx",
+          "src/components/FlowGuard.tsx",
+          "src/components/OperationsHub.tsx",
+          "src/components/AutonomyOps.tsx",
+          "src/components/SovereigntyMeter.tsx",
+          "src/components/MagnitudeMeter.tsx"
+        ],
+        "invariant": "no credentialed CORS grants",
+        "method": "source",
+        "result": "zero CORS headers, zero credentials:include, no cookie sessions; cross-origin pages cannot read API responses",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-01",
+        "reviewed_paths": [
+          "src/app/page.tsx",
+          "src/app/layout.tsx",
+          "src/components/OperatorGate.tsx",
+          "src/components/MobileNav.tsx",
+          "src/components/ui/chart.tsx",
+          "src/components/GridPanel.tsx",
+          "src/components/HotMarketPanel.tsx",
+          "src/components/LivePulse.tsx",
+          "src/components/NetworkHub.tsx",
+          "src/components/CouncilPanel.tsx",
+          "src/components/ClaimsAuditor.tsx",
+          "src/components/FlowGuard.tsx",
+          "src/components/OperationsHub.tsx",
+          "src/components/AutonomyOps.tsx",
+          "src/components/SovereigntyMeter.tsx",
+          "src/components/MagnitudeMeter.tsx"
+        ],
+        "invariant": "client operator-key custody",
+        "method": "source",
+        "result": "key in localStorage, fetch interceptor sameOrigin test misclassifies protocol-relative URLs (hardening only; all current fetches literal /api strings)",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": [],
+    "hardening": []
+  },
+  {
+    "coverage_id": "src%2Flib%2Fchain-export.ts%2C%20chain-repair.ts%2C%20restore-drill.ts%2C%20handoffs::export%2Frestore%20handlers%20writing%20state%20and%20reading%20chain%20data::src%2Flib::Export%2Fbackup%20scope%20expansion%20and%20restore%20authority",
+    "canonical_refs": {
+      "surface": "src/lib/chain-export.ts, chain-repair.ts, restore-drill.ts, handoffs",
+      "boundary": "export/restore handlers writing state and reading chain data",
+      "subsystem": "src/lib",
+      "attack_class": "Export/backup scope expansion and restore authority"
+    },
+    "surface": "src/lib/chain-export.ts, chain-repair.ts, restore-drill.ts, handoffs",
+    "boundary": "export/restore handlers writing state and reading chain data",
+    "subsystem": "src/lib",
+    "attack_class": "Export/backup scope expansion and restore authority",
+    "starting_paths": [
+      "src/lib/chain-export.ts",
+      "src/lib/chain-repair.ts",
+      "src/lib/restore-drill.ts",
+      "src/lib/handoff.ts"
+    ],
+    "ordinary_attack_class_block": "DATA-ISOLATION-AND-LIFECYCLE.md#Export and backup scope expansion",
+    "selected_companion_blocks": [
+      "DATA-ISOLATION-AND-LIFECYCLE.md#Restore reintroduces invalid state",
+      "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+      "DATA-ISOLATION-AND-LIFECYCLE.md#Universal moves",
+      "DATA-ISOLATION-AND-LIFECYCLE.md#Validation rules"
+    ],
+    "excluded_blocks": [],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "hunter-04",
+    "reviewed_paths": [
+      "src/lib/chain-export.ts",
+      "src/lib/chain-repair.ts",
+      "src/lib/restore-drill.ts",
+      "src/lib/handoff.ts",
+      "src/lib/autohandoff.ts",
+      "src/app/api/ledger/route.ts",
+      "src/app/api/handoffs",
+      "src/app/api/operations/route.ts",
+      "src/app/api/sovereign/content/[id]/audio/route.ts"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "src/lib/chain-export.ts",
+          "src/lib/chain-repair.ts",
+          "src/lib/restore-drill.ts",
+          "src/lib/handoff.ts",
+          "src/lib/autohandoff.ts",
+          "src/app/api/ledger/route.ts",
+          "src/app/api/handoffs",
+          "src/app/api/operations/route.ts",
+          "src/app/api/sovereign/content/[id]/audio/route.ts"
+        ],
+        "invariant": "export dumps only canonical scope, no secret config",
+        "method": "source",
+        "result": "export lines = LedgerRecord columns only; no config/env/key table exported; single-principal system",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "src/lib/chain-export.ts",
+          "src/lib/chain-repair.ts",
+          "src/lib/restore-drill.ts",
+          "src/lib/handoff.ts",
+          "src/lib/autohandoff.ts",
+          "src/app/api/ledger/route.ts",
+          "src/app/api/handoffs",
+          "src/app/api/operations/route.ts",
+          "src/app/api/sovereign/content/[id]/audio/route.ts"
+        ],
+        "invariant": "no user-influenced path reaches fs sinks",
+        "method": "source",
+        "result": "EXPORT_PATH/repair temps cwd-derived constants; drill sources closed enum + strict filename regex + age bound; audio id coerced positive int",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "src/lib/chain-export.ts",
+          "src/lib/chain-repair.ts",
+          "src/lib/restore-drill.ts",
+          "src/lib/handoff.ts",
+          "src/lib/autohandoff.ts",
+          "src/app/api/ledger/route.ts",
+          "src/app/api/handoffs",
+          "src/app/api/operations/route.ts",
+          "src/app/api/sovereign/content/[id]/audio/route.ts"
+        ],
+        "invariant": "restore/repair cannot reintroduce invalid state",
+        "method": "source",
+        "result": "restore-drill never writes production state (throwaway copy + prefix cross-check); chain-repair rewrites only broken tail with full verify; export rebuild requires verified divergence",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-04",
+        "reviewed_paths": [
+          "src/lib/chain-export.ts",
+          "src/lib/chain-repair.ts",
+          "src/lib/restore-drill.ts",
+          "src/lib/handoff.ts",
+          "src/lib/autohandoff.ts",
+          "src/app/api/ledger/route.ts",
+          "src/app/api/handoffs",
+          "src/app/api/operations/route.ts",
+          "src/app/api/sovereign/content/[id]/audio/route.ts"
+        ],
+        "invariant": "handoff intake cannot execute or bypass approval",
+        "method": "source",
+        "result": "DONE task required, 256KB cap, secret-scanned, path validator, approve PROPOSED->APPROVED only, execute hash-pins + byte-compares read-back",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": [],
+    "hardening": [
+      "executor writeResult retry can duplicate cosmetic ledger append on first-then-throw",
+      "claims GET spawns node leak-scan + 4 git subprocesses per call, no memoization (pre-auth work imbalance)",
+      "heartbeat appGuard respawn lacks backoff; all heartbeat git spawnSync without timeout",
+      "resyncFromOrigin can discard valid local-only chain tail",
+      "council_events/council_cards + vault-guardian-log.jsonl same no-retention pattern"
+    ]
+  }
+]

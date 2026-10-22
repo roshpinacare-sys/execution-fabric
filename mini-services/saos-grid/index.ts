@@ -10,6 +10,7 @@ import './lib/install-secp-shim.cjs'
 import * as engine from './engine'
 import * as ff from './ff'
 import * as market from './market'
+import { organAuth } from '../organ-auth'
 
 const PORT = Number(process.env.PORT ?? 3070)
 const CYCLE_MS = Number(process.env.CYCLE_MS ?? 45_000)
@@ -72,14 +73,22 @@ try {
         return Response.json({ ok: true, ff: await ff.probe() })
       }
       if (p === '/halt' && req.method === 'POST') {
+        // Task-121 audit fix (fingerprint saos-grid:3070-mutating-endpoints-without-authority-check):
+        // שער-סמכות — ה-bind-המקומי איננו גבול (שער-ה-Caddy מגיע אליו מבחוץ)
+        const deny = organAuth(req)
+        if (deny) return deny
         engine.halt('בקשת-עצירה-ידנית', false)
         return Response.json({ ok: true, halted: true })
       }
       if (p === '/resume' && req.method === 'POST') {
+        const deny = organAuth(req)
+        if (deny) return deny
         engine.resume()
         return Response.json({ ok: true, halted: false })
       }
       if (p === '/cycle' && req.method === 'POST') {
+        const deny = organAuth(req)
+        if (deny) return deny
         const r = await engine.cycle()
         return Response.json({ ok: true, ...r })
       }

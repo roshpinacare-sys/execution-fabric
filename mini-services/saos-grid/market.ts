@@ -273,14 +273,14 @@ async function fetchSteemBinance(): Promise<number> {
   // binance (נמדד: זמין-לסירוגין — איפוס-IP-חוזר)
   try {
     const res = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=STEEMUSDT', { signal: AbortSignal.timeout(6000), cache: 'no-store' })
-    if (res.ok) { const p = parseFloat(((await res.json()) as { price?: string }).price ?? '0'); if (p > 0) return p }
+    if (res.ok) { const p = parseFloat(((await res.json()) as { price?: string }).price ?? '0'); if (Number.isFinite(p) && p > 0 && p < 1e3) return p }
   } catch { /* מקור-הבא */ }
   return 0
 }
 async function fetchSteemCoingecko(): Promise<number> {
   try {
     const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=steem&vs_currencies=usd', { signal: AbortSignal.timeout(8000), cache: 'no-store' })
-    if (res.ok) { const p = parseFloat(String(((await res.json()) as { steem?: { usd?: number } }).steem?.usd ?? '0')); if (p > 0) return p }
+    if (res.ok) { const p = parseFloat(String(((await res.json()) as { steem?: { usd?: number } }).steem?.usd ?? '0')); if (Number.isFinite(p) && p > 0 && p < 1e3) return p }
   } catch { /* מקור-הבא */ }
   return 0
 }
@@ -288,7 +288,7 @@ async function fetchSteemPaprika(): Promise<number> {
   // coinpaprika (נמדד-חי 00:48Z ו-01:06Z: 0.0552)
   try {
     const res = await fetch('https://api.coinpaprika.com/v1/tickers/steem-steem', { signal: AbortSignal.timeout(8000), cache: 'no-store' })
-    if (res.ok) { const p = parseFloat(String(((await res.json()) as { quotes?: { USD?: { price?: number } } }).quotes?.USD?.price ?? '0')); if (p > 0) return p }
+    if (res.ok) { const p = parseFloat(String(((await res.json()) as { quotes?: { USD?: { price?: number } } }).quotes?.USD?.price ?? '0')); if (Number.isFinite(p) && p > 0 && p < 1e3) return p }
   } catch { /* כנות: אין-מדידה-STEEM */ }
   return 0
 }
@@ -316,7 +316,7 @@ async function fetchSbdUsd(): Promise<number> {
   // SBD: coingecko הוא-המקור-היחיד-שנמדד-חי (coinpaprika: אין-ticker-sbd)
   try {
     const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=steem-dollars&vs_currencies=usd', { signal: AbortSignal.timeout(8000), cache: 'no-store' })
-    if (res.ok) { const p = parseFloat(String(((await res.json()) as { 'steem-dollars'?: { usd?: number } })['steem-dollars']?.usd ?? '0')); if (p > 0) return p }
+    if (res.ok) { const p = parseFloat(String(((await res.json()) as { 'steem-dollars'?: { usd?: number } })['steem-dollars']?.usd ?? '0')); if (Number.isFinite(p) && p > 0 && p < 1e3) return p }
   } catch { /* כנות: אין-מדידה-SBD */ }
   return 0
 }
@@ -331,9 +331,23 @@ export async function getExternalMarks(): Promise<ExternalMarks> {
     // Task-120 חגורת-מתים: אם-הזהות-הטרייה קרובה-לעוגן-המיושם יותר-מ-DEADBAND —
     // העוגן-הקודם נשאר (רק-מאריכים-מטמון). הסולם לא-נסחט-על-רעש-בין-מקורות/בורסות.
     const candidateIdentity = steemUsd / sbdUsd
+    // Task-121 audit fix (fingerprint saos-grid:market-single-source-anchor-no-cross-validation-or-bounds):
+    // חגורת-שפיות-מוחלטת + חגורת-צעד: ערך-זהות מחוץ-ל-[0.01,10000] או קפיצה-חד-רענון >25%
+    // נדחים — העוגן-האחרון-הטוב קופא (מקור-שקרן/פגום לא מזיז-את-הרצפה). Infinity/NaN נפסלים
+    // כבר-ב-parsers (Number.isFinite). מדידות-אמת (Task-120): תנודות-אמת 0.28-0.9% — 25% גבוה-בביטחון.
+    if (!(candidateIdentity > 0.01 && candidateIdentity < 10000)) {
+      console.warn(`[market] anchor-plausibility-reject: candidateIdentity=${candidateIdentity} (steemUsd=${steemUsd} sbdUsd=${sbdUsd}) — מקור-נפסל`)
+      if (marksCache) { marksAt = Date.now(); return marksCache }
+      return { steemUsd: 0, sbdUsd: 0, at: new Date().toISOString(), stale: true } as ExternalMarks
+    }
     const prevIdentity = marksCache && !marksCache.stale && marksCache.sbdUsd > 0
       ? marksCache.steemUsd / marksCache.sbdUsd
       : 0
+    if (prevIdentity > 0 && Math.abs(candidateIdentity - prevIdentity) / prevIdentity > 0.25) {
+      console.warn(`[market] anchor-step-bound-reject: ${prevIdentity.toFixed(5)} -> ${candidateIdentity.toFixed(5)} (>25% צעד-חד) — העוגן-הקודם קופא`)
+      marksAt = Date.now()
+      return marksCache
+    }
     if (prevIdentity > 0 && Math.abs(candidateIdentity - prevIdentity) / prevIdentity < ANCHOR_DEADBAND_PCT / 100) {
       marksAt = Date.now()
       return marksCache

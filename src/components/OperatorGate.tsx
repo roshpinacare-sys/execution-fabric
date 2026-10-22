@@ -29,14 +29,17 @@ export function OperatorGate() {
     window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
       try {
         const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
-        const sameOrigin = url.startsWith('/') || url.startsWith(window.location.origin)
+        // Task-121 hardening: פרוטוקול-יחסי '//host' איננו same-origin — השוואת-origin מלאה,
+        // אחרת מפתח-הבעלים היה מצורף לבקשה חוצת-מקור
+        const resolved = new URL(url, window.location.origin)
+        const sameOrigin = resolved.origin === window.location.origin
         if (sameOrigin) {
           const method = String(
             init?.method ??
               (typeof input === 'object' && input !== null && !(input instanceof URL) ? input.method : 'GET') ??
               'GET',
           ).toUpperCase()
-          const force = /[?&]force=1/.test(url)
+          const force = /([?&])force=/.test(url)
           const mutates = (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') || force
           if (mutates) {
             const stored = window.localStorage.getItem(STORAGE_KEY) || ''

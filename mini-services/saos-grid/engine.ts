@@ -186,6 +186,20 @@ try {
   }
 } catch { /* כנות: ניקוי-לא-קריטי */ }
 
+// Task-121 audit fix (fingerprint saos-grid.grid_events.grid_orders.unbounded-no-retention):
+// שמירת-אירועים 30 יום (דפוס-האח-הצופה saos-metrics: ריטנשן-שוטף) + אינדקס-לסריקת-המילויים.
+// grid_orders אינו-נמחק (פנקס-הקלטת-האמת) — רק-מאונדקס. ריצה-שעתית-דרך-grid_meta.
+db.exec(`CREATE INDEX IF NOT EXISTS idx_grid_orders_filled_at ON grid_orders(filled_at)`)
+try {
+  const lastRetention = db.query("SELECT v FROM grid_meta WHERE k='events_retention_at'").get() as { v?: string } | undefined
+  if (!lastRetention || Date.now() - Date.parse(lastRetention.v) > 3600_000) {
+    const cutoff = new Date(Date.now() - 30 * 86400_000).toISOString()
+    const del = db.query("DELETE FROM grid_events WHERE at < ? AND kind NOT IN ('fill')").run(cutoff)
+    db.query("INSERT INTO grid_meta(k,v) VALUES('events_retention_at',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(new Date().toISOString())
+    if (del.changes > 0) console.log(`[saos-grid] Task-121 ריטנשן: ${del.changes} אירועים-מעל-30-יום נמחקו`)
+  }
+} catch { /* כנות: ריטנשן-לא-קריטי */ }
+
 // Task-113 תיקון-חד-פעמי-עמיד: שורות-שאומצו-לפני-הפרדת-הסמכויות (level=0 אבל
 // לא-הוצבו-על-ידי-המנוע) → מסומנות level=-9 (מעקב-בלבד). זיהוי-הפקודות-שלנו:
 // כל-הצבה-שלנו רושמת-אירוע-place-עם orderid=<N> בפירוט. אידמפוטנטי.
@@ -489,9 +503,19 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
           canceled++
           continue
         }
-        if (o.side === 'sell' && floor !== null && o.price < floor) {
+        // Task-121 audit fix (fingerprint saos-grid:engine-shadow-to-live-migration-bypasses-anchor-fail-closed):
+        // אין-עוגן (floor===null) → הגירת-מכירות-צל נכשלת-סגור — המשמעת (415-425) חייבת-לחול-גם-כאן,
+        // בדיוק-כמו-בסולם (:676) בנגדים (:593) ובריקווט (:804).
+        if (o.side === 'sell' && (floor === null || o.price < floor)) {
           db.query("UPDATE grid_orders SET status='canceled' WHERE orderid=?").run(o.orderid)
-          event('cancel', { account: o.account, side: o.side, level: o.level, price: o.price, amountSteem: o.amount_steem, amountSbd: o.amount_sbd, mode: 'shadow', detail: `הגירה: מחיר-צל-מתחת-לרצפת (${floor.toFixed(4)}) — לא-משודר` })
+          event('cancel', { account: o.account, side: o.side, level: o.level, price: o.price, amountSteem: o.amount_steem, amountSbd: o.amount_sbd, mode: 'shadow', detail: `הגירה: ${floor === null ? 'אין-עוגן-ערך-חוץ — כשל-סגור (Task-117/121)' : `מחיר-צל-מתחת-לרצפת (${floor.toFixed(4)})`} — לא-משודר` })
+          canceled++
+          continue
+        }
+        // Task-121 audit fix: מראה-סימטרי לשומר-הקניות — גם-מוטציות-מכירה כפופות למנהל-החשיפה
+        if (o.side === 'sell' && skipSide === 'sell') {
+          db.query("UPDATE grid_orders SET status='canceled' WHERE orderid=?").run(o.orderid)
+          event('cancel', { account: o.account, side: o.side, level: o.level, price: o.price, amountSteem: o.amount_steem, amountSbd: o.amount_sbd, mode: 'shadow', detail: 'הגירה: מכירה-חסומה-במנהל-החשיפה — לא-משודרת' })
           canceled++
           continue
         }

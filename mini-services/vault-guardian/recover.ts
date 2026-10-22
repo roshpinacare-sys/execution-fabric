@@ -253,7 +253,8 @@ export async function landSteemEnv(recovered: Record<string, string>, accounts: 
     if (!lines.some((l) => l.startsWith('GRID_ACCOUNTS='))) lines.splice(3, 0, `GRID_ACCOUNTS=${accounts.join(',')}`);
   }
   mkdirSync(UP, { recursive: true });
-  writeFileSync(VAULT_ENV, lines.join('\n') + '\n');
+  // Task-121 hardening: מוד-0600 ישירות-בכתיבה — נסגר-חלון-הזמן שבין-הכתיבה ל-chmod
+  writeFileSync(VAULT_ENV, lines.join('\n') + '\n', { mode: 0o600 });
   try { (await import('node:fs')).chmodSync(VAULT_ENV, 0o600); } catch { /* פרטיות-טובה-מנסה */ }
   return { ok: landed.length > 0, landed };
 }
