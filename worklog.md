@@ -2539,3 +2539,20 @@ Work Log:
 Stage Summary:
 - The owner's two claims are now settled with measured artifacts: (1) "no proof" → the Proof Board on / shows every claim as a live measurement that refreshes itself every 10s and re-proves itself with different latencies; (2) "everything falls and doesn't come back" → the app fell mid-task and self-revived in ~15-20s (appGuard→guardian→9 organs), metrics self-revived in 2.2s, grid carries 14 documented falls-and-returns, and the keeper's freeze class — the one thing that genuinely did NOT come back — is root-fixed with the zero-blocking law.
 - Artifacts: src/app/api/sovereign/ops/proof/route.ts (GET+POST seal), src/components/ProofBoard.tsx, survival-keeper runBounded refactor (4 blocking sites eliminated), lastTickAt visibility, worklog entry, sealed ledger 2226.
+
+---
+Task ID: 125
+Agent: Z.ai Code (orchestrator)
+Task: "הלכתי לנוח לשעתיים לא ראיתי שקרה משהו בכלל למרות הטענות שלך" + hydration error pasted by owner — fix the visible failures, continue, push.
+
+Work Log:
+- EVIDENCE FIRST (not claims): ledger 141 entries in the owner's 2h rest window (last id 2266 one minute before measurement) — activity EXISTED; what failed was (a) push of da1482d at 10:09 (transient), retried only at the next 15-min pulse → origin/main stale for the owner; (b) a live hydration crash pasted by the owner; (c) the git-pulse state itself invisible on the proof board.
+- HYDRATION ROOT-CAUSED AND FIXED (src/components/ProofBoard.tsx): `useState(() => Date.now())` rendered the clock during SSR in server TZ (UTC) vs client TZ (Israel UTC+3) → React hydration mismatch crash overlay = the face of "broken" for the owner. Law now: zero clock on the server — `null` until mount, timezone-blind `--:--:--` placeholder, real time client-only.
+- TWO REAL GIT-PULSE DEFECTS FIXED (mini-services/fabric-heartbeat/index.ts): (1) clean-tree-with-unpushed-HEAD fell into 'clean — אין-שינויים לדחוף' FALSE result — a failed push followed by a quiet tree would sit unpushed forever (da1482d's window). Now measured: `rev-list --count origin/main..HEAD` drives the push even on a clean tree. (2) push failure waited 15 min for the next pulse; now schedulePushRetry fires the full gitPulseChecked path after 60/120/240s (bounded ×3, zero load, counter resets on success).
+- GIT HYGIENE: removed interrupted-push temp objects (.git/objects/*/tmp_obj_* — the count-objects garbage warnings).
+- VISIBILITY (proof route + board): /api/sovereign/ops/proof now also measures the heart itself (:3031) live — gitPulses/gitPushes/lastGitPulseAt/lastGitPulseResult/appRestarts — and the board shows "פעימת-גיט: <time> · <result> · N דחיפות-אוטומטיות" plus an amber "האפליקציה-נפלה-והוזנקה-חזרה ×N" badge. The owner now SEES the push artery beat, including failures, in the app.
+- LIVE PROOF: heart hot-reloaded (startedAt 10:27:48), its first pulse with the new code pushed 11 files at 10:28:08 — including this very fix (the fix pushed itself through the artery it fixes); proof API returns pulse data, 10/10 organs, chain 2267, witness ok, HEAD==origin/main (9854577).
+
+Stage Summary:
+- The owner's "nothing happened" is now structurally impossible to repeat silently: a failed push self-retries within ≤2 min, an unpushed commit can no longer be masked by a quiet tree, and every push/fail/restart is a live badge on the proof board refreshed every 10s. Hydration crash eliminated at the root.
+- Artifacts: ProofBoard.tsx (hydration law + pulse display), ops/proof/route.ts (heart measurement), fabric-heartbeat/index.ts (ahead-measurement + push-retry), this worklog, commit 9854577 on origin/main.

@@ -44,7 +44,7 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "no-useless-escape": "off",
   },
 }, {
-  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills", "repos/**", "mini-services/saos-arb/state/**", "mini-services/saos-grid/state/**", "mini-services/saos-metrics/state/**", "**/*.cjs"]
+  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills", "repos/**", "mini-services/repos/**", "mini-services/saos-arb/state/**", "mini-services/saos-grid/state/**", "mini-services/saos-metrics/state/**", "**/*.cjs"]
 }];
 
 export default eslintConfig;
