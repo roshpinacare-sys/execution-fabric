@@ -363,11 +363,11 @@
     },
     "143": {
       "audioPath": "sovereign/site/audio/improvement-143.wav",
-      "sizeBytes": 1441296,
+      "sizeBytes": 314256,
       "voice": "tongtong",
       "speed": 1,
-      "textChars": 162,
-      "narratedAt": "2026-10-20T16:09:57.565Z",
+      "textChars": 92,
+      "narratedAt": "2026-10-22T02:18:27.459Z",
       "worker": "sdk-tts:tongtong"
     },
     "144": {

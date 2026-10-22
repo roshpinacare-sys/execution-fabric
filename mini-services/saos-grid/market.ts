@@ -254,22 +254,61 @@ import { join } from 'node:path'
 const MARKS_FILE = join(import.meta.dir, 'state', 'marks.json')
 const MARKS_MAX_AGE_MS = 24 * 3600_000
 
-async function fetchSteemUsd(): Promise<number> {
-  // מקור-1: binance (נמדד: זמין-לסירוגין — איפוס-IP-חוזר)
+// Task-120 מדידה-חיה (02:20-02:30Z): העוגן התנדנד ±0.9% בין-המקורות (binance↔coingecko —
+// המקור-שמגיב-ראשון מנצח-את-המרוץ-מחדש-בכל-רענון) → הרצפה קפצה → requote מלא של-הסולם
+// בכל-קפיצה (נמדדו 433 ביטולים/שעה). תיקון-כפול:
+//   (1) עוגן-דביק: המקור-שהצליח-אחרון נשאר-ראשון-בתור — אין-מרוץ-מחדש כל-עוד-הוא-חי;
+//   (2) חגורת-מתים: שינוי-זהות בתוך GRID_ANCHOR_DEADBAND_PCT (ברירת-מחדל 0.4%, גבולות 0.05-2)
+//       לא מזיז את-העוגן — הסולם נח על-רעש-מדידה, נע רק על-תזוזה-אמיתית.
+type SteemSourceName = 'binance' | 'coingecko' | 'coinpaprika'
+let stickySteemSource: SteemSourceName | null = null
+
+function envNum(v: string | undefined, d: number): number {
+  const n = parseFloat(v ?? '')
+  return Number.isFinite(n) ? n : d
+}
+const ANCHOR_DEADBAND_PCT = Math.min(2, Math.max(0.05, envNum(process.env.GRID_ANCHOR_DEADBAND_PCT, 0.4)))
+
+async function fetchSteemBinance(): Promise<number> {
+  // binance (נמדד: זמין-לסירוגין — איפוס-IP-חוזר)
   try {
     const res = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=STEEMUSDT', { signal: AbortSignal.timeout(6000), cache: 'no-store' })
     if (res.ok) { const p = parseFloat(((await res.json()) as { price?: string }).price ?? '0'); if (p > 0) return p }
   } catch { /* מקור-הבא */ }
-  // מקור-2: coingecko
+  return 0
+}
+async function fetchSteemCoingecko(): Promise<number> {
   try {
     const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=steem&vs_currencies=usd', { signal: AbortSignal.timeout(8000), cache: 'no-store' })
     if (res.ok) { const p = parseFloat(String(((await res.json()) as { steem?: { usd?: number } }).steem?.usd ?? '0')); if (p > 0) return p }
   } catch { /* מקור-הבא */ }
-  // מקור-3: coinpaprika (נמדד-חי 00:48Z ו-01:06Z: 0.0552)
+  return 0
+}
+async function fetchSteemPaprika(): Promise<number> {
+  // coinpaprika (נמדד-חי 00:48Z ו-01:06Z: 0.0552)
   try {
     const res = await fetch('https://api.coinpaprika.com/v1/tickers/steem-steem', { signal: AbortSignal.timeout(8000), cache: 'no-store' })
     if (res.ok) { const p = parseFloat(String(((await res.json()) as { quotes?: { USD?: { price?: number } } }).quotes?.USD?.price ?? '0')); if (p > 0) return p }
   } catch { /* כנות: אין-מדידה-STEEM */ }
+  return 0
+}
+
+const STEEM_SOURCES: Array<[SteemSourceName, () => Promise<number>]> = [
+  ['binance', fetchSteemBinance],
+  ['coingecko', fetchSteemCoingecko],
+  ['coinpaprika', fetchSteemPaprika],
+]
+
+async function fetchSteemUsd(): Promise<number> {
+  const order = [...STEEM_SOURCES]
+  if (stickySteemSource) {
+    const i = order.findIndex(([n]) => n === stickySteemSource)
+    if (i > 0) order.unshift(order.splice(i, 1)[0]) // הדביק-ראשון
+  }
+  for (const [name, fn] of order) {
+    const p = await fn()
+    if (p > 0) { stickySteemSource = name; return p }
+  }
   return 0
 }
 
@@ -289,6 +328,16 @@ export async function getExternalMarks(): Promise<ExternalMarks> {
   steemUsd = await fetchSteemUsd()
   sbdUsd = await fetchSbdUsd()
   if (steemUsd > 0 && sbdUsd > 0) {
+    // Task-120 חגורת-מתים: אם-הזהות-הטרייה קרובה-לעוגן-המיושם יותר-מ-DEADBAND —
+    // העוגן-הקודם נשאר (רק-מאריכים-מטמון). הסולם לא-נסחט-על-רעש-בין-מקורות/בורסות.
+    const candidateIdentity = steemUsd / sbdUsd
+    const prevIdentity = marksCache && !marksCache.stale && marksCache.sbdUsd > 0
+      ? marksCache.steemUsd / marksCache.sbdUsd
+      : 0
+    if (prevIdentity > 0 && Math.abs(candidateIdentity - prevIdentity) / prevIdentity < ANCHOR_DEADBAND_PCT / 100) {
+      marksAt = Date.now()
+      return marksCache
+    }
     marksCache = { steemUsd, sbdUsd, at: new Date().toISOString() }
     marksAt = Date.now()
     try {
