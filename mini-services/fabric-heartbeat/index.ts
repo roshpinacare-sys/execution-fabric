@@ -1700,6 +1700,12 @@ async function sovereignDigest(): Promise<void> {
     const census = (await fetchJsonTimeout(`${APP_URL}/api/census`)) as
       | { chain?: { verify?: { ok?: boolean; total?: number } } }
       | null
+    // Task-123 תיקון-מדידה-חיה: census-יחיד זרק אזעקת-שווא (רגע-טרנזיטורי נכתב "ok:false —
+    // נדרש-טיפול"). מעתה: שני-מאמתים-בלתי-תלויים מוצגים-גלויים — census + witness (הקפדן
+    // העצמאי-הבודק-כל-דקה). אי-התאמה-ביניהם תהיה-נראית; אף-אינטרפרטציה-לא-נכתבת.
+    const witness = (await fetchJsonTimeout('http://127.0.0.1:3050/health')) as
+      | { last?: { ok?: boolean; total?: number } }
+      | null
     const grid = (await fetchJsonTimeout('http://127.0.0.1:3070/health')) as
       | { cycles?: number; lastError?: string | null; halted?: boolean; ffRail?: { ok?: boolean } }
       | null
@@ -1747,7 +1753,8 @@ async function sovereignDigest(): Promise<void> {
       '|---|---|',
       `| רשומות-סה"כ | ${ledgerTotal ?? 'לא-נמדד'} |`,
       `| פעילות-שעה-אחרונה | ${ledgerLastHour ?? 'לא-נמדד'} רשומות |`,
-      `| אימות-שרשרת | ${census?.chain?.verify?.ok === true ? 'ok:true' : census ? 'ok:false — נדרש-טיפול' : 'לא-נמדד'} |`,
+      `| אימות-census | ${census?.chain?.verify ? (census.chain.verify.ok ? 'ok:true' : 'ok:false') : 'לא-נמדד'} |`,
+      `| אימות-witness (בלתי-תלוי) | ${witness?.last ? (witness.last.ok ? `ok:true (total ${witness.last.total ?? '?'})` : 'ok:false') : 'לא-נמדד'} |`,
       '',
       '## גריד-המסחר',
       '| מדד | ערך |',
