@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
-import { Loader2, RefreshCw, ShieldCheck, HeartPulse, GitBranch, Scale, Wrench, Activity } from 'lucide-react'
+import { Loader2, RefreshCw, ShieldCheck, HeartPulse, GitBranch, Scale, Wrench, Activity, TrendingUp } from 'lucide-react'
 
 // משטח-ההוכחה (Task-124): הבעלים דרש — "אין הוכחה לטענות שלך הכל נופל ולא חוזר".
 // התשובה כאן: לוח-מדידה-חי. כל-10s המשטח מודד מחדש מול-העולם-האמיתי:
@@ -57,6 +57,26 @@ type ProofData = {
     appRestarts: number | null
     lastAppGuardResult: string | null
   } | null
+  // Task-127: היד-החיה-על-Steem — הגריד נמדד-חי-מהגריד-עצמו בכל-מדידה
+  grid: {
+    mode: string | null
+    account: string | null
+    cycles: number | null
+    lastCycleAt: string | null
+    lastCycleMs: number | null
+    lastError: string | null
+    consecutiveErrors: number | null
+    price: number | null
+    sellFloor: number | null
+    spreadToFloorPct: number | null
+    halted: boolean | null
+    openLive: number | null
+    liveFills: number | null
+    lastLiveFills: Array<{ at: string | null; side: string | null; price: number | null; amountSbd: number | null; amountSteem: number | null }>
+  } | null
+  // Task-127: רציפות-ריבונית — רשומות-שרשרת לפי-שעה (החדשה-ראשונה) + גיל-המכונה
+  continuity: { hours: Array<{ hoursAgo: number; count: number }> }
+  machine: { uptimeSec: number | null }
   assets: {
     bootAllScript: boolean
     sovereignPulse: { exists: boolean; mtime: string | null }
@@ -72,6 +92,16 @@ function fmtTime(iso: string | null | undefined): string {
   } catch {
     return '—'
   }
+}
+
+function fmtUptime(sec: number): string {
+  if (sec < 90) return `${sec}ש׳`
+  const m = Math.floor(sec / 60)
+  if (m < 90) return `${m} דק'`
+  const h = Math.floor(m / 60)
+  if (h < 36) return `${h} שע' ${m % 60} דק'`
+  const d = Math.floor(h / 24)
+  return `${d} ימים ${h % 24} שע'`
 }
 
 export function ProofBoard() {
@@ -173,6 +203,64 @@ export function ProofBoard() {
               ))}
             </div>
           </div>
+
+          <Separator />
+
+          {/* Task-127: היד-החיה — הגריד-על-Steem נמדד-חי-מהגריד-עצמו */}
+          {data.grid && (() => {
+            const g = data.grid
+            const lastCycleSecs = g.lastCycleAt && now !== null ? Math.max(0, Math.floor((now - new Date(g.lastCycleAt).getTime()) / 1000)) : null
+            return (
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
+                  <TrendingUp className="h-3.5 w-3.5" />
+                  <span>הגריד-על-Steem — היד-החיה של-הריבונות (חשבון {g.account ?? '—'})</span>
+                  {g.mode === 'live' && !g.halted && <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">חי-על-השרשרת</Badge>}
+                  {g.mode === 'shadow' && <Badge className="bg-amber-500 text-white hover:bg-amber-500">מצב-צל</Badge>}
+                  {g.halted && <Badge className="bg-rose-600 text-white hover:bg-rose-600">עצור</Badge>}
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {g.cycles !== null && <Badge variant="outline" className="font-mono">{g.cycles} מחזורות</Badge>}
+                  {lastCycleSecs !== null && (
+                    <Badge
+                      variant="outline"
+                      className={
+                        lastCycleSecs < 120
+                          ? 'text-emerald-700 dark:text-emerald-400 border-emerald-300/60 dark:border-emerald-800/60'
+                          : 'text-amber-700 dark:text-amber-400 border-amber-300/60 dark:border-amber-800/60'
+                      }
+                    >
+                      מחזור-אחרון לפני {lastCycleSecs}ש׳ {lastCycleSecs < 120 ? '(דוגדג)' : '(תקוע?!)'}
+                    </Badge>
+                  )}
+                  {g.openLive !== null && <Badge variant="outline" className="font-mono">{g.openLive} פקודות-פתוחות</Badge>}
+                  {g.liveFills !== null && <Badge variant="outline" className="font-mono">{g.liveFills} מילויים-חיים</Badge>}
+                  {g.spreadToFloorPct !== null && (
+                    <Badge variant="outline" className="font-mono">פאריטי: {g.spreadToFloorPct.toFixed(2)}%</Badge>
+                  )}
+                  {g.consecutiveErrors !== null && g.consecutiveErrors > 0 && (
+                    <Badge className="bg-rose-600 text-white hover:bg-rose-600">שגיאות-רצופות: {g.consecutiveErrors}</Badge>
+                  )}
+                </div>
+                {g.lastLiveFills.length > 0 && (
+                  <div className="max-h-24 overflow-y-auto rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs space-y-1" dir="rtl">
+                    {g.lastLiveFills.map((f, i) => (
+                      <div key={`${f.at}-${i}`} className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-muted-foreground shrink-0">{fmtTime(f.at)}</span>
+                        <Badge variant="outline" className={f.side === 'buy' ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
+                          {f.side === 'buy' ? 'קנייה' : 'מכירה'}
+                        </Badge>
+                        <span className="font-mono" dir="ltr">
+                          {f.amountSteem?.toFixed(3)} STEEM @ {f.price?.toFixed(5)} = {f.amountSbd?.toFixed(3)} SBD
+                        </span>
+                        <span className="text-muted-foreground">מילוי-אמיתי-מהשרשרת — לבד, בלי-סוכן</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           <Separator />
 
@@ -295,6 +383,38 @@ export function ProofBoard() {
                 )}
               </div>
             </div>
+          </div>
+
+          <Separator />
+
+          {/* Task-127: רציפות-ריבונית — פעימות-השרשרת לפי-שעה + גיל-המכונה בכנות-מלאה */}
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <Activity className="h-3.5 w-3.5" />
+              רציפות-ריבונית — רשומות-שרשרת לפי-שעה (6-השעות-האחרונות)
+            </div>
+            <div className="flex items-end gap-1.5" dir="rtl">
+              {data.continuity.hours.map((h) => {
+                const max = Math.max(...data.continuity.hours.map((x) => x.count), 1)
+                return (
+                  <div key={h.hoursAgo} className="flex flex-1 flex-col items-center gap-0.5">
+                    <div
+                      className={`w-full rounded-t ${h.count > 0 ? 'bg-emerald-500/70' : 'bg-rose-400/60'}`}
+                      style={{ height: `${Math.max(3, (h.count / max) * 30)}px` }}
+                      title={`${h.count} רשומות-חתומות`}
+                    />
+                    <span className="font-mono text-[10px] text-muted-foreground">{h.hoursAgo === 0 ? 'עכשיו' : `-${h.hoursAgo}שע׳`}</span>
+                    <span className="font-mono text-[10px] tabular-nums">{h.count}</span>
+                  </div>
+                )
+              })}
+            </div>
+            {data.machine.uptimeSec !== null && (
+              <div className="text-xs text-muted-foreground">
+                גיל-המכונה: <span className="font-mono">{fmtUptime(data.machine.uptimeSec)}</span> · בכל-אתחול-מכונה כל-האיברים קמים אוטומטית (start.sh + הזקיפה).
+                כשהמכונה-ישנה בין-הפעלות — אף-תהליך-בעולם-לא-יכול-לרוץ; העמודות-כאן הן-ההוכחה-שהריבונות-פועלת-בכל-רגע-ער.
+              </div>
+            )}
           </div>
         </CardContent>
       )}

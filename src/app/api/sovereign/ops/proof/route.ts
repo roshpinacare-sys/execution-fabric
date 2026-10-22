@@ -60,6 +60,29 @@ async function probeOrgan(o: { name: string; port: number; path: string }): Prom
 
 type KeeperEvent = { at: string; kind: string; msg: string }
 
+// Task-127: תצורת-הגריד-החי — מהגריד-עצמו (:3070/grid), אפס-טענה
+type GridSummary = {
+  mode?: string
+  fingerprint?: string
+  price?: number | null
+  sellFloor?: number | null
+  stats?: { cycles?: number; lastCycleAt?: string | null; lastCycleMs?: number | null; lastError?: string | null; consecutiveErrors?: number }
+  halt?: { halted?: boolean; reason?: string }
+  open?: Array<{ mode?: string; n?: number }>
+  fills?: Array<{ mode?: string; n?: number }>
+  lastLiveFills?: Array<{ at?: string; side?: string; price?: number; amount_sbd?: number; amount_steem?: number }>
+}
+
+// Task-127: גיל-המכונה — ההוכחה-הכנה: ה-VM עצמו ישן-בין-הפעלות (תקרת-פלטפורמה),
+// ובכל-קימה כל-האיברים קמים אוטומטית. /proc/uptime = המדידה-הישירה.
+function readMachineUptimeSec(): number | null {
+  try {
+    return Math.round(parseFloat(readFileSync('/proc/uptime', 'utf8').split(' ')[0] ?? ''))
+  } catch {
+    return null
+  }
+}
+
 function readKeeperState(): { source: string; data: unknown | null } {
   // מחוץ-לעץ-הפרויקט (STATE_PATH של-הזקיפה) — fallback לשיקוף-הגיט; נגזר-מהעץ, לא-מוצק
   const candidates = [resolve(PROJECT_ROOT, '..', 'fabric-keeper-state.json'), join(PROJECT_ROOT, 'fabric-keeper-state.json')]
@@ -118,6 +141,24 @@ export async function measureProof(): Promise<{ snapshot: Record<string, unknown
     fetch('http://127.0.0.1:3031/', { cache: 'no-store', signal: AbortSignal.timeout(2000) })
       .then(r => r.json())
       .catch(() => null),
+  ])
+
+  // 3.5) Task-127: היד-החיה — הגריד-על-Steem נמדד-חי-מהגריד-עצמו + רציפות-שעתית + גיל-מכונה
+  const machineUptimeSec = readMachineUptimeSec()
+  const hourFloor = Math.floor(Date.now() / 3600_000) * 3600_000
+  const [gridSummary, hourlyCounts] = await Promise.all([
+    fetch('http://127.0.0.1:3070/grid', { cache: 'no-store', signal: AbortSignal.timeout(3000) })
+      .then(r => r.json())
+      .catch(() => null),
+    Promise.all(
+      Array.from({ length: 6 }, (_, k) => {
+        const start = new Date(hourFloor - k * 3600_000)
+        const end = k === 0 ? new Date() : new Date(hourFloor - (k - 1) * 3600_000)
+        return db.ledgerEntry
+          .count({ where: { createdAt: { gte: start, lt: end } } })
+          .then(count => ({ hoursAgo: k, count }))
+      }),
+    ),
   ])
 
   // 4) גיט — נמדד בפועל
@@ -183,6 +224,41 @@ export async function measureProof(): Promise<{ snapshot: Record<string, unknown
           lastAppGuardResult: hs.lastAppGuardResult ?? null,
         }
       : null,
+    // Task-127: היד-החיה-על-Steem — מחזורות/פקודות/מילויים-אמיתיים נמדדים-חי-מהגריד-עצמו (null כנה אם-לא-עונה)
+    grid: (() => {
+      const gs = (gridSummary ?? null) as GridSummary | null
+      if (!gs) return null
+      const liveOpen = Array.isArray(gs.open) ? gs.open.filter(o => o.mode === 'live').reduce((a, o) => a + (o.n ?? 0), 0) : null
+      const liveFills = Array.isArray(gs.fills) ? gs.fills.filter(f => f.mode === 'live').reduce((a, f) => a + (f.n ?? 0), 0) : null
+      return {
+        mode: gs.mode ?? null,
+        account: gs.fingerprint ?? null,
+        cycles: gs.stats?.cycles ?? null,
+        lastCycleAt: gs.stats?.lastCycleAt ?? null,
+        lastCycleMs: gs.stats?.lastCycleMs ?? null,
+        lastError: gs.stats?.lastError ?? null,
+        consecutiveErrors: gs.stats?.consecutiveErrors ?? null,
+        price: gs.price ?? null,
+        sellFloor: gs.sellFloor ?? null,
+        spreadToFloorPct: gs.price != null && gs.sellFloor != null ? ((gs.sellFloor - gs.price) / gs.price) * 100 : null,
+        halted: gs.halt?.halted ?? null,
+        openLive: liveOpen,
+        liveFills,
+        lastLiveFills: Array.isArray(gs.lastLiveFills)
+          ? gs.lastLiveFills.slice(0, 4).map(f => ({
+              at: f.at ?? null,
+              side: f.side ?? null,
+              price: f.price ?? null,
+              amountSbd: f.amount_sbd ?? null,
+              amountSteem: f.amount_steem ?? null,
+            }))
+          : [],
+      }
+    })(),
+    // Task-127: רציפות-ריבונית — רשומות-שרשרת לפי-שעה (6-השעות-האחרונות, החדשה-ראשונה)
+    continuity: { hours: hourlyCounts },
+    // Task-127: גיל-המכונה — ההוכחה-הכנה לקימה-אוטומטית-מלאה אחרי-שינה-בין-הפעלות
+    machine: { uptimeSec: machineUptimeSec },
     assets,
   }
   return { snapshot, measureMs: Date.now() - t0 }
