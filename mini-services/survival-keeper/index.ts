@@ -244,8 +244,10 @@ async function provisionOrgan(name: string, dir: string): Promise<{ provisioned:
     if (!i.ok) return { provisioned: false, detail: `bun install נכשל: ${i.out.split('\n').slice(-1)[0] ?? '?'}` }
     steps.push('bun install ✓')
   }
-  // ג'-דקס: סכמת-prisma חייבת-להיות-מסונכרנת לפני-עלייה
-  if (name === 'dex') {
+    // ג'-דקס: סכמת-prisma חייבת-להיות-מסונכרנת לפני-עלייה — רק-לאיבר-עם-prisma.
+    // Task-131: הדקס-המחודר (mini-services/saos-dex) מנהל-סכמה-עצמית (bun:sqlite CREATE IF
+    // NOT EXISTS) — אין-prisma ואין-db:push; כפיה-הייתה-מכשילה-את-הזינוק בכל-מחזור.
+    if (name === 'dex' && existsSync(path.join(dir, 'prisma', 'schema.prisma'))) {
     const hasDb = existsSync(path.join(dir, 'db', 'dex.db'))
     // Task-126 (שיעור-דם-חי 12:46+12:56): DATABASE_URL-יורש-מהפלטפורמה (מצביע-על-db-הראשי!)
     // גובר-על-.env-וגרם-לשני-אירועי-השחתה-של-סכמת-הפנקס. דריסה-מוטמעת-בשורת-הפקודה
@@ -312,7 +314,7 @@ async function watchService(
     name === 'heartbeat' ? 'fabric-heartbeat'
     : name === 'metrics' ? 'saos-metrics'
     : name === 'grid' ? 'saos-grid' // Task 105
-    : name === 'dex' ? path.join('repos', 'saos-dex') // Task 106 — הדקס-הריבוני (מהגיט; דוקטרינת-REVIVE)
+    : name === 'dex' ? 'saos-dex' // Task-131 — הדקס-הריבוני כאיבר-מהשורה בעץ-הנצחי (לקח-הדם: ה-clone-המקונן repos/saos-dex אבד-באתחול — מימושו מעולם לא היה בגיט; מעתה mini-services/saos-dex מוגן-פעימת-גיט)
     : name === 'arb' ? 'saos-arb' // Task 106 — איבר-השוק-החריף
     : name === 'council' ? 'saos-council' // Task 107 — מועצת-השולחן
     : name === 'vault-guardian' ? 'vault-guardian' // T-111 — שומר-הכספת
@@ -335,6 +337,8 @@ async function watchService(
     // לקח-חי (Task 106): spawn עם 'bun' רק-מסתמך-על-PATH-של-ההורה (ENOENT נמדד);
     // וגם posix_spawn-ישיר-של-הבינארי-נכשל-ENOENT-מהתהליך-הזה (נמדד-חי) —
     // מעטפת-/bin/sh פותרת (שלוש-שכבות-ניסיון-מתועדות: יחסי → מוחלט → מעטפת).
+    // Task-131 (לקח-הדם 15:28): הדקס-המחודר הוא-איבר-bun-פשוט (mini-services/saos-dex,
+    // פורט-3010 מקודד-בתוכו) — זינוק-גנרי כמו-כל-איבר; אין-עוד-next/clone/פורט-מיוחד.
     const child = Bun.spawn(['/bin/sh', '-c', `cd '${dir}' && exec /usr/local/bin/bun run dev`], {
       cwd: dir,
       stdin: 'ignore',
