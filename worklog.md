@@ -2402,3 +2402,21 @@ Work Log:
 Stage Summary:
 - The anchor-crash doctrine violation was caught live and killed at root: multi-source + disk anchor + fail-closed + below-floor purge. The floor now survives any single-feed outage for 24h and can never silently degrade to book-ask. Dedup verified holding in production. Internal drain rail honestly rejected (FAKE-PEG). Treasury truth documented (SBD exhausted by the buy-bot — ladder at floor is the recovery path). Pushed.
 - Artifacts: mini-services/saos-grid/market.ts (3-source anchor + marks.json persistence), mini-services/saos-grid/engine.ts (fail-closed + below-floor purge), worklog Task-117.
+
+---
+Task ID: 118
+Agent: Z.ai Code (orchestrator)
+Task: "תמשיך ודחוף" — continue after Task-117: next efficiency lever, smarter flow, volume within doctrine.
+
+Work Log:
+- LIVE AUDIT (01:19-01:28Z): dedup law holds in production (fill_ledger 30→61→73 rows, 73 total = 73 unique orderid:at:side — one chain op = one row, zero duplicate fill events since 01:00). Cloud buy-bot (same-account runner, family 1500000xxx) exhausted the last SBD by 01:14:03 (partial 1.803ST fill = the final drop) — treasury truth of Task-117 confirmed by ledger. Our floor stack was intact but FLAT: all 4 rungs (4×25ST) at ONE price 0.11088 — the parity clamp swallowed the entire tilt ladder (tilt targets 0.1021-0.1028 all < floor).
+- ROOT CAUSE (measured): section-5 placement computes tilt targets from mid (0.1018), then clamps each to floor → every rung collapses to the same price. Zero depth above floor: when the market finally rises 8.8% to parity, all 100ST dump at once at the floor and the ladder captures none of the continuing momentum.
+- FIX #1 (parity ladder spread, live-drilled 01:26Z): a rung whose target is below the floor now SPREADS above it instead of stacking — rung L = floor×(1+L×PARITY_LADDER_STEP), env GRID_PARITY_LADDER_STEP (default 0.6%, clamp 0.1-3%). L0 stays exactly at floor; L1/L2/L3 lifted live via requote path: 0.11077 / 0.11140 (+0.57%) / 0.11207 (+1.18%) / 0.11273 (+1.78%), 25ST each, orderids 1792631307/2388/2389/2390 — real depth above parity, doctrine preserved (no rung below external value), anti-churn preserved (stable per-rung target; requote target formula shares the same spread).
+- FIX #2 (autonomous FF pulse): the external rail is now probed BY THE ENGINE every 13 cycles (~10min), regardless of any external observer — status change (401→live) fires an 'ff-probe' receipt event automatically. Live: pulse firing, ok=false (vendor 401 persists, patient per owner directive), the system will SEE the moment the gate opens.
+- FIX #3 (truth in health): /health now carries identityLine, floor, spreadToParityPct (8.78% live), ffRail — the owner sees exactly why volume sits where it sits, without asking.
+- Governor verified coherent: basePct=97.1% → buys stay blocked (AutoHedge doctrine); the buy-side auto-revives when floor-ladder fills push SBD share past the 80% skew threshold (full 100ST ladder fill ≈ +11.1 SBD → basePct ~77% → buys re-arm near mid, below parity = value-accretive). The recovery loop closes by itself; no invented liquidity.
+- eslint green (engine.ts, index.ts). Watch-restart at 01:26:41Z, cycles clean, lastError=null.
+
+Stage Summary:
+- The sell ladder is a real ladder now: 100ST tranched across floor→+1.8% instead of a single-price stack — more volume captured on the rise AND better average exit, at zero doctrine cost. The FF rail pulses autonomously and will announce its own unblocking. Parity truth (identity/floor/spread) is exposed live in health. Dedup law verified at 73/73.
+- Artifacts: mini-services/saos-grid/engine.ts (PARITY_LADDER_STEP placement+requote spread, ff pulse, stats.ffRail), mini-services/saos-grid/index.ts (health enrichment), worklog Task-118.

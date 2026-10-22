@@ -51,6 +51,13 @@ const server = Bun.serve({
           lastCycleAt: engine.stats.lastCycleAt,
           lastError: engine.stats.lastError,
           price: engine.stats.price,
+          // Task-118: אמת-פאריטי-ומסילה-חוצה חיים-בבריאות — הבעלים רואה למה הווליום היכן-שהוא
+          identityLine: engine.stats.identityLine,
+          floor: engine.stats.floor,
+          spreadToParityPct: engine.stats.price !== null && engine.stats.floor !== null
+            ? ((engine.stats.floor - engine.stats.price) / engine.stats.price) * 100
+            : null,
+          ffRail: engine.stats.ffRail,
         })
       }
       if (p === '/grid') {

@@ -12,6 +12,7 @@ import { readFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { Database } from 'bun:sqlite'
 import * as market from './market'
+import * as ff from './ff'
 
 export const ROOT = join(import.meta.dir, '..', '..')
 export const VAULT = join(ROOT, 'upload', 'steem.env')
@@ -38,6 +39,11 @@ const REBALANCE_TILT = num(envOf('GRID_REBALANCE_TILT'), 0.34)
 // היחידה-שמנבילה-נזילות-בערך-חוץ; כמות-גדולה-יותר-לכל-רמה = יותר-ווליום-שנמדד
 // כשקונים-אמיתיים-מגיעים. חסום: ×4 מקסימום, תקרת-מחויבות-ויתרה-נשמרות.
 const TILT_QTY_BOOST = Math.min(4, Math.max(1, num(envOf('GRID_TILT_QTY_BOOST'), 2.5)))
+// Task-118: סולם-פאריטי — נמדד-חי 01:21Z: כשהמיד-7.6%-מתחת-לרצפה, כל-יעדי-הטייה
+// נשאבים-אל-הרצפה ו־4 רונגות נערמות-במחיר-אחד (4×25ST @0.11088 — אפס-עומק-מעל-הרצפה).
+// מעתה: רונגה-L-שנשאבה-נפרשת-מעל-הרצפה ברצפה×(1+L×צעד) — עומק-אמיתי-לוכד-מומנטום-עולה
+// במחיר-ממוצע-טוב-יותר; אף-רונגה-מתחת-לרצפה (הדוקטרינה-נשמרת) ויעד-יציב-לרונגה (אנטי-צ'רנר).
+const PARITY_LADDER_STEP = Math.min(3, Math.max(0.1, num(envOf('GRID_PARITY_LADDER_STEP'), 0.6)))
 export const CONFIG: GridConfig = {
   levels: num(envOf('GRID_LEVELS'), 4),
   stepPct: num(envOf('GRID_STEP_PCT'), 0.75),
@@ -261,6 +267,7 @@ export type CycleStats = {
   identityLine: number | null
   lastReconcileAt: string | null
   lastFillsLive: number
+  ffRail: { ok: boolean | null; checkedAt: string | null; note: string | null } // Task-118 דופק-FF-אוטונומי
 }
 export const stats: CycleStats = {
   cycles: 0,
@@ -274,6 +281,7 @@ export const stats: CycleStats = {
   identityLine: null,
   lastReconcileAt: null,
   lastFillsLive: 0,
+  ffRail: { ok: null, checkedAt: null, note: null },
 }
 
 // ── שידור-חי (דורש-מפתח-אמיתי; מבודד-כדי-שצל-לא-יישבר) ──────────────────────
@@ -361,6 +369,20 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
     stats.price = m.mid
     if (m.mid === null) throw new Error('אין-מחיר-אמצעי')
     decisions.push(`שוק: bid=${m.bestBid?.toFixed(4)} ask=${m.bestAsk?.toFixed(4)} mid=${m.mid.toFixed(4)} נזילות-STEEM=${Math.round(m.bidVolSteem + m.askVolSteem)}`)
+
+    // 1.5) Task-118: דופק-FF-אוטונומי — מסילת-ההמרה-החוצה נבדקת-מעצמה כל-13-מחזורים (~10ד')
+    // בלי-שום-גורם-חיצוני; שינוי-מצב (401→חי) נרשם-כאירוע — המערכת-רואה-לבד שהשער-נפתח.
+    if (stats.cycles % 13 === 0) {
+      const ffp = await ff.probe()
+      const ok = ffp.currencies !== null
+      const note = ffp.currencies !== null ? `currencies=${ffp.currencies}` : (ffp.lastError ?? 'שגיאה')
+      const changed = stats.ffRail.ok !== ok
+      stats.ffRail = { ok, checkedAt: new Date().toISOString(), note }
+      if (changed || stats.cycles === 0) {
+        event('ff-probe', { account: '*', side: '-', level: 0, price: 0, amountSteem: 0, amountSbd: 0, mode: mode(), detail: `מסילת-FF: ${ok ? 'חיה' : 'חסומה'} (${note})` })
+      }
+      decisions.push(`מסילת-FF: ${ok ? 'חיה' : 'חסומה'} — דופק-אוטונומי (${note})`)
+    }
 
     // 2) סערה — תנודה-פתאומית → עצירה-כנה
     if (stats.lastPrice !== null && stats.lastPrice > 0) {
@@ -640,6 +662,8 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
         const commitCap = Math.max(0, (bal.steem + lk.steem) * COMMIT_PCT - lk.steem - (plannedSellByAcct.get(acct) ?? 0))
         const sellFloor = floor ?? m.bestAsk ?? m.mid!
         let sellPrice2 = Math.max(sellPrice, sellFloor) // מדיניות: לעולם-לא-מתחת-לרצפה
+        // Task-118: סולם-פאריטי — יעד-מתחת-לרצפה לא-נערם-על-ידיה אלא-נפרש-מעל-יה
+        if (sellPrice < sellFloor && L > 0) sellPrice2 = sellFloor * (1 + (L * PARITY_LADDER_STEP) / 100)
         const steemAvail = Math.min(bal.steem * (1 - CONFIG.reservePct / 100), commitCap)
         // Task-116: הגברת-כמות-בצד-המאזן (טיית-פעילה) — יותר-עומק-בערך-חוץ
         const boost = tiltSell ? TILT_QTY_BOOST : 1
@@ -725,7 +749,13 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
         let target = o.side === 'sell'
           ? m.mid! + step * (levelForTarget + 1) * (rebalSell ? REBALANCE_TILT : 1)
           : m.mid! - step * (levelForTarget + 1) * (rebalBuy ? REBALANCE_TILT : 1)
-        if (o.side === 'sell') target = Math.max(target, floor ?? m.bestAsk ?? m.mid!)
+        if (o.side === 'sell') {
+          const fl = floor ?? m.bestAsk ?? m.mid!
+          // Task-118: סולם-פאריטי-גם-בקיזוז — רונגה-L-שנשאבה-לרצפה נפרשת-מעל-יה
+          target = target < fl && levelForTarget > 0
+            ? fl * (1 + (levelForTarget * PARITY_LADDER_STEP) / 100)
+            : Math.max(target, fl)
+        }
         if (Math.abs(target - o.price) <= o.price * 0.0005) continue // כבר-ביעד
         const chainId = Number(o.orderid.split(':')[1])
         const twin = (chainOrders.get(o.account) ?? []).some((c) => c.side === o.side && Math.abs(c.price - target) <= target * (band / m.mid))
