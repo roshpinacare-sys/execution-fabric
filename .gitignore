@@ -63,6 +63,9 @@ mini-service-*.log
 # platform bootstrap scripts — sandbox-regenerated, not canonical (RUNBOOK)
 .zscripts/*.sh
 !.zscripts/git-credential-pat.sh
+# Task-123 exception: סקריפט-הבוט-הריבוני הוא-תשתית-קנונית-ללא-סודות — הייעוד-שלו
+# הוא-לחיות-בגיט ולהקים-את-המערכת-מקלון-טרי-אחרי-מות-מכונה
+!.zscripts/boot-all.sh
 
 # Task 68 — נגזרי-TTS (audio): נוצרים-מחדש מהטקסט על-ידי narrate (zai tts);
 # ה-12 הקיימים tracked-ונשארים-בגיט (שרדו-מחיקת-סנדבוקס); חדשים — לא-נכנסים (צמיחה-חסומה).
