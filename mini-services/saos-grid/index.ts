@@ -30,7 +30,11 @@ async function tickCycle(): Promise<void> {
   }
 }
 
-const server = Bun.serve({
+// Task-119: שומר-יחידות — פורט-תפוס = מנוע-אחר-כבר-חי-על-החשבון → יציאה-שקטה.
+// הלקח-החי (00:24Z): מחזור-החייאה הזניק מפעיל-שני; מי-שהפסיד-את-הפורט נשאר-זומבי-עם-ידיים-על-הפנקס.
+// מעתה: מפסיד-הפורט מת-מיד — מנוע-אחד-בלבד כותב-לחשבון-ולפנקס.
+try {
+  Bun.serve({
   port: PORT,
   hostname: '127.0.0.1',
   async fetch(req) {
@@ -146,7 +150,11 @@ const server = Bun.serve({
       return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 })
     }
   },
-})
+  })
+} catch (e) {
+  console.log(`[saos-grid] :${PORT} תפוס — מנוע-אחר-חי-כבר → יציאה-שקטה (Task-119: מנוע-יחיד, אין-כותב-כפול)`)
+  process.exit(0)
+}
 
 console.log(`[saos-grid] חי על :${PORT} — מנוע-גריד STEEM/SBD; מחזור כל ${CYCLE_MS / 1000}ש'; מצב: ${engine.mode()}; ידיים: ${engine.fingerprint()}`)
 console.log(`[saos-grid] כספת: upload/steem.env (תבנית: steem.env.template) — נחתמו-מפתחות? עובר-לחיים-אוטומטית`)

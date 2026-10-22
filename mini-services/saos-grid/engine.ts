@@ -44,6 +44,10 @@ const TILT_QTY_BOOST = Math.min(4, Math.max(1, num(envOf('GRID_TILT_QTY_BOOST'),
 // מעתה: רונגה-L-שנשאבה-נפרשת-מעל-הרצפה ברצפה×(1+L×צעד) — עומק-אמיתי-לוכד-מומנטום-עולה
 // במחיר-ממוצע-טוב-יותר; אף-רונגה-מתחת-לרצפה (הדוקטרינה-נשמרת) ויעד-יציב-לרונגה (אנטי-צ'רנר).
 const PARITY_LADDER_STEP = Math.min(3, Math.max(0.1, num(envOf('GRID_PARITY_LADDER_STEP'), 0.6)))
+// Task-119: סולם-פאריטי-עמוק — נמדד-חי 01:35Z: הרץ-הענן ביטל-את-סולם-ה-250ST-שלו-מתחת-לפאריטי
+// והנזיל-חזר-לחשבון (330ST) בזמן-שהסולם-שלנו-מציב-רק-100ST; תקרת-המחויבות-מתירה-287ST.
+// בצד-המאזן הסולם נפרש-על-מלוא-התקרה — ריכוז-היצע-בערך-חוץ = נתיב-השיקום.
+const PARITY_LADDER_LEVELS = Math.min(20, Math.max(1, Math.round(num(envOf('GRID_PARITY_LADDER_LEVELS'), 10))))
 export const CONFIG: GridConfig = {
   levels: num(envOf('GRID_LEVELS'), 4),
   stepPct: num(envOf('GRID_STEP_PCT'), 0.75),
@@ -622,11 +626,22 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
     const band = step / 2
     const plans: Plan[] = []
     const plannedSellByAcct = new Map<string, number>()
-    for (let L = 0; L < CONFIG.levels; L++) {
+    // Task-119: מודעות-מחזור — צילום-השרשרת-הוא-מתחילת-המחזור; ביטולים-והצבות-שאירעו-במחזור-עצמו
+    // חייבים-להימדד או-צל-הרוחות-שלהם (פקודה-שבוטלה-לפני-רגע) יסגרו-יעדים-פנויים-של-רונגות
+    // ויאכלו-את-הסולם (נמדד-חי 01:41Z: סולם-4-רונגות קטן-ל-2 תחת-הגירת-רצפה).
+    const cancelledThisCycle = new Set<string>()
+    const placedThisCycle: Array<{ account: string; side: string; price: number }> = []
+    // Task-119: סולם-עמוק-בצד-המאזן — עד-תקרת-הפקודות-הפתוחות
+    const tiltSellAny = basePct > CONFIG.maxSideSkewPct
+    const tiltBuyAny = 100 - basePct > CONFIG.maxSideSkewPct
+    const ladderLen = tiltSellAny || tiltBuyAny
+      ? Math.min(CONFIG.maxOpenPerAccount, Math.max(CONFIG.levels, PARITY_LADDER_LEVELS))
+      : CONFIG.levels
+    for (let L = 0; L < ladderLen; L++) {
       const acct = accounts[L % n].name
       // Task-115: טיית-איזון — הצד-המאזן מתקרב-למרכז כשהחשיפה-קיצונית
-      const tiltSell = basePct > CONFIG.maxSideSkewPct
-      const tiltBuy = 100 - basePct > CONFIG.maxSideSkewPct
+      const tiltSell = tiltSellAny
+      const tiltBuy = tiltBuyAny
       const buyPrice = m.mid - step * (L + 1) * (tiltBuy ? REBALANCE_TILT : 1)
       const sellPrice = m.mid + step * (L + 1) * (tiltSell ? REBALANCE_TILT : 1)
       const bal = bals.data.find((b) => b.account === acct)
@@ -668,9 +683,14 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
         // Task-116: הגברת-כמות-בצד-המאזן (טיית-פעילה) — יותר-עומק-בערך-חוץ
         const boost = tiltSell ? TILT_QTY_BOOST : 1
         const sellSteem = Math.min(CONFIG.orderSizeSteem * boost, steemAvail)
-        if (sellSteem >= MIN_ORDER_STEEM && !hasNear('sell', sellPrice2)) {
+        // Task-119: תקרת-פקודות-פתוחות-בפועל — maxOpenPerAccount נאכף-כעת-בקוד (היתה-תצורה-מתה)
+        const ownOpenSell = (db.query("SELECT COUNT(1) c FROM grid_orders WHERE account=? AND side='sell' AND status='open' AND mode=? AND level>=0").get(acct, live) as { c: number }).c
+        const plannedSellCount = plans.filter((p) => p.account === acct && p.side === 'sell').length
+        if (sellSteem >= MIN_ORDER_STEEM && !hasNear('sell', sellPrice2) && ownOpenSell + plannedSellCount < CONFIG.maxOpenPerAccount) {
           plans.push({ account: acct, side: 'sell', level: L, price: sellPrice2, amountSteem: sellSteem, amountSbd: sellSteem * sellPrice2 })
           plannedSellByAcct.set(acct, (plannedSellByAcct.get(acct) ?? 0) + sellSteem)
+         } else if (sellSteem >= MIN_ORDER_STEEM && ownOpenSell + plannedSellCount >= CONFIG.maxOpenPerAccount) {
+          decisions.push(`${acct}: תקרת-פקודות-פתוחות (${CONFIG.maxOpenPerAccount}) — מדרגה-L${L} דחויה`)
         } else if (sellSteem < MIN_ORDER_STEEM) {
           decisions.push(`${acct}: STEEM-מתחת-לגודל-המינימלי/תקרת-המחויבות (נזיל ${bal.steem.toFixed(3)}, נעול ${lk.steem.toFixed(1)}, חירום ${CONFIG.reservePct}%)`)
         }
@@ -756,15 +776,21 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
             ? fl * (1 + (levelForTarget * PARITY_LADDER_STEP) / 100)
             : Math.max(target, fl)
         }
-        if (Math.abs(target - o.price) <= o.price * 0.0005) continue // כבר-ביעד
+        // Task-119: רוחב-סבלנות לרונגה-מוצמדת-רצפה = 0.15% (רעש-עוגן בן 5בפ' לא יגרום צ'רנר);
+        // רונגה-מתחת-לרצפה (טיהור) נשארת בסבלנות ההדוקה — היא חייבת להתרפא מדויק
+        const atTargetBand = o.side === 'sell' && floor !== null && o.price >= floor ? 0.0015 : 0.0005
+        if (Math.abs(target - o.price) <= o.price * atTargetBand) continue // כבר-ביעד
         const chainId = Number(o.orderid.split(':')[1])
-        const twin = (chainOrders.get(o.account) ?? []).some((c) => c.side === o.side && Math.abs(c.price - target) <= target * (band / m.mid))
+        const twin = (chainOrders.get(o.account) ?? []).some((c) =>
+          !cancelledThisCycle.has(String(c.orderid)) && c.side === o.side && Math.abs(c.price - target) <= target * (band / m.mid),
+        ) || placedThisCycle.some((p) => p.account === o.account && p.side === o.side && Math.abs(p.price - target) <= target * (band / m.mid))
         const c = await broadcastCancel(acct, chainId)
         if (!c.ok) {
           event('error', { account: o.account, side: o.side, level: o.level, price: o.price, amountSteem: 0, amountSbd: 0, mode: 'live', detail: `קיזוז: ביטול-נכשל: ${c.error}` })
           continue
         }
         db.query("UPDATE grid_orders SET status='canceled' WHERE orderid=?").run(o.orderid)
+        cancelledThisCycle.add(String(chainId))
         canceled++
         if (twin) {
           // Task-113 זרימה-חכמה: היעד-תפוס-כבר-בשרשרת → ביטול-בלבד (המדרגה-תציב-מחדש-בעצמה)
@@ -777,6 +803,7 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
             `live:${r.orderid}:${o.account}`, o.account, o.side, o.level, target, o.amount_steem, o.amount_sbd, new Date().toISOString(), 'open', 'live',
           )
           event('place', { account: o.account, side: o.side, level: o.level, price: target, amountSteem: o.amount_steem, amountSbd: o.amount_sbd, mode: 'live', detail: `קיזוז-חי: ${o.price.toFixed(4)}→${target.toFixed(4)}; orderid=${r.orderid}` })
+          placedThisCycle.push({ account: o.account, side: o.side, price: target })
           placed++
           requoted++
         } else {
@@ -794,7 +821,9 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
         .get(p.account, p.side, p.level, live)
       if (dup) continue
       // אנטי-כפילות-מול-השרשרת (כל-מקור): פס-מחיר
-      const chainTwin = (chainOrders.get(p.account) ?? []).some((c) => c.side === p.side && Math.abs(c.price - p.price) <= p.price * (band / m.mid))
+      const chainTwin = (chainOrders.get(p.account) ?? []).some((c) =>
+        !cancelledThisCycle.has(String(c.orderid)) && c.side === p.side && Math.abs(c.price - p.price) <= p.price * (band / m.mid),
+      ) || placedThisCycle.some((q) => q.account === p.account && q.side === p.side && Math.abs(q.price - p.price) <= p.price * (band / m.mid))
       if (live === 'live' && chainTwin) continue
       if (live === 'shadow') {
         const nid = `shadow:${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
