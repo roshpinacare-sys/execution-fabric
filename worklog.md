@@ -2659,3 +2659,19 @@ Work Log:
 Stage Summary:
 - Second polish round closed three real defects found by reading the open preview's honest flags: the selftest timeout that cut its own evidence, the gap-evolution null crash, and the remote gate's silent 404 — the remote gate now witnesses GitHub itself (ls-remote head equality), so the push artery is proven end-to-end even with Actions billing-blocked. Claims surface at its honest maximum: 9/10 active, the 1 remaining degraded is a truthful vendor condition (zai 429) that no code can wish away.
 - Artifacts: heartbeat (remoteHeadWitness + 240s selftest + gap null-guard), claims.ts 'ok —' contract, export sync 2424==head, claims 9/10, worklog, chain 2424+ witness-verified.
+
+---
+Task ID: 130-b
+Agent: Z.ai Code (orchestrator)
+Task: continuation — the OOM struck AGAIN mid-verification (caught by the browser check, not assumed).
+
+Work Log:
+- CAUGHT LIVE: while browser-verifying the board, the app died under the open page ("Application error" → ERR_CONNECTION_REFUSED). appGuard revived it (pid 27343, Ready 2.5s) — but dmesg proved a THIRD kernel OOM: next-server pid 30466 killed at 2.1GB RSS WITH the 1536 heap-cap present in its env. ROOT TRUTH: --max-old-space-size caps only the V8 old-space; dev-mode RSS (source maps, Turbopack, external buffers) grows WITHOUT a ceiling — the cap can never prevent the kernel kill. free -m at the moment: 112MB free / 782MB available of 4GB — the whole stack was squeezed.
+- STRUCTURAL MEDICINE (Task 130-b): appGuard now carries a LIVE RSS CEILING — every 15s guard cycle reads VmRSS from /proc/<next-server-pid>/status (appServerRssMb via pgrep); above APP_RSS_CEILING_MB=1250 it performs a DISCIPLINED RECYCLE (killAndRespawnApp refactor — one choke point for both the not-responding path and the RSS path, same EADDRINUSE-safe kill + heart-tree spawn). Honest counters in state: appRssRecycles, lastAppRssMb (flow to /health for the board).
+- VERIFIED LIVE: minutes after restart the guard measured RSS 1538MB > 1250MB → recycled (appRssRecycles:1) → app healthy again (200, RSS 1073MB, below ceiling). The blind kernel kill is replaced by a measured, bounded, self-applied recycle.
+- BROWSER-VERIFIED (agent-browser, one session, killed after use per memory discipline): page renders 274KB text, ZERO page errors, zero console errors; הגריד-על-Steem ✓ רציפות-ריבונית ✓ לולאות-פתוחות ✓ טענות ✓; magnitude meter 386x measured with honest gap analysis; sticky footer present.
+- lint green.
+
+Stage Summary:
+- The third OOM proved the heap-cap was necessary but insufficient: V8 cap ≠ RSS cap. The heart now measures the REAL memory truth every 15s and recycles the dev server above 1250MB — memory discipline institutionalized in the watcher, not left to kernel randomness or agent vigilance. Verified live end-to-end: recycle fired, app healthy, board clean.
+- Artifacts: appServerRssMb + APP_RSS_CEILING_MB + killAndRespawnApp refactor (appGuard), state fields appRssRecycles/lastAppRssMb, this worklog.
