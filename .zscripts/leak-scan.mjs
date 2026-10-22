@@ -139,8 +139,11 @@ function addedLinesOfFile(file) {
 function targets() {
   if (process.argv.includes("--staged")) {
     // (א) קבצים-מוצבים-שהשתנו + (ב) untracked — -z: אפס-מניפולציית-שמות
+    // Task-122: --diff-filter=d מנדה-מחיקות מרשימת-הסריקה — נתיב-שנמחק אינו-נקרא
+    // (מיקרו-מצב-חי: ניקוי-tmp מוצב חסם-את-הסריקה fail-closed על ENOENT; מחיקה
+    // אינה-מכילה-תוכן-לסרוק). בלעדי-זה, כל-פעימת-לב עם מחיקה-מוצבת הייתה נחסמת.
     const changed = gitOut(
-      "git -c core.quotepath=off diff --cached --name-only -z",
+      "git -c core.quotepath=off diff --cached --name-only --diff-filter=d -z",
     ).toString("utf8");
     const untracked = gitOut(
       "git -c core.quotepath=off ls-files --others --exclude-standard -z",

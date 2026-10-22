@@ -2488,3 +2488,19 @@ Work Log:
 Stage Summary:
 - The owner's two links became real capability: the CF skill ran a complete, validator-passing, adversarially-verified audit whose 9 confirmed findings were fixed in production within the same session (the most dangerous one — the anchor-less migration sell — was our own doctrine violation waiting to repeat Task-117 loss), and PentAGI memory/delegation concepts live on in the committed additive ledger (security-audit/run-1/ + security-audit-skill/ in-repo). Future audits read run-1 and hunt only gaps — no duplicates by construction.
 - Artifacts: security-audit-skill/ (vendored methodology), security-audit/run-1/{coverage-ledger,findings,REPORT,FINDINGS-DETAIL,NEEDS-VALIDATION} files, mini-services/organ-auth.ts, fixes in engine.ts/market.ts/grid-index/arb/council/vault-guardian/health/proxy/OperatorGate/recover.ts.
+
+---
+Task ID: 122
+Agent: Z.ai Code (orchestrator)
+Task: "תמשיך ודחוף — מאשר, כן, מה-הכי-טוב תעשה, בצע ודחוף" — diagnose chronic selftest red + unsigned round, fix at the root, verify, push.
+
+Work Log:
+- FALSE ALARM FIRST (honesty law): initial port scan with regex `301[0-9]|307[0-9]` looked like 5 dead organs — re-measured full: ALL 10 organs alive (3000/3010/3031/3050/3051/3060/3070/3071/3072/3080, fabric-heartbeat 3952 ticks, witness verified, keeper 3541 ticks, census allClear). My regex was the bug, not the fleet.
+- CHRONIC RED DIAGNOSED: selftest FAILED every 30 min since 04:29Z (8/9 or 4/9). Two independent truths: (1) drill:zai rate-limited ALL DAY — 16/16 attempts 429, live probe now confirms supplier-side 429 in 40ms (nvidia rail alive 16/16, carries 64 chain wins today; exhausted=18 honest terminals). Same doctrine as FixedFloat 401: patience, no fake green, multi-rail ladder already carries production. (2) 07:58Z round WORSE: doc written but chain record MISSING — the git pulse (commit 53ef7c5 at 07:57:46) replaced db/custom.db inode exactly during signing; appendLedger threw a transient connection error (its retry covers only UNIQUE(prev)), so the FAILED round never signed. Also found: ledger date filters must use epoch-millis (createdAt stored INTEGER) — earlier "no records" reads were my query artifact.
+- FIX AT THE CHOKE POINT (src/lib/ledger.ts): new appendLedgerResilient — bounded transient-error retry (~12s: reach-database/pool/locked/SQLITE_BUSY/prepared-statement) + read-back verification per signature (catches silent orphan-inode writes: unconfirmed record = retry on canonical file). Fresh-head read per attempt keeps UNIQUE(prev) at-most-once; persistent failure still throws honestly. Wired into the two critical signers: selftest route + drill route (both switched appendLedger→appendLedgerResilient). Other signers unchanged (minimal intervention).
+- LIVE PROOF: full selftest re-run 08:19:02Z → 8/9 (only drill:zai rate-limit, honest), round SIGNED: LedgerEntry id 2171 AUDIT FAILED tool-failed; witness ok:true total=2171 no break; failure doc sealed. eslint green.
+- PRE-PUSH AUDIT: fill_ledger 214 rows = 214 distinct k = 0 dup keys (the "one fill=one record" law holds; 6 repeated orderids are documented partial-fill semantics per Task-116 schema comment — e.g. 1500000031 filled 10.151+10.151 in two matches 24s apart). Grid deployed 215.188 SBD total.
+
+Stage Summary:
+- The system's honesty loop is now unbreakable at its weakest joint: a failing round can no longer go unsigned — even when the git pulse swaps the DB file mid-signature, the resilient signer lands the record on the canonical chain within ~12s or fails loudly. The chronic red itself is supplier truth (zai 429), correctly carried by nvidia; zero fake green anywhere.
+- Artifacts: src/lib/ledger.ts (appendLedgerResilient), selftest/drill routes resilient, 9 honest failure docs sealed in sovereign/site/, this worklog.

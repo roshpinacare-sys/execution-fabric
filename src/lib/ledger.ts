@@ -143,6 +143,19 @@ export function appendSlot<T>(job: () => Promise<T>): Promise<T> {
 
 const APPEND_RETRIES = 6
 
+// Task-122 (אירוע-חי 07:58:20, רשומה-חתומה-חסרה): פעימת-גיט החליפה-את-קובץ-ה-db תחת-האפליקציה
+// בדיוק-בעת-חתימת-סבב-selftest כושל — appendLedger זרק שגיאת-חיבור חולפת (לא-Unique) והסבב
+// נשאר בלי-רשומה בשרשרת (הדוח-נאטם, החתימה-לא). מעתה: שגיאות-חולפות (חיבור/מאגר/נעילה)
+// מנוסות-שוב בגבול-זמן צנוע (~12ש' — החיבור-מחדש-של-הלב מגיע-בתוכו), כל-ניסיון קורא-ראש-טרייה
+// (חוק UNIQUE(prev) שומר at-most-once בתוך-השרשרת), וכל-כתיבה-מוצלחת מאומתת-בקריאה-חוזרת
+// (חוק-קריאה-חוזרת): כתיבה-שנבלעה-בקובץ-יתום (inode-חלוף שקט) לא-תימצא-בקריאה-החוזרת
+// ותיחשב-כישלון-חולף — הניסיון-הבא ייחתם-על-הקובץ-הקנוני. כשל-מתמשך = זריקה-כנה-רגילה.
+const TRANSIENT_DB_ERROR =
+  /reach database server|connection pool|closed the connection|database (is )?locked|SQLITE_BUSY|SQLITE_READONLY|prepared statement|Cannot fetch data from database/
+
+const RESILIENT_RETRIES = 4
+const RESILIENT_BACKOFF_MS = [2_000, 3_000, 4_000, 4_000]
+
 export function appendLedger(
   rec: Omit<LedgerRecord, 'prev'>,
   opts?: { batchId?: string }
@@ -166,4 +179,34 @@ export function appendLedger(
     }
     throw lastErr
   })
+}
+
+// חתימה-עמידה (Task-122): אותו-חוזה כמו appendLedger, אך סובלנית-לשגיאות-חולפות
+// ומאמתת-כל-חתימה בקריאה-חוזרת. לשימוש-בחותמים-הקריטיים (selftest/drill) — שסבב-כושל
+// לא-יישאר-אף-פעם בלי-רשומה בשרשרת בגלל חלון-החלפת-db של פעימת-הגיט.
+export async function appendLedgerResilient(
+  rec: Omit<LedgerRecord, 'prev'>,
+  opts?: { batchId?: string }
+): Promise<LedgerEntry> {
+  let lastErr: unknown = null
+  for (let attempt = 0; attempt <= RESILIENT_RETRIES; attempt++) {
+    try {
+      const created = await appendLedger(rec, opts)
+      // קריאה-חוזרת: הרשומה-חייבת-להימצא-בקריאה-טרייה (מגלה כתיבה-שנבלעה בקובץ-יתום)
+      const readBack = await db.ledgerEntry.findUnique({ where: { id: created.id } })
+      if (readBack && readBack.hash === created.hash) return readBack
+      lastErr = new Error(
+        `read-back failed: record ${created.id} not confirmed on canonical file`
+      )
+    } catch (e) {
+      lastErr = e
+      const msg = e instanceof Error ? e.message : String(e)
+      // Unique(prev) מטופל-בפנים-על-ידי appendLedger; כאן מטופלים רק-חולפים
+      if (!TRANSIENT_DB_ERROR.test(msg) && !msg.includes('read-back failed')) throw e
+    }
+    if (attempt < RESILIENT_RETRIES) {
+      await new Promise((r) => setTimeout(r, RESILIENT_BACKOFF_MS[attempt]))
+    }
+  }
+  throw lastErr
 }

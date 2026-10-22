@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { appendLedger, sha256Short } from '@/lib/ledger'
+import { appendLedgerResilient, sha256Short } from '@/lib/ledger'
 import { runDrill, type ErrorClass } from '@/lib/llm-chain'
 import { nvidiaConfigured, nvidiaDrill, type RailDrill } from '@/lib/providers'
 
@@ -15,8 +15,9 @@ export async function POST() {
   }
   const rails = await Promise.all(jobs)
 
+  // Task-122: חתימה-עמידה — רשומת-drill חייבת-לעלות-לשרשרת גם-בחלון-החלפת-db של פעימת-הגיט
   for (const r of rails) {
-    await appendLedger({
+    await appendLedgerResilient({
       taskId: null,
       kind: 'DRILL',
       status: r.ok ? 'DONE' : 'FAILED',

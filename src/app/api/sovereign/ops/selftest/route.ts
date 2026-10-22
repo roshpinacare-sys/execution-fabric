@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { appendLedger, sha256Short } from '@/lib/ledger'
+import { appendLedgerResilient, sha256Short } from '@/lib/ledger'
 
 // בדיקת-סרט-כלים עצמית (Task 44): POST /api/sovereign/ops/selftest
 // האוטונומיה מפעילה את **כל הכלים שלה** בקריאות אמיתיות ומדווחת בכנות —
@@ -166,7 +166,8 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  await appendLedger({
+  // Task-122: חתימה-עמידה — סבב-כושל חייב-רשומה-חתומה גם-אם-פעימת-גיט החליפה-db-בדיוק-בעת-החתימה
+  await appendLedgerResilient({
     taskId: null,
     kind: 'AUDIT',
     status: allOk ? 'DONE' : 'FAILED',
