@@ -179,6 +179,8 @@ interface State {
   lastNarrationAt: string | null
   lastNarrationResult: string | null
   appRestarts: number
+  appRssRecycles: number
+  lastAppRssMb: number | null
   lastAppGuardAt: string | null
   lastAppGuardResult: string | null
   keeperRestarts: number
@@ -301,6 +303,8 @@ const state: State = {
   lastNarrationAt: null,
   lastNarrationResult: null,
   appRestarts: 0,
+  appRssRecycles: 0,
+  lastAppRssMb: null,
   lastAppGuardAt: null,
   lastAppGuardResult: null,
   keeperRestarts: 0,
@@ -800,6 +804,44 @@ function gitPulse(): void {
 let appGuardFails = 0
 let appGuardBusy = false
 
+// מחזור-הזיכרון-החי (Task 130-b): תקרת-RSS לשרת-ה-dev — ה-heap-cap מגביל רק את-ערימת-V8;
+// ה-RSS-האמיתי (מפות-מקור, טורבופק, מאגרים-חוץ-ערימתיים) צומח-ללא-תקרה והגרעין כבר הרג את-השרת
+// ב-2.1GB תוך-כ-35דק' גם-עם-התקרה. מעתה: הלב מודד-את-ה-RSS בעצמו (VmRSS מ-/proc) וממחזר
+// את-השרת מעל-התקרה — מיחזור-ממושמע של-שרת-dev במקום-הריגת-OOM עיוורת של-הגרעין.
+const APP_RSS_CEILING_MB = 1250
+function appServerRssMb(): number | null {
+  try {
+    const pid = Bun.spawnSync(['bash', '-c', 'pgrep -f "next-server" | head -1'], {
+      cwd: PROJECT_DIR,
+      stdout: 'pipe',
+      stderr: 'ignore',
+    }).stdout.toString().trim()
+    if (!/^\d+$/.test(pid)) return null
+    const m = readFileSync(`/proc/${pid}/status`, 'utf8').match(/VmRSS:\s+(\d+)\s+kB/)
+    return m ? Math.round(parseInt(m[1] ?? '0', 10) / 1024) : null
+  } catch {
+    return null
+  }
+}
+function killAndRespawnApp(reason: string): void {
+  // ספון-בן-של-הלב: הלב חי-תחת-העץ-המתמיד של הפלטפורמה — ולכן הבן שורד גם-הוא.
+  // מחזור-#10: לפני-הספון — הריגה-מסודרת של-שאריות-מחזיקות-פורט (EADDRINUSE).
+  Bun.spawnSync(['bash', '-c', 'pkill -f "next-server" ; pkill -f "next dev -p 3000" ; sleep 1'], {
+    cwd: PROJECT_DIR,
+    stdout: 'ignore',
+    stderr: 'ignore',
+  })
+  Bun.spawn(['bun', 'run', 'dev'], {
+    cwd: PROJECT_DIR,
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'ignore',
+  })
+  state.appRestarts++
+  state.lastAppGuardResult = `respawned (#${state.appRestarts}) — ${reason} — ממתין לבריאות`
+  log(`שומר-האפליקציה: הוזנק מופע-חדש (#${state.appRestarts}) — ${reason}`)
+}
+
 async function appGuard(): Promise<void> {
   if (appGuardBusy) return
   appGuardBusy = true
@@ -818,6 +860,21 @@ async function appGuard(): Promise<void> {
     }
     if (res.ok && bodyOk) {
       appGuardFails = 0
+      // Task 130-b: מדידת-RSS חיה בכל-ביקורת — מיחזור-ממושמע מעל-התקרה (לפני-שהגרעין ייאלץ)
+      const rss = appServerRssMb()
+      state.lastAppRssMb = rss
+      if (rss !== null && rss > APP_RSS_CEILING_MB) {
+        state.appRssRecycles++
+        log(`שומר-האפליקציה: תקרת-RSS — ${rss}MB > ${APP_RSS_CEILING_MB}MB — מיחזור-ממושמע (#${state.appRssRecycles})`)
+        try {
+          killAndRespawnApp(`תקרת-RSS (${rss}MB)`)
+        } catch (e) {
+          state.lastAppGuardResult = `rss-recycle spawn failed: ${e instanceof Error ? e.message : String(e)}`
+          log(`שומר-האפליקציה: כשל-מיחזור-RSS כן — ${state.lastAppGuardResult}`)
+        }
+        appGuardBusy = false
+        return
+      }
       state.lastAppGuardResult = 'ok'
       appGuardBusy = false
       return
@@ -831,23 +888,7 @@ async function appGuard(): Promise<void> {
     state.lastAppGuardResult = 'restarting app...'
     log('שומר-האפליקציה: האפליקציה לא עונה — מזניק מחדש מבן-עץ-הלב')
     try {
-      // ספון-בן-של-הלב: הלב חי-תחת-העץ-המתמיד של הפלטפורמה — ולכן הבן שורד גם-הוא.
-      // מחזור-#10: לפני-הספון — הריגה-מסודרת של-שאריות-מחזיקות-פורט (next-server יתום
-      // אינו-מקבל-אות-מהוריו-המתים והיה-חוסם-את-ההזנקה-ב-EADDRINUSE לנצח).
-      Bun.spawnSync(['bash', '-c', 'pkill -f "next-server" ; pkill -f "next dev -p 3000" ; sleep 1'], {
-        cwd: PROJECT_DIR,
-        stdout: 'ignore',
-        stderr: 'ignore',
-      })
-      Bun.spawn(['bun', 'run', 'dev'], {
-        cwd: PROJECT_DIR,
-        stdin: 'ignore',
-        stdout: 'ignore',
-        stderr: 'ignore',
-      })
-      state.appRestarts++
-      state.lastAppGuardResult = `respawned (#${state.appRestarts}) — ממתין לבריאות`
-      log(`שומר-האפליקציה: הוזנק מופע-חדש (#${state.appRestarts})`)
+      killAndRespawnApp('לא-עונה')
     } catch (e) {
       state.lastAppGuardResult = `spawn failed: ${e instanceof Error ? e.message : String(e)}`
       log(`שומר-האפליקציה: כשל-הזנקה כן — ${state.lastAppGuardResult}`)
