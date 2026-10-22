@@ -27,6 +27,7 @@ import { ClaimsAuditor } from '@/components/ClaimsAuditor'
 import { MagnitudeMeter } from '@/components/MagnitudeMeter'
 import { SovereigntyMeter } from '@/components/SovereigntyMeter'
 import { LivePulse } from '@/components/LivePulse'
+import { ProofBoard } from '@/components/ProofBoard'
 import { FlowGuard } from '@/components/FlowGuard'
 import { GridPanel } from '@/components/GridPanel'
 import { HotMarketPanel } from '@/components/HotMarketPanel'
@@ -1692,6 +1693,9 @@ export default function Home() {
 
       {/* תוכן */}
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 pb-24 lg:pb-6 grid grid-cols-1 lg:grid-cols-5 gap-6 overflow-x-hidden">
+        {/* משטח-ההוכחה (Task-124): כל-הטענות הוחלפו-במדידות — איברים/החייאות/שרשרת/גיט, מתחדש-חי כל-10ש׳ */}
+        <ProofBoard />
+
         {/* עמודת-צד: שיגור + שרשרת */}
         <div className="lg:col-span-2 space-y-6">
           <Card id="sec-dispatch" className="scroll-mt-20">

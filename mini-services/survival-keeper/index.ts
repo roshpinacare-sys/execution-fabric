@@ -119,6 +119,7 @@ const mirror: MirrorState = {
 const snapshots: SnapshotState = { count: 0, lastAt: null, lastResult: null, dir: BACKUP_DIR }
 let events: Event[] = []
 let ticks = 0
+let lastTickAt: string | null = null
 const startedAt = new Date().toISOString()
 
 // ── עמידות-מצב (Task 72): טעינה-באתחול, שמירה-בשינוי ──────────────────────
@@ -179,50 +180,83 @@ function pushEvent(kind: string, msg: string): void {
 // והגריד-קרס-בכל-אתחול-על-ה-binding-ה-native. מעתה: לפני-כל-זינוק, אם-האיבר
 // חסר-מהעץ — הזקיפה-**מקימה-אותו-מהגיט-בעצמה**. אסור-שתהיה-מצב-בו-איבר-מורד
 // וממתין-לבן-אדם. המקור-המכונן-הוא-גיט; ההקמה-אוטונומית-לגמרי.
-function shellOut(cmd: string, cwd: string, timeoutMs = 300_000): { ok: boolean; out: string } {
-  const p = Bun.spawnSync(['/bin/sh', '-c', cmd], { cwd, stdout: 'pipe', stderr: 'pipe', timeout: timeoutMs })
-  return { ok: p.exitCode === 0, out: `${p.stdout ?? ''}\n${p.stderr ?? ''}`.trim() }
+// Task-124 — חוק-אפס-החסמות: Bun.spawnSync חסם-את-הת'רד-היחיד-והקפיא-את-הזקיפה
+// (נמדד-חי 09:04→09:15 2026-10-22: טיקים-קופאים בזמן-spawnSync-של-עדכון-מראת-גיט
+// על-רשת-תקועה; Bun מוסיף-טיימאוט-אך-pipe-של-נכד-מחזיק-אותו-תקוע-לנצח).
+// מעתה: הרצה-אסינכרונית-תחומה — SIGKILL בדדליין, קטיעת-פלט אם-נכד מחזיק-pipe,
+// והלולאה-ממשיכה-למדוד תמיד. אסור-שתהיה-קריאה-חוסמת-בזקיפה-הריבונית.
+async function runBounded(cmd: string[], cwd: string, timeoutMs: number): Promise<{ ok: boolean; out: string }> {
+  let proc: ReturnType<typeof Bun.spawn> | null = null
+  try {
+    proc = Bun.spawn(cmd, { cwd, stdout: 'pipe', stderr: 'pipe', stdin: 'ignore' })
+    const killTimer = setTimeout(() => {
+      try {
+        proc?.kill(9)
+      } catch {
+        /* כבר-מת */
+      }
+    }, timeoutMs)
+    try {
+      const collect = (async () => {
+        const [so, se] = await Promise.all([
+          new Response(proc!.stdout).text().catch(() => ''),
+          new Response(proc!.stderr).text().catch(() => ''),
+        ])
+        return `${so}\n${se}`.trim()
+      })()
+      const exited = proc!.exited.then((c) => c)
+      const code = await Promise.race([
+        exited,
+        new Promise<number>((r) => setTimeout(() => r(-999), timeoutMs + 5_000)),
+      ])
+      const out = await Promise.race([
+        collect,
+        new Promise<string>((r) => setTimeout(() => r('[פלט-נחתך — נכד-מחזיק-pipe]'), timeoutMs + 10_000)),
+      ])
+      return { ok: code === 0, out: code === 0 ? out : `${out}\n[exit ${code}]`.trim() }
+    } finally {
+      clearTimeout(killTimer)
+    }
+  } catch (e) {
+    return { ok: false, out: `spawn-שגיאה: ${e instanceof Error ? e.message : String(e)}` }
+  }
 }
 
-function provisionOrgan(name: string, dir: string): { provisioned: boolean; detail: string } {
+function shellOut(cmd: string, cwd: string, timeoutMs = 300_000): Promise<{ ok: boolean; out: string }> {
+  return runBounded(['/bin/sh', '-c', cmd], cwd, timeoutMs)
+}
+
+async function provisionOrgan(name: string, dir: string): Promise<{ provisioned: boolean; detail: string }> {
   const steps: string[] = []
   // א'-התיקיה-עצמה נעדרת → שיבוט-מה-origin-של-העץ (dex חי-בגיט נפרד)
   if (!existsSync(dir)) {
-    const origin = git(['remote', 'get-url', 'origin'])
+    const origin = await git(['remote', 'get-url', 'origin'])
     if (!origin.ok) return { provisioned: false, detail: 'origin url לא-נקרא' }
     const rel = path.relative(PROJECT_ROOT, dir)
     // קינון-רק-לאיבר-שהוא-ריפו-נפרד (dex); שאר-האיברים-חיים-בתוך-העץ-ולא-יגיעו-לכאן
-    const c = shellOut(`git clone --depth 1 '${origin.out.split('\n')[0].trim()}' '${rel}' 2>&1`, PROJECT_ROOT, 300_000)
+    const c = await shellOut(`git clone --depth 1 '${origin.out.split('\n')[0].trim()}' '${rel}' 2>&1`, PROJECT_ROOT, 300_000)
     if (!c.ok) return { provisioned: false, detail: `clone נכשל: ${c.out.split('\n').slice(-1)[0] ?? '?'}` }
     steps.push('clone ✓')
   }
   // ב'-תלויות חסרות → התקנה-עצמית (אתחול-מכונה-מוחק-node_modules)
   if (!existsSync(path.join(dir, 'node_modules'))) {
-    const i = shellOut('bun install 2>&1', dir, 300_000)
+    const i = await shellOut('bun install 2>&1', dir, 300_000)
     if (!i.ok) return { provisioned: false, detail: `bun install נכשל: ${i.out.split('\n').slice(-1)[0] ?? '?'}` }
     steps.push('bun install ✓')
   }
   // ג'-דקס: סכמת-prisma חייבת-להיות-מסונכרנת לפני-עלייה
   if (name === 'dex') {
     const hasDb = existsSync(path.join(dir, 'db', 'dex.db'))
-    const p = shellOut('bun run db:push 2>&1', dir, 300_000)
+    const p = await shellOut('bun run db:push 2>&1', dir, 300_000)
     if (!p.ok) return { provisioned: false, detail: `db:push נכשל: ${p.out.split('\n').slice(-1)[0] ?? '?'}` }
     steps.push(hasDb ? 'db:push ✓' : 'db:push (db-חדש) ✓')
   }
   return { provisioned: true, detail: steps.join(' · ') || 'היה-שלם' }
 }
 
-// ── עזרי-גיט (spawnSync — פשוט, אין-ערימה) ────────────────────────────────
-function git(args: string[], cwd?: string): { ok: boolean; out: string } {
-  const p = Bun.spawnSync(['git', ...args], {
-    cwd: cwd ?? PROJECT_ROOT,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  return {
-    ok: p.exitCode === 0,
-    out: `${p.stdout ?? ''}${p.exitCode === 0 ? '' : '\n' + (p.stderr ?? '')}`.trim(),
-  }
+// ── עזרי-גיט (אסינכרוני-תחום — Task-124: spawnSync-ללא-טיימאוט היה-קפיאה-צפויה) ──
+async function git(args: string[], cwd?: string): Promise<{ ok: boolean; out: string }> {
+  return runBounded(['git', ...args], cwd ?? PROJECT_ROOT, 30_000)
 }
 
 // ── משימה-1: זקיפה ──────────────────────────────────────────────────────────
@@ -284,7 +318,7 @@ async function watchService(
   try {
     // Task-114 — חוק-הקמה-מחדש-עצמית: איבר-חסר-מהעץ (תיקיה/node_modules/db) מוקם-מהגיט-
     // לפני-הזינוק. לעולם-לא 'spawn-נכשל-וממתינים' — הריבונות-מקימה-את-עצמה.
-    const prov = provisionOrgan(name, dir)
+    const prov = await provisionOrgan(name, dir)
     if (!prov.provisioned) {
       w.lastResult = `provision failed: ${prov.detail}`
       log(`🚨 הקמת-${name}-מהגיט-נכשלה — ${prov.detail}`)
@@ -319,45 +353,48 @@ async function watchService(
 }
 
 // ── משימה-2: מראת-גיבוי-מקומית ─────────────────────────────────────────────
-function originUrl(): string | null {
-  const r = git(['remote', 'get-url', 'origin'])
+async function originUrl(): Promise<string | null> {
+  const r = await git(['remote', 'get-url', 'origin'])
   return r.ok ? r.out.split('\n')[0].trim() : null
 }
 
-function mirrorPulse(): void {
+async function mirrorPulse(): Promise<void> {
   try {
     if (!existsSync(MIRROR_DIR)) {
-      const url = originUrl()
+      const url = await originUrl()
       if (!url) {
         mirror.lastResult = 'clone skipped: origin url לא-נקרא'
         return
       }
       log(`מראת-גיבוי: נוצרת clone --mirror (${MIRROR_DIR})`)
-      const c = Bun.spawnSync(
+      // Task-124: אסינכרוני-תחום — spawnSync-ללא-טיימאוט על-רשת היה-קפיאת-הזקיפה (נמדד-חי)
+      const c = await runBounded(
         ['git', '-c', `credential.helper=${CRED_HELPER}`, 'clone', '--mirror', url, MIRROR_DIR],
-        { stdout: 'pipe', stderr: 'pipe' },
+        PROJECT_ROOT,
+        300_000,
       )
-      if (c.exitCode !== 0) {
-        mirror.lastResult = `clone failed — כנות: ${`${c.stderr ?? ''}`.split('\n').filter(Boolean).slice(-1)[0] ?? '?'}`
+      if (!c.ok) {
+        mirror.lastResult = `clone failed — כנות: ${`${c.out}`.split('\n').filter(Boolean).slice(-1)[0] ?? '?'}`
         log(`מראת-גיבוי: clone נכשל — ${mirror.lastResult}`)
         return
       }
       pushEvent('mirror', 'מראת-גיבוי נולדה (clone --mirror)')
     }
     mirror.exists = true
-    const u = Bun.spawnSync(
+    const u = await runBounded(
       ['git', '-C', MIRROR_DIR, '-c', `credential.helper=${CRED_HELPER}`, 'remote', 'update', '--prune'],
-      { stdout: 'pipe', stderr: 'pipe' },
+      PROJECT_ROOT,
+      120_000,
     )
-    if (u.exitCode !== 0) {
-      mirror.lastResult = `update failed — כנות: ${`${u.stderr ?? ''}`.split('\n').filter(Boolean).slice(-1)[0] ?? '?'}`
+    if (!u.ok) {
+      mirror.lastResult = `update failed — כנות: ${`${u.out}`.split('\n').filter(Boolean).slice(-1)[0] ?? '?'}`
       log(`מראת-גיבוי: עדכון-נכשל — ${mirror.lastResult}`)
       return
     }
     mirror.updates++
     mirror.lastUpdateAt = new Date().toISOString()
-    const head = git(['rev-parse', 'refs/heads/main'], MIRROR_DIR)
-    const remoteMain = git(['rev-parse', 'origin/main'], PROJECT_ROOT)
+    const head = await git(['rev-parse', 'refs/heads/main'], MIRROR_DIR)
+    const remoteMain = await git(['rev-parse', 'origin/main'], PROJECT_ROOT)
     mirror.mirrorHead = head.ok ? head.out.slice(0, 8) : null
     mirror.synced = head.ok && remoteMain.ok ? head.out === remoteMain.out : null
     mirror.lastResult = `updated ✓ head ${mirror.mirrorHead ?? '?'} · synced:${mirror.synced}`
@@ -439,6 +476,7 @@ Bun.serve({
           startedAt,
           uptimeMs: Date.now() - new Date(startedAt).getTime(),
           ticks,
+          lastTickAt, // Task-124: טריות-טיק נמדדת — אם-הטיק-ישן-המשטח-יראה-זאת-בכנות
           watches,
           mirror,
           snapshots,
@@ -454,6 +492,7 @@ Bun.serve({
 
 async function check(): Promise<void> {
   ticks++
+  lastTickAt = new Date().toISOString() // Task-124: נראות-כנה — משטח-ההוכחה יוכל למדוד טריות-טיק
   await Promise.all([
     watchApp(),
     watchService('heartbeat', HEARTBEAT_URL),
