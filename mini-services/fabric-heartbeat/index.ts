@@ -1658,6 +1658,122 @@ async function gapEvolutionPulse(distanceToTarget: number, gapTitle: string): Pr
   }
 }
 
+// ===== Task-123: עורק-הנראות — digest ריבוני שעתי (sovereign/site/sovereign-pulse.md) =====
+// הלקח-החי (הבעלים, 2026-10-22): "יצאתי ונראה שאין פעילות" — המערכת דה-פקטו פעלה
+// (מדידה: 23-50 רשומות-שרשרת בכל-שעה, 8 שעות רצוף) אך הפעילות הייתה בלתי-נראית:
+// פעימות-הגיט נשאו state בלבד, וה-LLM-הנראה התייבש (zai 429 ספק). מעתה: פעם-בשעה
+// נכתב digest אחד-מתגלגל (קובץ-יחיד — אפס-רעש-קבצים), מדידה-אמת בלבד — שרשרת,
+// גריד, עשרת-האיברים; כל-שדה-שלא-נמדד נכתב "לא-נמדד" בכנות. עורק-ב ידחוף אותו
+// בפעימה הבאה → נראות-שעתית-מובטחת בגיט גם-כשהמערכת שקטה לגמרי.
+const DIGEST_MS = 60 * 60_000
+let lastDigestAt: string | null = null
+let lastDigestResult: string | null = null
+
+async function fetchJsonTimeout(url: string, ms = 5000): Promise<unknown | null> {
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(ms) })
+    return (await r.json()) as unknown
+  } catch {
+    return null
+  }
+}
+
+async function sovereignDigest(): Promise<void> {
+  const t0 = Date.now()
+  try {
+    // מדידת-שרשרת: קריאה-בלבד מה-db-החי (WAL — קוראים-מרובים-מותרים; אפס-כתיבה)
+    let ledgerTotal: number | null = null
+    let ledgerLastHour: number | null = null
+    try {
+      const d = new Database(path.join(PROJECT_DIR, 'db', 'custom.db'), { readonly: true })
+      const a = d.query('SELECT COUNT(*) n FROM LedgerEntry').get() as { n: number }
+      const b = d.query('SELECT COUNT(*) n FROM LedgerEntry WHERE createdAt >= ?').get(
+        Date.now() - 3_600_000,
+      ) as { n: number }
+      d.close()
+      ledgerTotal = a.n
+      ledgerLastHour = b.n
+    } catch {
+      /* כנות: השדות יישארו לא-נמדד */
+    }
+
+    const census = (await fetchJsonTimeout(`${APP_URL}/api/census`)) as
+      | { chain?: { verify?: { ok?: boolean; total?: number } } }
+      | null
+    const grid = (await fetchJsonTimeout('http://127.0.0.1:3070/health')) as
+      | { cycles?: number; lastError?: string | null; halted?: boolean; ffRail?: { ok?: boolean } }
+      | null
+
+    const ports: Array<[string, number, string]> = [
+      ['app', 3000, '/api/health'],
+      ['dex', 3010, '/saos-dex'],
+      ['heartbeat', 3031, '/health'],
+      ['witness', 3050, '/health'],
+      ['keeper', 3051, '/health'],
+      ['metrics', 3060, '/health'],
+      ['grid', 3070, '/health'],
+      ['arb', 3071, '/health'],
+      ['council', 3072, '/health'],
+      ['vault-guardian', 3080, '/health'],
+    ]
+    const organRows: string[] = []
+    let up = 0
+    for (const [name, port, p] of ports) {
+      try {
+        const r = await fetch(`http://127.0.0.1:${port}${p}`, { signal: AbortSignal.timeout(4000) })
+        if (r.ok) up++
+        organRows.push(`| ${name} | ${port} | ${r.ok ? 'חי' : `HTTP ${r.status}`} |`)
+      } catch {
+        organRows.push(`| ${name} | ${port} | לא-עונה |`)
+      }
+    }
+
+    const md = [
+      '---',
+      'title: "דופק-ריבוני — נראות-שעתית של פעילות-המערכת"',
+      'kind: DATA',
+      'status: APPLIED',
+      `createdAt: ${new Date().toISOString()}`,
+      'worker: fabric-heartbeat',
+      'summary: "קובץ-מתגלגל-יחיד (אפס-רעש-קבצים): מדידה-אמת של השעה האחרונה — שרשרת, גריד, עשרת-האיברים. כל-שדה-שלא-נמדד נכתב כך בכנות."',
+      '---',
+      '',
+      '# דופק-ריבוני (קובץ-מתגלגל — מתעדכן כל שעה)',
+      '',
+      `נמדד: ${new Date().toISOString()} · ייצור-ה-digest: ${Date.now() - t0}ms`,
+      '',
+      '## שרשרת-האמת',
+      '| מדד | ערך |',
+      '|---|---|',
+      `| רשומות-סה"כ | ${ledgerTotal ?? 'לא-נמדד'} |`,
+      `| פעילות-שעה-אחרונה | ${ledgerLastHour ?? 'לא-נמדד'} רשומות |`,
+      `| אימות-שרשרת | ${census?.chain?.verify?.ok === true ? 'ok:true' : census ? 'ok:false — נדרש-טיפול' : 'לא-נמדד'} |`,
+      '',
+      '## גריד-המסחר',
+      '| מדד | ערך |',
+      '|---|---|',
+      `| מצב | ${grid ? (grid.halted ? 'HALTED' : 'פעיל') : 'לא-נמדד'} |`,
+      `| מחזורים | ${grid?.cycles ?? 'לא-נמדד'} |`,
+      `| lastError | ${grid ? (grid.lastError ?? 'null') : 'לא-נמדד'} |`,
+      `| מסילת-FF | ${grid?.ffRail ? (grid.ffRail.ok ? 'חי' : 'מושבת-ספק') : 'לא-נמדד'} |`,
+      '',
+      `## איברים (חיים: ${up}/${ports.length})`,
+      '| איבר | פורט | מצב |',
+      '|---|---|---|',
+      ...organRows,
+      '',
+    ].join('\n')
+    writeFileSync(path.join(PROJECT_DIR, 'sovereign', 'site', 'sovereign-pulse.md'), md, 'utf8')
+    lastDigestAt = new Date().toISOString()
+    lastDigestResult = `ok (${Date.now() - t0}ms, organs ${up}/${ports.length})`
+    log(`דופק-ריבוני: digest נאטם — ${lastDigestResult}`)
+  } catch (e) {
+    lastDigestAt = new Date().toISOString()
+    lastDigestResult = `failed: ${e instanceof Error ? e.message.slice(0, 120) : String(e)}`
+    log(`דופק-ריבוני: כשל-כן — ${lastDigestResult}`)
+  }
+}
+
 // ===== שרת-דופק (תצפית) =====
 Bun.serve({
   port: PORT,
@@ -1670,6 +1786,8 @@ Bun.serve({
         tickMs: TICK_MS,
         gitPulseMin: GIT_PULSE_MS / 60_000,
         gitStuck: gitStuckState(), // Task 103: מצב-תקיעה גלוי-תמיד (rebase/merge יתום = החוסם-השקט הקטלני ביותר)
+        lastDigestAt, // Task-123: נראות-שעתית
+        lastDigestResult,
         ...state,
       }, null, 2),
       { headers: { 'content-type': 'application/json' } }
@@ -1708,6 +1826,9 @@ setTimeout(() => void opsPulse(), OPS_PULSE_FIRST_MS)
 setInterval(() => void opsPulse(), OPS_PULSE_MS)
 setTimeout(() => void selftestPulse(), SELFTEST_PULSE_FIRST_MS)
 setInterval(() => void selftestPulse(), SELFTEST_PULSE_MS)
+// Task-123: עורק-הנראות — digest ריבוני שעתי (מיד-בעלייה + כל שעה)
+setTimeout(() => void sovereignDigest(), 20_000)
+setInterval(() => void sovereignDigest(), DIGEST_MS)
 setInterval(() => void claimsPulse(), CLAIMS_PULSE_MS)
 setTimeout(() => void claimsPulse(), CLAIMS_PULSE_FIRST_MS)
 setInterval(() => void sovereigntyPulse(), SOVEREIGNTY_PULSE_MS)

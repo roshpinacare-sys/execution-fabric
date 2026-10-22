@@ -151,7 +151,7 @@ const APPEND_RETRIES = 6
 // (חוק-קריאה-חוזרת): כתיבה-שנבלעה-בקובץ-יתום (inode-חלוף שקט) לא-תימצא-בקריאה-החוזרת
 // ותיחשב-כישלון-חולף — הניסיון-הבא ייחתם-על-הקובץ-הקנוני. כשל-מתמשך = זריקה-כנה-רגילה.
 const TRANSIENT_DB_ERROR =
-  /reach database server|connection pool|closed the connection|database (is )?locked|SQLITE_BUSY|SQLITE_READONLY|prepared statement|Cannot fetch data from database/
+  /reach database server|connection pool|closed the connection|database (is )?locked|SQLITE_BUSY|SQLITE_READONLY|prepared statement|Cannot fetch data from database|not yet connected/
 
 const RESILIENT_RETRIES = 4
 const RESILIENT_BACKOFF_MS = [2_000, 3_000, 4_000, 4_000]
