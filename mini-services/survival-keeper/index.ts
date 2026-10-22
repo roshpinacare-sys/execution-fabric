@@ -244,10 +244,10 @@ async function provisionOrgan(name: string, dir: string): Promise<{ provisioned:
     if (!i.ok) return { provisioned: false, detail: `bun install נכשל: ${i.out.split('\n').slice(-1)[0] ?? '?'}` }
     steps.push('bun install ✓')
   }
-    // ג'-דקס: סכמת-prisma חייבת-להיות-מסונכרנת לפני-עלייה — רק-לאיבר-עם-prisma.
-    // Task-131: הדקס-המחודר (mini-services/saos-dex) מנהל-סכמה-עצמית (bun:sqlite CREATE IF
-    // NOT EXISTS) — אין-prisma ואין-db:push; כפיה-הייתה-מכשילה-את-הזינוק בכל-מחזור.
-    if (name === 'dex' && existsSync(path.join(dir, 'prisma', 'schema.prisma'))) {
+  // ג'-סכמה: איבר-עם-prisma חייב-סנכרון-סכמה לפני-עלייה.
+  // Task-131: הדקס-המחודר (mini-services/saos-dex) מנהל-סכמה-עצמית (bun:sqlite CREATE IF
+  // NOT EXISTS) — אין-prisma ואין-db:push; כפיה-הייתה-מכשילה-את-הזינוק בכל-מחזור.
+  if (name === 'dex' && existsSync(path.join(dir, 'prisma', 'schema.prisma'))) {
     const hasDb = existsSync(path.join(dir, 'db', 'dex.db'))
     // Task-126 (שיעור-דם-חי 12:46+12:56): DATABASE_URL-יורש-מהפלטפורמה (מצביע-על-db-הראשי!)
     // גובר-על-.env-וגרם-לשני-אירועי-השחתה-של-סכמת-הפנקס. דריסה-מוטמעת-בשורת-הפקודה

@@ -40,7 +40,7 @@ const BUN = '/usr/local/bin/bun'
 const ORGANS: Array<{ name: string; probe: string; cwd: string }> = [
   { name: 'grid', probe: 'http://127.0.0.1:3070/health', cwd: join(ROOT, 'mini-services', 'saos-grid') }, // Task 105
   { name: 'arb', probe: 'http://127.0.0.1:3071/health', cwd: join(ROOT, 'mini-services', 'saos-arb') }, // Task 106
-  { name: 'dex', probe: 'http://127.0.0.1:3010/saos-dex/api/dex/state', cwd: join(ROOT, 'repos', 'saos-dex') }, // Task 106 — השוק-שלנו
+  { name: 'dex', probe: 'http://127.0.0.1:3010/saos-dex/api/dex/state', cwd: join(ROOT, 'mini-services', 'saos-dex') }, // Task-131 — השוק-שלנו כאיבר-מהשורה (לקח-הדם: ה-clone-המקונן אבד-באתחול)
   { name: 'council', probe: 'http://127.0.0.1:3072/health', cwd: join(ROOT, 'mini-services', 'saos-council') }, // Task 107 — מועצת-השולחן (AutoHedge+agency-agents מותאם)
   { name: 'heart', probe: 'http://127.0.0.1:3031/health', cwd: join(ROOT, 'mini-services', 'fabric-heartbeat') }, // Task 112 — הלב: פעימת-גיט
   { name: 'witness', probe: 'http://127.0.0.1:3050/health', cwd: join(ROOT, 'mini-services', 'chain-witness') }, // Task 112 — עד-השרשרת
