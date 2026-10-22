@@ -740,6 +740,43 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
       const staleRows = db
         .query("SELECT orderid, account, side, level, price, amount_steem, amount_sbd, mode FROM grid_orders WHERE status='open'")
         .all() as Array<{ orderid: string; account: string; side: string; level: number; price: number; amount_steem: number; amount_sbd: number; mode: string }>
+      // Task-120 פאזה-א (מדידה-חיה 02:39Z — קסקדת-שכנים): יעד-רונגה שנח-בין-שתי-שכנות-ישנות
+      // "נתפס" על-ידי-שכנתה-מעל (מרווח-מדרגה 0.6% < 2×סבילות-כיבוש) → ביטול-בלי-החלפה
+      // לכל-הסולם → הסולם מת (נמדדו 0 מדרגות פתוחות). תיקון: תופס-לגיטימי הוא רק מי-שיישאר-
+      // במקומו; רונגה-שהיא-עצמה-מועמדת-הזזה-ובתוך-תקרת-הקיזוז (מבצע) אינה תופסת.
+      const targetOf = new Map<string, { target: number; atBand: number; chainId: number }>()
+      for (const o of staleRows) {
+        if (o.mode !== 'live' || o.level === -9) continue
+        if (o.side === 'buy' && skipSide === 'buy') continue
+        if (o.side === 'sell' && skipSide === 'sell' && !(floor !== null && o.price < floor)) continue
+        const acct = accounts.find((a) => a.name === o.account)
+        if (!acct?.wif) continue
+        const levelForTarget = o.level >= 0 ? o.level : 0
+        const rebalSell = basePct > CONFIG.maxSideSkewPct
+        const rebalBuy = 100 - basePct > CONFIG.maxSideSkewPct
+        let target = o.side === 'sell'
+          ? m.mid! + step * (levelForTarget + 1) * (rebalSell ? REBALANCE_TILT : 1)
+          : m.mid! - step * (levelForTarget + 1) * (rebalBuy ? REBALANCE_TILT : 1)
+        if (o.side === 'sell') {
+          const fl = floor ?? m.bestAsk ?? m.mid!
+          target = target < fl && levelForTarget > 0
+            ? fl * (1 + (levelForTarget * PARITY_LADDER_STEP) / 100)
+            : Math.max(target, fl)
+        }
+        const atTargetBand = o.side === 'sell' && floor !== null && o.price >= floor ? 0.0015 : 0.0005
+        targetOf.set(o.orderid, { target, atBand: o.price * atTargetBand, chainId: Number(o.orderid.split(':')[1]) })
+      }
+      // מבצעי-המחזור: המזיזים-הראשונים-בתוך-תקרת-האנטי-צ'רנר — אלה-לא-יתפסו-יעדי-חבריהם
+      const executors = new Set<string>()
+      for (const o of staleRows) {
+        if (executors.size >= MAX_REQUOTE_PER_CYCLE) break
+        const p = targetOf.get(o.orderid)
+        if (!p) continue
+        const belowFloorPurge = o.side === 'sell' && floor !== null && o.price < floor
+        if (!belowFloorPurge && Math.abs(o.price - m.mid!) <= drift) continue
+        if (Math.abs(p.target - o.price) <= p.atBand) continue
+        executors.add(String(p.chainId))
+      }
       for (const o of staleRows) {
         // Task-117 טיהור-רצפה: מכירה-פתוחה-מתחת-לרצפה = הפרת-דוקטרינה חיה — מורמת-לרצפה
         // גם-בלי-סטיית-מחיר (מדידה-חיה: מכירות-0.1029-שנשתלו-בחלון-קריסת-העוגן לא-היו
@@ -761,29 +798,16 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
         // Task-117: טיהור-רצפה עוקף את מנהל-החשיפה — הרמת-מכירה-אל-הרצפה היא הכיוון-המרפא
         // (היעד = רצפה ≥ ערך-החוץ), ואסור-שה-fail-closed יקפיא אותה.
         if ((o.side === 'buy' && skipSide === 'buy') || (o.side === 'sell' && skipSide === 'sell' && !belowFloorPurge)) continue
-        // יעד-מדרגה (עם-רצפה-למכירה — קו-זהות, ואם-אין-מדידה: bestAsk הקיים)
-        // Task-115: יעד-הקיזוז מקבל-את-אותה-טיית-איזון — פקודות-רחוקות-נמשכות-למרכז-בעת-חוסר-איזון
-        const levelForTarget = o.level >= 0 ? o.level : 0
-        const rebalSell = basePct > CONFIG.maxSideSkewPct
-        const rebalBuy = 100 - basePct > CONFIG.maxSideSkewPct
-        let target = o.side === 'sell'
-          ? m.mid! + step * (levelForTarget + 1) * (rebalSell ? REBALANCE_TILT : 1)
-          : m.mid! - step * (levelForTarget + 1) * (rebalBuy ? REBALANCE_TILT : 1)
-        if (o.side === 'sell') {
-          const fl = floor ?? m.bestAsk ?? m.mid!
-          // Task-118: סולם-פאריטי-גם-בקיזוז — רונגה-L-שנשאבה-לרצפה נפרשת-מעל-יה
-          target = target < fl && levelForTarget > 0
-            ? fl * (1 + (levelForTarget * PARITY_LADDER_STEP) / 100)
-            : Math.max(target, fl)
-        }
-        // Task-119: רוחב-סבלנות לרונגה-מוצמדת-רצפה = 0.15% (רעש-עוגן בן 5בפ' לא יגרום צ'רנר);
-        // רונגה-מתחת-לרצפה (טיהור) נשארת בסבלנות ההדוקה — היא חייבת להתרפא מדויק
-        const atTargetBand = o.side === 'sell' && floor !== null && o.price >= floor ? 0.0015 : 0.0005
-        if (Math.abs(target - o.price) <= o.price * atTargetBand) continue // כבר-ביעד
-        const chainId = Number(o.orderid.split(':')[1])
+        const p = targetOf.get(o.orderid)
+        if (!p) continue // נחסם-בפאזה-א — לא-מזיז-המחזור
+        const target = p.target
+        if (Math.abs(target - o.price) <= p.atBand) continue // כבר-ביעד
+        const chainId = p.chainId
         const twin = (chainOrders.get(o.account) ?? []).some((c) =>
-          !cancelledThisCycle.has(String(c.orderid)) && c.side === o.side && Math.abs(c.price - target) <= target * (band / m.mid),
-        ) || placedThisCycle.some((p) => p.account === o.account && p.side === o.side && Math.abs(p.price - target) <= target * (band / m.mid))
+          !cancelledThisCycle.has(String(c.orderid)) &&
+          !executors.has(String(c.orderid)) && // Task-120: מבצע-המחזור לא-תופס את-יעד-חברו
+          c.side === o.side && Math.abs(c.price - target) <= target * (band / m.mid),
+        ) || placedThisCycle.some((p2) => p2.account === o.account && p2.side === o.side && Math.abs(p2.price - target) <= target * (band / m.mid))
         const c = await broadcastCancel(acct, chainId)
         if (!c.ok) {
           event('error', { account: o.account, side: o.side, level: o.level, price: o.price, amountSteem: 0, amountSbd: 0, mode: 'live', detail: `קיזוז: ביטול-נכשל: ${c.error}` })
