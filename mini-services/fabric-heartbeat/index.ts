@@ -661,11 +661,16 @@ function gitPulse(): void {
   // הם-תמונות-פעימה-מתכלות — מתכנסים-לorigin/main (ענף+עץ→רחוק; db-החי-מוגן-בהוצאה-מה-checkout)
   // וממשיכים-פעימה-רגילה. עבודה-מקומית-אמיתית (שאינה-פעימה) לעולם-לא-נדרסת — ממשיך-למיזוג-רגיל.
   const preFetch = git(['fetch', 'origin'])
+  // Task-130-c: תוצאת-ה-fetch נשמרת — אם-הרחוק-נייח (ro=0) ה-pull-rebase אחרי-הקומיט הוא
+  // נו-אופ שיכול-רק-להיכשל (העץ-החי נשמר-מטונפן-תדידות — השרשרת כותבת) ולחסום-את-העורק
+  // לנצח (נמדד-חי 15:28: "abort כנה" על-כל-חוזר). כשאין-מה-למשוך — דחיפה-ישירה על-העץ-החי.
+  let remoteNew = -1 // -1 = לא-ידוע (fetch נכשל) — נתנהג-כמו-קודם
   if (preFetch.ok) {
     const remoteOnly = git(['rev-list', '--count', 'HEAD..origin/main'])
     const localOnly = git(['rev-list', '--count', 'origin/main..HEAD'])
     const ro = remoteOnly.ok ? parseInt(remoteOnly.out.trim(), 10) || 0 : 0
     const lo = localOnly.ok ? parseInt(localOnly.out.trim(), 10) || 0 : 0
+    remoteNew = ro
     if (ro > 0 && lo > 0) {
       const names = git(['log', '--format=%s', 'origin/main..HEAD'])
       const allPulse =
@@ -721,7 +726,12 @@ function gitPulse(): void {
   }
 
   // pull-rebase אחרי-commit (העץ נקי עתה); קונפליקט-db = פתרון-עצמי מוכח-שרשרת (Task 27)
-  let pull = git(['pull', '--rebase', 'origin', 'main'])
+  // Task-130-c: רק-כשהרחוק התקדם (remoteNew>0) או-שאינו-ידוע (-1). רחוק-נייח + עץ-חי →
+  // דילוג-כן על-ה-pull (היה-נכשל "unstaged changes" בלי-קונפליקט-אמיתי) — push ישיר מטה.
+  let pull: { ok: boolean; out: string } = { ok: true, out: 'skipped: remote-static — דחיפה-ישירה על-עץ-חי (Task-130-c)' }
+  if (remoteNew !== 0) {
+    pull = git(['pull', '--rebase', 'origin', 'main'])
+  }
   if (!pull.ok) {
     let rounds = 0
     for (let i = 0; i < 5 && !pull.ok; i++) {
