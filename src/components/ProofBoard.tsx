@@ -12,6 +12,9 @@ import { Loader2, RefreshCw, ShieldCheck, HeartPulse, GitBranch, Scale, Wrench, 
 //   עשרה-איברים בבדיקת-HTTP חיה (עם-זמן-תגובה), אירועי-נפילה→החזרה מהזקיפה עצמו,
 //   שרשרת-חתומה + עד-חיצוני, מצב-גיט, נכסי-בנייה-מחדש. אפס-טענות — רק-מדידות.
 // מחוון-השניות החי למעלה מוכיח-שהמשטח-עצמו חי בין-מדידה-למדידה.
+// Task-125 (שיעור-הידרציה-חי): `useState(() => Date.now())` מרנדר-שעה-שונה-בשרת (UTC)
+// מול-הלקוח (ישראל UTC+3) → קריסת-הידרציה-גלויה-לבעלים. מעתה: אפס-שעה-בשרת —
+// `null` עד-ה-mount, פלייסהולדר אטום-לאזור-זמן, והשעה-האמיתית רק-מהלקוח.
 
 type ProofData = {
   measuredAt: string
@@ -44,6 +47,16 @@ type ProofData = {
     synced: boolean
     lastCommit: string | null
   }
+  // Task-125: מצב-פעימת-הגיט-מהלב-עצמו — הבעלים ראה "לא-קרה-כלום" בזמן-שהדחיפה-נכשלה-בשקט.
+  // מעתה: תוצאת-הדחיפה-האחרונה, מועדה וספירת-הדחיפות — נמדדות-חי-מהלב ומוצגות-בלוח.
+  pulse: {
+    gitPulses: number | null
+    gitPushes: number | null
+    lastGitPulseAt: string | null
+    lastGitPulseResult: string | null
+    appRestarts: number | null
+    lastAppGuardResult: string | null
+  } | null
   assets: {
     bootAllScript: boolean
     sovereignPulse: { exists: boolean; mtime: string | null }
@@ -65,11 +78,12 @@ export function ProofBoard() {
   const [data, setData] = useState<ProofData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [now, setNow] = useState(() => Date.now())
+  const [now, setNow] = useState<number | null>(null)
   const alive = useRef(true)
 
   useEffect(() => {
     alive.current = true
+    setNow(Date.now()) // בלקוח-בלבד — אפס-רינדור-שעה-בשרת (חוק-ההידרציה)
     const clock = setInterval(() => setNow(Date.now()), 1000)
     return () => {
       alive.current = false
@@ -100,7 +114,7 @@ export function ProofBoard() {
     return () => clearInterval(t)
   }, [measure])
 
-  const secsAgo = data ? Math.max(0, Math.floor((now - new Date(data.measuredAt).getTime()) / 1000)) : null
+  const secsAgo = data && now !== null ? Math.max(0, Math.floor((now - new Date(data.measuredAt).getTime()) / 1000)) : null
 
   return (
     <Card id="sec-proof" className="scroll-mt-20 lg:col-span-5 border-emerald-200/60 dark:border-emerald-900/40">
@@ -112,7 +126,7 @@ export function ProofBoard() {
           </CardTitle>
           <div className="flex items-center gap-2">
             <span className="font-mono text-xs tabular-nums text-muted-foreground" aria-label="שעון-חי">
-              {new Date(now).toLocaleTimeString('he-IL', { hour12: false })}
+              {now === null ? '--:--:--' : new Date(now).toLocaleTimeString('he-IL', { hour12: false })}
             </span>
             <Button variant="outline" size="sm" onClick={measure} disabled={loading} aria-label="מדוד-עכשיו">
               {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -254,6 +268,21 @@ export function ProofBoard() {
                 )}
               </div>
               {data.git.lastCommit && <div className="truncate font-mono text-xs text-muted-foreground" dir="ltr">{data.git.lastCommit.split('|')[0]}</div>}
+              {data.pulse && (
+                <div className="flex flex-wrap items-center gap-1.5 text-xs" dir="rtl">
+                  <span className="text-muted-foreground">
+                    פעימת-גיט: {fmtTime(data.pulse.lastGitPulseAt)} · {data.pulse.lastGitPulseResult ?? '—'}
+                  </span>
+                  {data.pulse.gitPushes !== null && (
+                    <Badge variant="outline" className="font-mono">{data.pulse.gitPushes} דחיפות-אוטומטיות</Badge>
+                  )}
+                  {data.pulse.appRestarts !== null && data.pulse.appRestarts > 0 && (
+                    <Badge variant="outline" className="text-amber-700 dark:text-amber-400 border-amber-300/60 dark:border-amber-800/60">
+                      האפליקציה-נפלה-והוזנקה-חזרה ×{data.pulse.appRestarts}
+                    </Badge>
+                  )}
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-1.5 text-xs">
                 <Wrench className="h-3 w-3 text-muted-foreground" />
                 {data.assets.bootAllScript ? (

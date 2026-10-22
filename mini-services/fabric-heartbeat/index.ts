@@ -574,6 +574,26 @@ function dbFileIno(): number | null {
   }
 }
 
+// Task-125: ניסיון-דחיפה-חוזר-מהיר — נמדד-חי: דחיפה-כושלת-10:09 השאירה-את-origin/main מאחור-עד-הפעימה-הבאה
+// (הבעלים-ראה-"לא-קרה-כלום"-בגיט). מעתה: לא-ממתינים-15-דק' — מנסים-שוב-אחרי-60/120/240ש׳ (חסם-מקסימום-3 — אפס-עומס).
+const PUSH_RETRY_DELAYS_MS = [60_000, 120_000, 240_000]
+let pushRetryRound = 0
+let pushRetryScheduled = false
+function schedulePushRetry(): void {
+  if (pushRetryScheduled) return
+  if (pushRetryRound >= PUSH_RETRY_DELAYS_MS.length) {
+    pushRetryRound = 0 // נגמרו-החוזרים-המהירים — הפעימה-הקבועה-תיקח (כנות, לא-לולאה-אינסופית)
+    return
+  }
+  const delay = PUSH_RETRY_DELAYS_MS[pushRetryRound++]
+  pushRetryScheduled = true
+  log(`פעימת-גיט: דחיפה-כושלת — ניסיון-חוזר-${pushRetryRound} בעוד ${Math.round(delay / 1000)}ש׳`)
+  setTimeout(() => {
+    pushRetryScheduled = false
+    void gitPulseChecked() // המסלול-המלא (כולל-בדיקת-האינוד) — לא-קיצור-דרך
+  }, delay)
+}
+
 async function gitPulseChecked(): Promise<void> {
   const inoBefore = dbFileIno()
   gitPulse()
@@ -709,20 +729,28 @@ function gitPulse(): void {
     }
   } catch {}
 
-  if (!dirty) {
+  // Task-125: מדידת-מה-לא-דחוף — עץ-נקי-עם-קומיט-מקומי-שטרם-נדחף (דחיפה-כושלת-קודמת) היה
+  // נופל-ל-'clean — אין-מה-לדחוף'-שקרי-ונשאר-תקוע-לנצח. מעתה: נמדד-בפועל מול-origin/main.
+  let ahead = 0
+  const aheadRes = git(['rev-list', '--count', 'origin/main..HEAD'])
+  if (aheadRes.ok) ahead = parseInt(aheadRes.out.trim(), 10) || 0
+
+  if (!dirty && ahead === 0) {
     state.lastGitPulseResult = 'clean — אין-שינויים לדחוף'
     return
   }
 
   const push = git(['push', 'origin', 'main'])
   if (!push.ok) {
-    state.lastGitPulseResult = 'push failed — ינסה-שוב בפעימה-הבאה'
-    log('פעימת-גיט: push נדחה — הפעימה-הבאה תעשה pull-rebase ותנסה שוב')
+    state.lastGitPulseResult = `push failed (ahead:${ahead || 0}) — חוזר-מהיר 60/120/240ש׳`
+    log('פעימת-גיט: push נדחה — ניסיון-חוזר-מהיר מתוזמן (לא-ממתין-לפעימה-הבאה)')
+    schedulePushRetry()
     return
   }
+  pushRetryRound = 0 // הצלחה — מונה-החוזרים-מתאפס
   state.gitPushes++
-  state.lastGitPulseResult = `pushed: ${nFiles} files`
-  log(`פעימת-גיט: נדחף ✓ ${nFiles} קבצים (סה"כ דחיפות-אוטומטיות: ${state.gitPushes})`)
+  state.lastGitPulseResult = `pushed: ${ahead > 0 && !dirty ? `${ahead} commits (מצטבר)` : `${nFiles} files`}`
+  log(`פעימת-גיט: נדחף ✓ ${ahead > 0 && !dirty ? `${ahead} קומיטים-שהמתינו` : `${nFiles} קבצים`} (סה"כ דחיפות-אוטומטיות: ${state.gitPushes})`)
 }
 
 // ===== עורק-0: שומר-האפליקציה (Task 26) — הרשת מרפאת-את-עצמה =====

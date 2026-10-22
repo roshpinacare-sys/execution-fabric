@@ -101,9 +101,9 @@ export async function measureProof(): Promise<{ snapshot: Record<string, unknown
     ? Object.entries(kd.watches).map(([name, w]) => ({ name, up: !!w.up, restarts: w.restarts ?? 0, lastResult: w.lastResult ?? null }))
     : []
 
-  // 3) שרשרת — ספירה-חיה + עד-חיצוני
+  // 3) שרשרת — ספירה-חיה + עד-חיצוני; ומצב-הלב (פעימת-הגיט-עצמה) — Task-125
   const hourAgo = new Date(Date.now() - 3600_000) // schema מגדיר DateTime — פילטר-פריזמה לוקח Date (שיעור-122 היה-על-שאילתות-sqlite-גולמיות)
-  const [total, lastHour, last12, witness, keeperHealth] = await Promise.all([
+  const [total, lastHour, last12, witness, keeperHealth, heartState] = await Promise.all([
     db.ledgerEntry.count(),
     db.ledgerEntry.count({ where: { createdAt: { gte: hourAgo } } }),
     db.ledgerEntry.findMany({ orderBy: { id: 'desc' }, take: 12, select: { id: true, createdAt: true, worker: true, status: true } }),
@@ -112,6 +112,10 @@ export async function measureProof(): Promise<{ snapshot: Record<string, unknown
       .catch(() => null),
     // Task-124: lastTickAt נמדד-חי-מהזקיפה-עצמה (קובץ-המצב-נשטף-תקופתית-ומפגר)
     fetch('http://127.0.0.1:3051/health', { cache: 'no-store', signal: AbortSignal.timeout(3000) })
+      .then(r => r.json())
+      .catch(() => null),
+    // Task-125: פעימת-הגיט-מהלב-עצמו — "pushed/push failed/שעה" — ההוכחה-שהבעלים-ראה-חסרה
+    fetch('http://127.0.0.1:3031/', { cache: 'no-store', signal: AbortSignal.timeout(2000) })
       .then(r => r.json())
       .catch(() => null),
   ])
@@ -131,6 +135,15 @@ export async function measureProof(): Promise<{ snapshot: Record<string, unknown
     bootAllScript: existsSync(bootAll),
     sovereignPulse: existsSync(pulseFile) ? { exists: true, mtime: new Date(statSync(pulseFile).mtimeMs).toISOString() } : { exists: false, mtime: null },
   }
+
+  const hs = (heartState ?? null) as {
+    gitPulses?: number
+    gitPushes?: number
+    lastGitPulseAt?: string | null
+    lastGitPulseResult?: string | null
+    appRestarts?: number
+    lastAppGuardResult?: string | null
+  } | null
 
   const snapshot = {
     measuredAt,
@@ -159,6 +172,17 @@ export async function measureProof(): Promise<{ snapshot: Record<string, unknown
       synced: head !== null && head === originMain,
       lastCommit: lastCommitInfo,
     },
+    // Task-125: מצב-פעימת-הגיט-מהלב — נמדד-חי-בבקשה-זו (null כנה אם-הלב-לא-עונה)
+    pulse: hs
+      ? {
+          gitPulses: typeof hs.gitPulses === 'number' ? hs.gitPulses : null,
+          gitPushes: typeof hs.gitPushes === 'number' ? hs.gitPushes : null,
+          lastGitPulseAt: hs.lastGitPulseAt ?? null,
+          lastGitPulseResult: hs.lastGitPulseResult ?? null,
+          appRestarts: typeof hs.appRestarts === 'number' ? hs.appRestarts : null,
+          lastAppGuardResult: hs.lastAppGuardResult ?? null,
+        }
+      : null,
     assets,
   }
   return { snapshot, measureMs: Date.now() - t0 }
