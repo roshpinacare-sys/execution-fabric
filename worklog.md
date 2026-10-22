@@ -2556,3 +2556,19 @@ Work Log:
 Stage Summary:
 - The owner's "nothing happened" is now structurally impossible to repeat silently: a failed push self-retries within ≤2 min, an unpushed commit can no longer be masked by a quiet tree, and every push/fail/restart is a live badge on the proof board refreshed every 10s. Hydration crash eliminated at the root.
 - Artifacts: ProofBoard.tsx (hydration law + pulse display), ops/proof/route.ts (heart measurement), fabric-heartbeat/index.ts (ahead-measurement + push-retry), this worklog, commit 9854577 on origin/main.
+
+---
+Task ID: 126
+Agent: Z.ai Code (orchestrator)
+Task: "תמשיך ודחוף וודא פעילות ריבונית אוטונומית קבועה עובדת על הכל בגיט" — verify constant sovereign activity, unstick the git artery, revive dex.
+
+Work Log:
+- ROOT CAUSE FOUND (reflog forensics): a PLATFORM CHECKPOINT-RESTORE rolled the whole filesystem back to ~yesterday-18:00 — reflog restarts at e8ab3ca (amend-loop anchor), src/ lost Task-124/125 files entirely, ledger db rolled back to a stale 1792-row fork (true chain reached 2336), top-level repos/saos-dex wiped (dex :3010 dead), heart/keeper state reset. The remote kept everything (multi-instance fabric: another instance continued OUR chain from git — rows 2267-2336 signed 10:24-11:38, and row 2266 matched my morning measurement bit-for-bit: AUDIT nvidia-nim 10:20:17).
+- LEDGER TRUTH RESOLVED BY HASH CROSS-VERIFICATION (no gambling): remote chain contains our entire true chain (rows 2260/2266 hashes+timestamps = this morning's measured truth) and continues it. Adopted origin/main wholesale per the no-trust law (origin=source): VACUUM INTO backup of the stale disk first (kept as evidence, NOT restored — restoring it would fork the chain), git reset --hard origin/main, POST /api/admin/db-reconnect → app engine re-bound to the 2336-row true chain.
+- DEX REVIVED via the proven Task-106 path: real repo = roshpinacare-sys/saos-dex (found in docs/KEY-LEDGER.md; the keeper's provision was cloning the FABRIC repo by mistake and failing db:push ×17). git clone → bun install (194 pkgs) → db:push (schema in sync, dex.db state intact: snapshot/tape/klines) → boot-all.sh → PASS :3010 → keeper watch flipped up:true fails:0 → /saos-dex/api/dex/state answers ok:true.
+- CONVERGENCE LAW IMPLANTED (mini-services/fabric-heartbeat/index.ts, Task-126): at every pulse start — fetch, measure divergence (HEAD vs origin/main both directions); if diverged AND all local-only commits are auto-pulse snapshots → resyncFromOrigin() (branch+tree→remote, live db excluded from checkout, zero data loss) and continue the pulse normally; if local-only contains real work → honest log, NO overwrite, normal pull-rebase merge path. This converts any future platform-restore event from "stuck-in-abort forever" (measured 12:12-12:28) into self-convergence within one pulse (≤15 min).
+- VERIFIED LIVE: heart reloaded with the law (startedAt 12:50:34), witness 2336/2336 verified no-break, proof API 10/10 organs, git synced, chain 2336.
+
+Stage Summary:
+- The system survived a platform-level rollback and now carries an immune response to it: any filesystem regression is detected at the next pulse and converged to origin/main without touching the live ledger; the dex's own repo is cloned by name (not the fabric); all 10 organs alive; the true chain (2336, witness-verified) is both on disk and on origin.
+- Artifacts: heartbeat convergence law (Task-126), repos/saos-dex restored from its own github, this worklog, chain at 2336 with full witness verification.
