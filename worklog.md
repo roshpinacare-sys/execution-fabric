@@ -2456,3 +2456,18 @@ Work Log:
 Stage Summary:
 - The user's demand (no duplicates/overwrites/conflicts) audited at every layer: processes (1 zombie killed), ports (1:1), fds (clean), ledger (0 dups), DB↔chain (12=12 exact), orders (no stacking on the other runner), anchor (deadband-pinned), requote (no self-cascade). The grid now rests when the market rests and migrates orderly when it truly moves. Pushed.
 - Artifacts: mini-services/saos-grid/market.ts (source-sticky + GRID_ANCHOR_DEADBAND_PCT), mini-services/saos-grid/engine.ts (§7 two-phase requote, executors-exclusion), worklog Task-120, sovereign/site narration artifact committed.
+
+---
+Task ID: 120-b (post-push recovery addendum)
+Agent: Z.ai Code (orchestrator)
+Task: inode-orphan recurrence during the Task-120 push dance — recovery + law.
+
+Work Log:
+- RECURRENCE (03:02Z): MY OWN stash-push in the Task-120 push dance replaced state files under live processes — grid (12576), council (5171), metrics (5180) held deleted-inode WAL/SHM fds again. The Task-119 heartbeat law covers rebases, not stashes.
+- KEY DISCOVERY: bun --watch compares CONTENT, not mtime — `touch index.ts` does NOT reload. And the engine's DB connection is module-level (engine.ts:129): it opened BEFORE the stash → the ACTIVE writer was on the deleted inode (idle since the copy, but the next write would have been lost).
+- RECOVERY EXECUTED (03:03-03:06Z): (1) copied live WAL/SHM out of /proc/PID/fd onto disk for all three organs; (2) forced reload via CONTENT change (doctrine comment at the Database open point) — engine reopened on fd 785/786/787, zero deleted markers, cycles:1, lastError=null; (3) council + metrics bounced the same way.
+- STASH LAW (new): state-file snapshots in a stash are stale by definition (live organs keep writing) — popping them = overwriting newer chain-true state. DROP the stash, never pop; fill_ledger re-records exactly once from chain.
+- FINAL STATE (03:08Z): dup keys 0 / 171 fills; 6 managed rungs + 6 adopted (monitor-only); DB↔chain exact; 8/8 organs 200; zero orphaned state fds; main == origin/main (e7e0a75).
+
+Stage Summary:
+- The orphan disease is now fully mapped: cause (git file-replacement under live module-level DB handles), detection (deleted-fd scan), cure (fd-copy + content-reload), prevention (drop-don't-pop stashes; heartbeat law extended conceptually to stashes). Artifacts: doctrine comments in engine.ts / saos-council/index.ts / saos-metrics/index.ts.
