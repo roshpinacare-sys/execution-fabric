@@ -634,6 +634,32 @@ function gitPulse(): void {
     return
   }
 
+  // Task-126: התכנסות-מוקדמת אחרי-אירועי-שחזור (פלטפורמה/מכונה) — נמדד-חי 12:12-12:28:
+  // שחזור-פלטפורמה החזיר-ענף+עץ-לאתמול (reflog-מתחיל-מחדש, src/-חסר, dex-מת), הרחוק-המשיך-קדימה,
+  // והפעימות-נתקעות-ב-pull-rebase-abort-לנצח. מעתה: אם-הענף-סטה-מהרחוק וכל-הקומיטים-המקומיים-בלבד
+  // הם-תמונות-פעימה-מתכלות — מתכנסים-לorigin/main (ענף+עץ→רחוק; db-החי-מוגן-בהוצאה-מה-checkout)
+  // וממשיכים-פעימה-רגילה. עבודה-מקומית-אמיתית (שאינה-פעימה) לעולם-לא-נדרסת — ממשיך-למיזוג-רגיל.
+  const preFetch = git(['fetch', 'origin'])
+  if (preFetch.ok) {
+    const remoteOnly = git(['rev-list', '--count', 'HEAD..origin/main'])
+    const localOnly = git(['rev-list', '--count', 'origin/main..HEAD'])
+    const ro = remoteOnly.ok ? parseInt(remoteOnly.out.trim(), 10) || 0 : 0
+    const lo = localOnly.ok ? parseInt(localOnly.out.trim(), 10) || 0 : 0
+    if (ro > 0 && lo > 0) {
+      const names = git(['log', '--format=%s', 'origin/main..HEAD'])
+      const allPulse =
+        names.ok && names.out.split('\n').filter(Boolean).every((s) => s.startsWith('fabric-heartbeat: auto-pulse'))
+      if (allPulse) {
+        if (resyncFromOrigin('diverged-auto-pulse-only')) {
+          state.lastGitPulseResult = 'resynced→origin/main (סטיית-פעימות-בלבד; db-החי-נשמר)'
+          log('פעימת-גיט: התכנסות-לorigin/main אחרי-סטייה — קומיטי-פעימה-מתכלים-הומסו, db-החי-מוגן')
+        }
+      } else {
+        log(`פעימת-גיט: סטייה-עם-עבודה-מקומית-אמיתית (${lo} מקומי מול ${ro} ברחוק) — אין-דריסה, pull-rebase רגיל ימזג`)
+      }
+    }
+  }
+
   const status = git(['status', '--porcelain'])
   if (!status.ok) {
     state.lastGitPulseResult = 'skipped: git status failed'
