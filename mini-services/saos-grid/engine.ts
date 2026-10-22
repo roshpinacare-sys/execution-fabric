@@ -388,8 +388,11 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
     const floor = identityLine ? identityLine * (1 + FLOOR_BUFFER_BPS / 10_000) : null
     stats.identityLine = identityLine
     stats.floor = floor
-    if (identityLine) decisions.push(`קו-זהות: ${identityLine.toFixed(4)} SBD/STEEM → רצפת-מכירה ${floor!.toFixed(4)} (steemUsd=$${marks!.steemUsd}, sbdUsd=$${marks!.sbdUsd})`)
-    else decisions.push(`קו-זהות: לא-נמדד (steemUsd=${marks ? marks.steemUsd.toFixed(4) : 'נ/ל'}, sbdUsd-חסר) → מדיניות-שמרנית: אין-מכירות-מתחת-ל-bestAsk`)
+    if (identityLine) {
+      decisions.push(`קו-זהות: ${identityLine.toFixed(4)} SBD/STEEM → רצפת-מכירה ${floor!.toFixed(4)} (steemUsd=$${marks!.steemUsd}, sbdUsd=$${marks!.sbdUsd}${marks!.stale ? ', עוגן-ישן-מהדיסק' : ''})`)
+    } else {
+      decisions.push(`קו-זהות: לא-נמדד-ואין-עוגן-דיסק-בתוקף → Task-117-fail-closed: איסור-מכירות מוחלט (לעולם-לא-מכירה-בלי-עוגן-ערך-חוץ)`)
+    }
 
     // 4) ידיים — חשבונות-מהכספת; מפתח-חסר = יד-בצל
     const accounts = loadAccounts()
@@ -428,6 +431,9 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
     let skipSide: 'buy' | 'sell' | null = null
     if (basePct > CONFIG.maxSideSkewPct) skipSide = 'buy' // כבד-ב-STEEM — אין-קניות-נוספות עד-איזון
     else if (100 - basePct > CONFIG.maxSideSkewPct) skipSide = 'sell' // כבד-ב-SBD — אין-מכירות-נוספות
+    // Task-117 fail-closed: אין-עוגן-ערך-חוץ → איסור-מכירות מוחלט. הרצפה-לא-קורסת-ל-bestAsk —
+    // מדידה-חיה 01:04Z: קריסת-עוגן גרמה למכירות-חיות-מתחת-לפאריטי (0.1029 < 0.1101). לעולם-שוב-לא.
+    if (floor === null) skipSide = 'sell'
     if (skipSide) {
       decisions.push(`מנהל-חשיפה: STEEM=${basePct.toFixed(1)}% מהמלאי (נזיל+נעול, סף-${CONFIG.maxSideSkewPct}%) → פקודות-${skipSide === 'buy' ? 'קנייה' : 'מכירה'}-מושהות-עד-איזון (AutoHedge-rebalance)`)
       event('decision', { account: '*', side: skipSide, level: 0, price: m.mid!, amountSteem: 0, amountSbd: 0, mode: live, detail: `exposure-governor: basePct=${basePct.toFixed(1)}% skip=${skipSide}` })
@@ -691,7 +697,11 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
         .query("SELECT orderid, account, side, level, price, amount_steem, amount_sbd, mode FROM grid_orders WHERE status='open'")
         .all() as Array<{ orderid: string; account: string; side: string; level: number; price: number; amount_steem: number; amount_sbd: number; mode: string }>
       for (const o of staleRows) {
-        if (Math.abs(o.price - m.mid!) <= drift) continue
+        // Task-117 טיהור-רצפה: מכירה-פתוחה-מתחת-לרצפה = הפרת-דוקטרינה חיה — מורמת-לרצפה
+        // גם-בלי-סטיית-מחיר (מדידה-חיה: מכירות-0.1029-שנשתלו-בחלון-קריסת-העוגן לא-היו
+        // מקוזזות-לעולם כי הסטייה-מהמרכז היתה 1.1% < סף-1.5%).
+        const belowFloorPurge = o.side === 'sell' && floor !== null && o.price < floor
+        if (!belowFloorPurge && Math.abs(o.price - m.mid!) <= drift) continue
         if (o.mode === 'shadow') {
           db.query("UPDATE grid_orders SET status='canceled' WHERE orderid=?").run(o.orderid)
           event('cancel', { account: o.account, side: o.side, level: 0, price: o.price, amountSteem: 0, amountSbd: 0, mode: 'shadow', detail: 'סטייה-מעל-סף-הקיזוז' })
@@ -704,7 +714,9 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
         if (o.level === -9) continue
         const acct = accounts.find((a) => a.name === o.account)
         if (!acct?.wif) continue
-        if ((o.side === 'buy' && skipSide === 'buy') || (o.side === 'sell' && skipSide === 'sell')) continue
+        // Task-117: טיהור-רצפה עוקף את מנהל-החשיפה — הרמת-מכירה-אל-הרצפה היא הכיוון-המרפא
+        // (היעד = רצפה ≥ ערך-החוץ), ואסור-שה-fail-closed יקפיא אותה.
+        if ((o.side === 'buy' && skipSide === 'buy') || (o.side === 'sell' && skipSide === 'sell' && !belowFloorPurge)) continue
         // יעד-מדרגה (עם-רצפה-למכירה — קו-זהות, ואם-אין-מדידה: bestAsk הקיים)
         // Task-115: יעד-הקיזוז מקבל-את-אותה-טיית-איזון — פקודות-רחוקות-נמשכות-למרכז-בעת-חוסר-איזון
         const levelForTarget = o.level >= 0 ? o.level : 0

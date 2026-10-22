@@ -239,42 +239,75 @@ export async function getAccountFills(account: string, last = 100): Promise<RpcR
 // מדידה-חיה: coingecko-מוגבל-קצב (429 נמדד) → STEEM מול-Binance (STEEMUSDT,
 // אומת-חי: 0.05575). sbdUsd-רק-ממקור-אמיתי: אין-מקור → sbdUsd=0 → הקורא
 // מדליק-רצפה-null (מצב-שמרני: אין-מכירות-מתחת-ל-bestAsk). אפס-המצאות.
-export type ExternalMarks = { steemUsd: number; sbdUsd: number; at: string } | null
+export type ExternalMarks = { steemUsd: number; sbdUsd: number; at: string; stale?: boolean } | null
 let marksCache: ExternalMarks = null
 let marksAt = 0
+
+// Task-117 (נמדד-בדם 01:04Z): קריסת-עוגן — binance (איפוס-IP), coingecko (429-לסירוגין)
+// → identityLine=null → הרצפה-קרסה-ל-bestAsk → מכירות-חיות-מתחת-לערך-החוץ (0.1029 < 0.1101
+// פאריטי) — הפרת-דוקטרינה. שלוש-שכבות: (1) שלושה-מקורות-STEEM (binance→coingecko→
+// coinpaprika — שלושתם נמדדו-חי); (2) עוגן-אחרון-ידוע-טוב-בדיסק (state/marks.json,
+// תוקף-24h); (3) במנוע: אין-עוגן = איסור-מכירות מוחלט (fail-closed), לעולם-לא-מכירה-
+// מתחת-לערך-החוץ. העוגן-מהדיסק נשמר-במטמון-קצר (60s) כדי-לנסות-חי-שוב-מהר.
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+const MARKS_FILE = join(import.meta.dir, 'state', 'marks.json')
+const MARKS_MAX_AGE_MS = 24 * 3600_000
+
+async function fetchSteemUsd(): Promise<number> {
+  // מקור-1: binance (נמדד: זמין-לסירוגין — איפוס-IP-חוזר)
+  try {
+    const res = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=STEEMUSDT', { signal: AbortSignal.timeout(6000), cache: 'no-store' })
+    if (res.ok) { const p = parseFloat(((await res.json()) as { price?: string }).price ?? '0'); if (p > 0) return p }
+  } catch { /* מקור-הבא */ }
+  // מקור-2: coingecko
+  try {
+    const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=steem&vs_currencies=usd', { signal: AbortSignal.timeout(8000), cache: 'no-store' })
+    if (res.ok) { const p = parseFloat(String(((await res.json()) as { steem?: { usd?: number } }).steem?.usd ?? '0')); if (p > 0) return p }
+  } catch { /* מקור-הבא */ }
+  // מקור-3: coinpaprika (נמדד-חי 00:48Z ו-01:06Z: 0.0552)
+  try {
+    const res = await fetch('https://api.coinpaprika.com/v1/tickers/steem-steem', { signal: AbortSignal.timeout(8000), cache: 'no-store' })
+    if (res.ok) { const p = parseFloat(String(((await res.json()) as { quotes?: { USD?: { price?: number } } }).quotes?.USD?.price ?? '0')); if (p > 0) return p }
+  } catch { /* כנות: אין-מדידה-STEEM */ }
+  return 0
+}
+
+async function fetchSbdUsd(): Promise<number> {
+  // SBD: coingecko הוא-המקור-היחיד-שנמדד-חי (coinpaprika: אין-ticker-sbd)
+  try {
+    const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=steem-dollars&vs_currencies=usd', { signal: AbortSignal.timeout(8000), cache: 'no-store' })
+    if (res.ok) { const p = parseFloat(String(((await res.json()) as { 'steem-dollars'?: { usd?: number } })['steem-dollars']?.usd ?? '0')); if (p > 0) return p }
+  } catch { /* כנות: אין-מדידה-SBD */ }
+  return 0
+}
+
 export async function getExternalMarks(): Promise<ExternalMarks> {
-  if (marksCache && Date.now() - marksAt < 10 * 60_000) return marksCache
+  if (marksCache && Date.now() - marksAt < (marksCache.stale ? 60_000 : 10 * 60_000)) return marksCache
   let steemUsd = 0
   let sbdUsd = 0
-  try {
-    const res = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=STEEMUSDT', {
-      signal: AbortSignal.timeout(8000),
-      cache: 'no-store',
-    })
-    if (res.ok) {
-      const j = (await res.json()) as { price?: string }
-      steemUsd = parseFloat(j.price ?? '0')
-    }
-  } catch {
-    /* ניסיון-הבא-מקור */
+  steemUsd = await fetchSteemUsd()
+  sbdUsd = await fetchSbdUsd()
+  if (steemUsd > 0 && sbdUsd > 0) {
+    marksCache = { steemUsd, sbdUsd, at: new Date().toISOString() }
+    marksAt = Date.now()
+    try {
+      mkdirSync(join(import.meta.dir, 'state'), { recursive: true })
+      writeFileSync(MARKS_FILE, JSON.stringify(marksCache))
+    } catch { /* כנות: דיסק-לא-קריטי */ }
+    return marksCache
   }
+  // נפילה-כנה: עוגן-אחרון-ידוע-טוב-מהדיסק (תוקף-24h) — מסומן stale
   try {
-    const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=steem-dollars,steem&vs_currencies=usd', {
-      signal: AbortSignal.timeout(8000),
-      cache: 'no-store',
-    })
-    if (res.ok) {
-      const j = (await res.json()) as { steem?: { usd?: number }; 'steem-dollars'?: { usd?: number } }
-      const s = j.steem?.usd ?? 0
-      const d = j['steem-dollars']?.usd ?? 0
-      if (s > 0 && steemUsd <= 0) steemUsd = s
-      if (d > 0) sbdUsd = d
+    if (existsSync(MARKS_FILE)) {
+      const j = JSON.parse(readFileSync(MARKS_FILE, 'utf-8')) as { steemUsd: number; sbdUsd: number; at: string }
+      const age = Date.now() - new Date(j.at).getTime()
+      if (j.steemUsd > 0 && j.sbdUsd > 0 && Number.isFinite(age) && age < MARKS_MAX_AGE_MS) {
+        marksCache = { steemUsd: j.steemUsd, sbdUsd: j.sbdUsd, at: j.at, stale: true }
+        marksAt = Date.now()
+        return marksCache
+      }
     }
-  } catch {
-    /* כנות: sbdUsd-ישאר-0 */
-  }
-  if (steemUsd <= 0) return marksCache // אין-מדידה-חיה → null/ישן
-  marksCache = { steemUsd, sbdUsd, at: new Date().toISOString() }
-  marksAt = Date.now()
-  return marksCache
+  } catch { /* כנות: עוגן-דיסק-פגום */ }
+  return marksCache // null — המנוע יעשה fail-closed: איסור-מכירות מוחלט
 }
