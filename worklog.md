@@ -2619,3 +2619,20 @@ Work Log:
 Stage Summary:
 - The sovereign architecture is agent-independent by construction: every organ self-drives, the watcher is watched, boot-revival is automatic, the git artery pulses with fast-retry, the evolution loop executes real code via the LLM rail ladder, and all of it leaves signed chain + git evidence. When I exit, nothing I ran dies with me — the only pauses are the platform's VM sleep and vendor outages, both measured and displayed honestly on the proof board.
 - Artifacts: this audit, open-loops guide committed to git, chain growing (2374+), origin/main synced.
+
+---
+Task ID: 129
+Agent: Z.ai Code (orchestrator)
+Task: "מה עוד כתוב ב-preview הפתוח שאפשר לטפל בו וללטש? בדוק תכנן בצע דחוף"
+
+Work Log:
+- SCANNED the whole open preview for honest failure flags: found "Failed to fetch" on multiple panels + 11 FAILED badges — all traced to ONE live event: the main app DIED (OOM) while the page was open. The panels' fail-closed honesty was correct behavior, not bugs.
+- OOM ROOT-CAUSED (dmesg, twice): next-server ballooned to 1.95-2.3GB RSS on the 4GB VM → kernel OOM-killer terminated it (14:20:51 + earlier). The heart's appGuard revived it (×11 — revival chain proven working). MEMORY DISCIPLINE LESSON ON MYSELF: my own agent-browser chrome sessions (~600MB) were lingering and feeding the pressure — killed them; from now on: one browser session, verified dead after close.
+- OOM MITIGATION (structural): dev scripts heap-capped — package.json `NODE_OPTIONS=--max-old-space-size=1536` (main app) + repos/saos-dex `1024` (its own repo). Covers start.sh boot AND heart appGuard respawns (both go through `bun run dev`). VERIFIED in the revived process env: cap 1536 live, inline beats the inherited NODE_OPTIONS=2020. Hard-killed the old unbounded server; guard respawned it capped (200 OK); dex revived by keeper (200 OK).
+- EXPORT ARTERY HEALED via the canonical medicine gate: sovereign/chain-export/ledger.jsonl was frozen since Oct 21 16:00 (1656 lines) and DIVERGED from the recovered chain at entry #1532 (lineage break from the Task-126 recovery chaos) → drill:restore-export FAILED copy-not-prefix ×2. POST /api/sovereign/chain-export?mode=rebuild&confirm=export-rebuild-<head12> → canonical rebuild: 2389/2389 verified from Genesis, head==production, atomic rename, REPAIR signed on chain (#2391-era). Sync (append-only) resumes on the heart's 10min pulses. Forced drill: DONE — prefixMatch true, 52ms, signed #2393.
+- DOCS-HISTORY GARDEN SCOPE FIXED (honest instrument, wrong subject): drill FAILED "docs-history-tampered-at-sovereign/site/sovereign-pulse.md" — the hourly visibility digests (sovereign-pulse.md, ln.md, Task-123) are REWRITTEN BY DESIGN and never were sitebuild append-only products; they sat in the guarded garden. Fix: OPERATIONAL_DIGESTS exclusion set in docs-history-drill.ts, single choke point (blobMapAt) covering arc/vanish/monotonic/disk-cross. Integrity of the digests stays guarded live by the proof surface (mtime measured per request). Forced drill: DONE (match true, arc 5 points, oldest commit 89e4948).
+- VERIFIED: lint green; app+dex healthy post-cap; both drills signed DONE on chain.
+
+Stage Summary:
+- The preview's honest failures led to three structural polishes: bounded memory (OOM cycle ends — the app can no longer starve the stack), the third recovery source (export) alive and appending again after a canonical REPAIR, and the docs-integrity instrument scoped to its true subject. All evidence signed on chain; all changes pushed.
+- Artifacts: heap caps (both dev scripts), chain-export canonical rebuild + REPAIR entry, OPERATIONAL_DIGESTS scope fix, worklog, chain 2393+ witness-verified.

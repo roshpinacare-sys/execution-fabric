@@ -39,6 +39,18 @@ const MIN_INTERVAL_MS = 60 * 60_000
 const GIT_TIMEOUT_MS = 60_000
 const ARC_POINTS = 5 // נקודות-הדגימה-על-הקשת: עתיק, רבע, אמצע, שלושה-רבעים, אחרון
 
+// Task-129 (ליטוש-הכלים): מחלקה-נפרדת-בגינה — דיגסטים-תפעוליים-של-הלב.
+// sovereign-pulse.md + ln.md נכתבים-מחדש-שעתית-ע״י-עורק-הנראות (Task-123) — מעולם-לא-היו
+// תוצרי-sitebuild ואינם-נתונים-לחוק-ה-append-only שהתרגיל-מגן-עליו; הם-גם-לא-יכולים-לעמוד-בו
+// בעצם-טבעם (מת-כתיבה-מחדש-מכוונת). שלמותם-נשמרת-בכלי-חי: משטח-ההוכחה מודד-את-mtime-שלהם
+// בכל-בקשה. התיקון-כאן-הוא-תיקון-היקף-לאמת-ההיסטורית — התרגיל-ממשיך-להוכיח-ביט-ביט-את
+// כל-תוצרי-הפסיפס-האמיתיים. נקודת-הסינון-היחידה: blobMapAt — כל-הבדיקות (קשת/היעלמות/
+// מונוטוניות/צליבת-דיסק) ניזונות-ממנו.
+const OPERATIONAL_DIGESTS = new Set<string>([
+  'sovereign/site/sovereign-pulse.md',
+  'sovereign/site/ln.md',
+])
+
 export interface DocsHistoryDrillResult {
   ok: boolean
   ran: boolean
@@ -89,7 +101,10 @@ function blobMapAt(sha: string): Map<string, string> {
     if (tab < 0) continue
     const meta = line.slice(0, tab).split(/\s+/)
     const p = line.slice(tab + 1).trim()
-    if (meta.length >= 3 && meta[1] === 'blob' && p.endsWith('.md')) map.set(p, meta[2])
+    if (meta.length >= 3 && meta[1] === 'blob' && p.endsWith('.md')) {
+      if (OPERATIONAL_DIGESTS.has(p)) continue // דיגסטים-תפעוליים — מחוץ-לחוק-ה-append-only (Task-129)
+      map.set(p, meta[2])
+    }
   }
   return map
 }
