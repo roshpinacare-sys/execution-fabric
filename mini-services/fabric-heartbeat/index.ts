@@ -685,6 +685,30 @@ function gitPulse(): void {
     }
   }
 
+  // Task-119: ריפוי-אינוד-קבצי-מצב — rebase שהחליף-קובץ-מצב-תחת-איבר-חי משאיר-אותו
+  // כותב-לצינור-מת (אינוד-יתום) בזמן-שהקובץ-על-הדיסק הוא-האמת-החדשה. נגיעה ב-index.ts
+  // של-האיבר = טעינה-מחדש על-הקובץ-החדש. הפנקס-מבוסס-שרשרת (fill_ledger) → אפס-אובדן-אמת.
+  try {
+    const scope = git(['diff', '--name-only', 'ORIG_HEAD', 'HEAD'])
+    const remoteApplied = /Fast-?forward|Successfully rebased|Merge made/.test(pull.out || '')
+    if (scope.ok && remoteApplied) {
+      const organs = new Set<string>()
+      for (const line of scope.out.split('\n')) {
+        const f = line.trim()
+        const m = f.match(/^mini-services\/([^/]+)\//)
+        if (m && /state\/.+\.(db|db-shm|db-wal|json)$/.test(f)) organs.add(m[1])
+      }
+      for (const o of organs) {
+        const idx = `${PROJECT_DIR}/mini-services/${o}/index.ts`
+        if (existsSync(idx)) {
+          const t = Bun.spawnSync(['touch', idx])
+          if (t.exitCode === 0) log(`פעימת-גיט: איבר ${o} הוקפץ — מצב-הוחלף-תחתיו-ב-rebase → טעינה-מחדש-על-האמת`)
+        }
+      }
+      if (organs.size > 0) state.lastGitPulseResult = `pushed (+${organs.size} organs bounced: ${[...organs].join(',')})`
+    }
+  } catch {}
+
   if (!dirty) {
     state.lastGitPulseResult = 'clean — אין-שינויים לדחוף'
     return
