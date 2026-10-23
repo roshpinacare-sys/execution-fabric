@@ -2735,3 +2735,18 @@ Work Log:
 Stage Summary:
 - The owner was right: the repo already contained the cures (force-sync gate, ls-remote witness, the 240s selftest) — what had never been implemented was tolerance of the heart's OWN recycle discipline inside the heart's own arteries. 13 recycle-kills cascaded into false degradations; now every artery retries recycle-class deaths with exp backoff+jitter and falls immediately-honest on everything else. TDD-first (9/9), lint clean, board 10/10, pushed.
 - Artifacts: app-fetch.ts + app-fetch.test.ts (9/9) + fetchApp law across 24 arteries in index.ts, this worklog, commit 9764f0f on origin/main.
+
+---
+Task ID: 133-b
+Agent: Z.ai Code (orchestrator)
+Task: continuation — one artery (build) died 3× consecutive in recycles even WITH the retry law.
+
+Work Log:
+- MEASURED: buildPulse (longest LLM marathon, up to 180s) retried ×2 per the law and STILL died 3× — recycle churn every ~3 min kills any 3-min in-flight work regardless of retries. Retries heal SHORT arteries; marathons need scheduling discipline.
+- TDD: 2 more tests (red: missing export) → isRssNearCeiling(rss, ceiling): null→false (no measurement never blocks), >ceiling−150→true. GREEN 11/11 (27 asserts).
+- LAW 2 (marathon discipline): evolutionPulse + buildPulse now defer ONE pulse honestly when RSS is within 150MB of the ceiling — "deferred: RSS ... קרוב-לתקרה ... ממתין-לחלון-שקט (כנות, לא-כשל)". Don't start a marathon in front of a guaranteed road closure. The next pulse re-evaluates.
+- VERIFIED: bun test 11/11, lint clean, heart auto-reloaded (16:18:48) ticking clean.
+
+Stage Summary:
+- Two complementary laws now govern the recycle churn: LAW 1 — every artery retries recycle-class deaths (exp backoff+jitter, honest immediate fall on business/timeout errors); LAW 2 — the two LLM marathons defer honestly when the app is near its recycle ceiling instead of feeding the churn. The system no longer mistakes its own medicine for disease, and no longer schedules surgery during the earthquake.
+- Artifacts: isRssNearCeiling + marathon deferral in evolution/build pulses, tests 11/11, this worklog.
