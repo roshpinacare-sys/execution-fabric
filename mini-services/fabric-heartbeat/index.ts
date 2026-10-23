@@ -728,11 +728,28 @@ function gitPulse(): void {
   // pull-rebase אחרי-commit (העץ נקי עתה); קונפליקט-db = פתרון-עצמי מוכח-שרשרת (Task 27)
   // Task-130-c: רק-כשהרחוק התקדם (remoteNew>0) או-שאינו-ידוע (-1). רחוק-נייח + עץ-חי →
   // דילוג-כן על-ה-pull (היה-נכשל "unstaged changes" בלי-קונפליקט-אמיתי) — push ישיר מטה.
+  // Task-132: ההחלטה נמדדת עכשיו — לא מהתפיסה-המיושנת שלפני-הריפוי/הקומיט. נמדד-חי 14:44
+  // (אחרי-אתחול-הפלטפורמה): סטייה ro>0 → resyncFromOrigin ריפא לorigin/main, אך remoteNew נשאר >0
+  // → pull-rebase מיותר על עץ-חי (השרשרת כותבת בין-לין) → "unstaged changes" → abort כנה
+  // → עורק תקוע מחזור-שלם (15 דק'). מעתה: דלתא-רחוק טרייה רגע-ההחלטה.
   let pull: { ok: boolean; out: string } = { ok: true, out: 'skipped: remote-static — דחיפה-ישירה על-עץ-חי (Task-130-c)' }
   if (remoteNew !== 0) {
-    pull = git(['pull', '--rebase', 'origin', 'main'])
+    const fresh = git(['rev-list', '--count', 'HEAD..origin/main'])
+    const freshRemote = fresh.ok ? parseInt(fresh.out.trim(), 10) || 0 : remoteNew
+    if (freshRemote === 0) {
+      log('פעימת-גיט: הרחוק נבלע במקומי (נמדד-טרי אחרי-הריפוי/הקומיט) — דילוג-כן על pull מיותר (Task-132)')
+    } else {
+      pull = git(['pull', '--rebase', 'origin', 'main'])
+    }
   }
   if (!pull.ok) {
+    // Task-132: נו-אופ מוכח — pull נכשל בלי-קונפליקט-מסומן והמקומי מכיל-את-הרחוק (is-ancestor מדוד):
+    // ה-rebase לא היה ממזג-כלום; כישלונו ("unstaged changes" על עץ-חי) חוסם-דחיפה בחינם.
+    // כנות: דילוג-על-ה-pull בשם-האמת-המדודה ודחיפה-ישירה. הרחוק-מחזיק-מה-שאין-במקומי → abort כנה כרגיל.
+    if (unmergedPaths().length === 0 && git(['merge-base', '--is-ancestor', 'origin/main', 'HEAD']).ok) {
+      log('פעימת-גיט: pull-rebase נכשל על עץ-חי אך המקומי מכיל-את-הרחוק (מדוד) — נו-אופ כנה, דחיפה-ישירה (Task-132)')
+      state.lastGitPulseResult = 'pull no-op (superset מדוד, אין-קונפליקט) — דחיפה-ישירה על-עץ-חי (Task-132)'
+    } else {
     let rounds = 0
     for (let i = 0; i < 5 && !pull.ok; i++) {
       const unmerged = unmergedPaths()
@@ -759,6 +776,7 @@ function gitPulse(): void {
       log(
         `פעימת-גיט: קונפליקט-db נפתר עצמית (${rounds} מחזורים) — שרשרת-מקומית הוכחה-על-קבוצה (סה"כ: ${state.dbConflictsResolved})`
       )
+    }
     }
   }
 
