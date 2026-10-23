@@ -24,7 +24,19 @@
 import { Database } from 'bun:sqlite'
 import { join, resolve } from 'path'
 import { existsSync, readFileSync, mkdirSync } from 'fs'
-import { free, finalizeTaker, matchOrderCore, type Balances, type DexStore, type Order, type WalletRec } from './engine'
+import { free, finalizeTaker, matchOrderCore, type Order, type WalletRec } from './engine'
+import {
+  bookRows,
+  createSqliteStore,
+  ensureSchema,
+  getMeta,
+  myOrdersRows,
+  placeOrderRow,
+  seedWallets as seedWalletRows,
+  saveWalletRow,
+  setMeta,
+  walletRow,
+} from './store'
 
 const PORT = 3010 // פורט-קבוע — חוזה-האיברים (לעולם לא env)
 const ROOT = resolve(import.meta.dir, '..', '..')
@@ -55,47 +67,21 @@ const HAND_SEEDS: Record<string, Record<string, number>> = {
 
 if (!existsSync(STATE_DIR)) mkdirSync(STATE_DIR, { recursive: true })
 const db = new Database(DB_PATH)
-db.run('PRAGMA journal_mode = WAL;')
-db.run(`CREATE TABLE IF NOT EXISTS wallets(
-  name TEXT PRIMARY KEY, credits INTEGER NOT NULL DEFAULT 0,
-  balances TEXT NOT NULL DEFAULT '{}', locked TEXT NOT NULL DEFAULT '{}')`)
-db.run(`CREATE TABLE IF NOT EXISTS orders(
-  id INTEGER PRIMARY KEY AUTOINCREMENT, base TEXT NOT NULL, quote TEXT NOT NULL,
-  side TEXT NOT NULL, priceMu INTEGER NOT NULL, amountMu INTEGER NOT NULL,
-  filledMu INTEGER NOT NULL DEFAULT 0, issuer TEXT NOT NULL,
-  postOnly INTEGER NOT NULL DEFAULT 0, ioc INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'open', createdAt TEXT NOT NULL)`)
-db.run(`CREATE TABLE IF NOT EXISTS fills(
-  id INTEGER PRIMARY KEY AUTOINCREMENT, base TEXT NOT NULL, quote TEXT NOT NULL,
-  side TEXT NOT NULL, priceMu INTEGER NOT NULL, amountMu INTEGER NOT NULL,
-  buyer TEXT NOT NULL, seller TEXT NOT NULL, createdAt TEXT NOT NULL)`)
-db.run(`CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
+// Task-132: ה-DDL, נגישי-השורות והחנות-חיים-ב-store.ts — ניתנים-לייבוא בטוח (בלי-פורט)
+// כדי-ששכבת-ה-SQL תהיה-מכוסה-בדיקות (store.test.ts על :memory:) — ה-blind-spot
+// שהשאיר את ה-INSERT-השבור חי-שבוע בלי-שאף-בדיקה יראה-אותו.
+ensureSchema(db)
+const seeded = seedWalletRows(db, HAND_SEEDS)
+if (seeded > 0) log(`ארנקות-זרע נזרעו (${seeded}) — ערכי-SEED זהים-לארב, מתועדים`)
 
-const getMeta = (k: string): string | null => (db.query('SELECT value FROM meta WHERE key=?').get(k) as { value: string } | null)?.value ?? null
-const setMeta = (k: string, v: string): void => db.query('INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k, v)
+let height = Number(getMeta(db, 'height') ?? 0)
+const bump = (): number => { height++; setMeta(db, 'height', String(height)); return height }
 
-let height = Number(getMeta('height') ?? 0)
-const bump = (): number => { height++; setMeta('height', String(height)); return height }
-
-function seedWallets(): void {
-  const count = (db.query('SELECT COUNT(*) c FROM wallets').get() as { c: number }).c
-  if (count > 0) return
-  const ins = db.query('INSERT INTO wallets(name,credits,balances,locked) VALUES(?,0,?,?)')
-  for (const [name, bal] of Object.entries(HAND_SEEDS)) {
-    ins.run(name, JSON.stringify(bal), '{}')
-  }
-  log(`ארנקות-זרע נזרעו (${Object.keys(HAND_SEEDS).length}) — ערכי-SEED זהים-לארב, מתועדים`)
-}
-seedWallets()
-
-function wallet(name: string): WalletRec | null {
-  const r = db.query('SELECT * FROM wallets WHERE name=?').get(name) as { name: string; credits: number; balances: string; locked: string } | null
-  if (!r) return null
-  return { name: r.name, credits: r.credits, balances: JSON.parse(r.balances) as Balances, locked: JSON.parse(r.locked) as Balances }
-}
-function saveWallet(w: WalletRec): void {
-  db.query('UPDATE wallets SET credits=?, balances=?, locked=? WHERE name=?').run(w.credits, JSON.stringify(w.balances), JSON.stringify(w.locked), w.name)
-}
+// נגישים-מקומיים (חתימות-זהות-למקור — אפס-שינוי-קריאות-במטפלים)
+const wallet = (name: string): WalletRec | null => walletRow(db, name)
+const saveWallet = (w: WalletRec): void => saveWalletRow(db, w)
+const bookOf = (base: string, quote: string): { bids: Order[]; asks: Order[] } => bookRows(db, base, quote)
+const store = createSqliteStore(db)
 
 // ── מחיר-חוץ כן (מסילת-הגריד FF — cache 60ש׳; כשל = דגל-כנה, לא-המצאה) ────────
 let ffCache: { at: number; steemUsd: number | null } = { at: 0, steemUsd: null }
@@ -115,12 +101,6 @@ async function externalSteemUsd(): Promise<{ steemUsd: number | null; feedOk: bo
 }
 
 // ── פארים-חיים: fair = מחצי-הספר אם-יש-פקודות, אחרת-זרע-מתועד ────────────────
-function bookOf(base: string, quote: string): { bids: Order[]; asks: Order[] } {
-  const open = db.query("SELECT * FROM orders WHERE base=? AND quote=? AND status='open' ORDER BY priceMu ASC, id ASC").all(base, quote) as Order[]
-  const asks = open.filter((o) => o.side === 'sell')
-  const bids = open.filter((o) => o.side === 'buy').reverse() // קנייה-גבוהה-ראשונה
-  return { bids, asks }
-}
 function marketView(base: string, quote: string) {
   const { bids, asks } = bookOf(base, quote)
   const bestBid = bids[0]?.priceMu ?? null
@@ -135,22 +115,6 @@ function marketView(base: string, quote: string) {
     poolMid: null,
     refSource: mid !== null ? 'book' : spec.refSource,
   }
-}
-
-// ── מימוש-האחסון של-הליבה מעל sqlite (Task-132) — האיבר-החי מזריק-את-החנות ────
-const store: DexStore = {
-  listOpen: (base, quote) => bookOf(base, quote),
-  getWallet: (name) => wallet(name),
-  saveWallet: (w) => saveWallet(w),
-  markFilledIfComplete: (id) => db.query("UPDATE orders SET status='filled' WHERE id=? AND filledMu>=amountMu").run(id),
-  setMakerProgress: (id, filledMu, complete) => {
-    if (complete) db.query('UPDATE orders SET filledMu=?, status=? WHERE id=?').run(filledMu, 'filled', id)
-    else db.query('UPDATE orders SET filledMu=? WHERE id=?').run(filledMu, id)
-  },
-  insertFill: (f) =>
-    db.query('INSERT INTO fills(base,quote,side,priceMu,amountMu,buyer,seller,createdAt) VALUES(?,?,?,?,?,?,?,?)')
-      .run(f.base, f.quote, f.side, f.priceMu, f.amountMu, f.buyer, f.seller, new Date().toISOString()),
-  log,
 }
 
 // ── ליבת-ההתאמה חיה ב-engine.ts (Task-132) — matchOrderCore(taker, store) ─────
@@ -228,7 +192,7 @@ async function handle(req: Request): Promise<Response> {
   if (p === '/saos-dex/api/dex/my-orders' && req.method === 'GET') {
     const issuer = url.searchParams.get('issuer')
     if (!issuer) return new Response(JSON.stringify({ ok: false, error: 'issuer-required' }), { status: 400, headers: cors })
-    const orders = db.query('SELECT * FROM orders WHERE issuer=? ORDER BY id DESC LIMIT 200').all(issuer) as Order[]
+    const orders = myOrdersRows(db, issuer)
     return new Response(JSON.stringify({ ok: true, issuer, orders }), { headers: cors })
   }
 
@@ -265,9 +229,10 @@ async function handle(req: Request): Promise<Response> {
         const wouldCross = bestOpp !== null && (side === 'buy' ? priceMu >= bestOpp : priceMu <= bestOpp)
         if (wouldCross) return new Response(JSON.stringify({ ok: false, error: 'postonly-would-cross' }), { status: 400, headers: cors })
       }
-      const info = db.query('INSERT INTO orders(base,quote,side,priceMu,amountMu,filledMu,issuer,postOnly,ioc,status,createdAt) VALUES(?,?,?,?,?,0,?,?,?,open,?)')
-        .run(base, quote, side, priceMu, amountMu, issuer, postOnly ? 1 : 0, ioc ? 1 : 0, new Date().toISOString())
-      const id = Number(info.lastInsertRowid)
+      // Task-132 fix (נלכד-חי בבדיקת-אינטגרציה): 'open' היה ללא-מרכאות → SQLite קרא
+      // אותו כעמודה → "no such column: open" → אף-פקודה לא נתקבלה מאז-Task-131.
+      // ה-INSERT עתה ב-store.ts (placeOrderRow) — מכוסה-בדיקת-רגרסיה על :memory:.
+      const id = placeOrderRow(db, { base, quote, side, priceMu, amountMu, issuer, postOnly, ioc })
       w.locked[payAsset] = (w.locked[payAsset] ?? 0) + need
       saveWallet(w)
       const o = db.query('SELECT * FROM orders WHERE id=?').get(id) as Order
