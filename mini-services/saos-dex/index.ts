@@ -24,6 +24,7 @@
 import { Database } from 'bun:sqlite'
 import { join, resolve } from 'path'
 import { existsSync, readFileSync, mkdirSync } from 'fs'
+import { free, finalizeTaker, matchOrderCore, type Balances, type DexStore, type Order, type WalletRec } from './engine'
 
 const PORT = 3010 // פורט-קבוע — חוזה-האיברים (לעולם לא env)
 const ROOT = resolve(import.meta.dir, '..', '..')
@@ -87,16 +88,14 @@ function seedWallets(): void {
 }
 seedWallets()
 
-type Balances = Record<string, number>
-function wallet(name: string): { name: string; credits: number; balances: Balances; locked: Balances } | null {
+function wallet(name: string): WalletRec | null {
   const r = db.query('SELECT * FROM wallets WHERE name=?').get(name) as { name: string; credits: number; balances: string; locked: string } | null
   if (!r) return null
   return { name: r.name, credits: r.credits, balances: JSON.parse(r.balances) as Balances, locked: JSON.parse(r.locked) as Balances }
 }
-function saveWallet(w: { name: string; credits: number; balances: Balances; locked: Balances }): void {
+function saveWallet(w: WalletRec): void {
   db.query('UPDATE wallets SET credits=?, balances=?, locked=? WHERE name=?').run(w.credits, JSON.stringify(w.balances), JSON.stringify(w.locked), w.name)
 }
-const free = (w: { balances: Balances; locked: Balances }, a: string): number => (w.balances[a] ?? 0) - (w.locked[a] ?? 0)
 
 // ── מחיר-חוץ כן (מסילת-הגריד FF — cache 60ש׳; כשל = דגל-כנה, לא-המצאה) ────────
 let ffCache: { at: number; steemUsd: number | null } = { at: 0, steemUsd: null }
@@ -122,10 +121,6 @@ function bookOf(base: string, quote: string): { bids: Order[]; asks: Order[] } {
   const bids = open.filter((o) => o.side === 'buy').reverse() // קנייה-גבוהה-ראשונה
   return { bids, asks }
 }
-interface Order {
-  id: number; base: string; quote: string; side: string; priceMu: number; amountMu: number
-  filledMu: number; issuer: string; postOnly: number; ioc: number; status: string; createdAt: string
-}
 function marketView(base: string, quote: string) {
   const { bids, asks } = bookOf(base, quote)
   const bestBid = bids[0]?.priceMu ?? null
@@ -142,59 +137,25 @@ function marketView(base: string, quote: string) {
   }
 }
 
-// ── התאמה: מחיר-זמן; עסקה-במחיר-המייקר ───────────────────────────────────────
-// כלל-נעילות מדויק: שחרור-הימור-הנעילה במחיר-הפקודה-הנועלת-עצמה (order.priceMu×qty
-// לצד-ה-quote; qty לצד-הבסיס), העברה-במחיר-העסקה (תמיד מחיר-המייקר).
-// לקוח-הקנייה-החוצה-פאריטי מקבל-את-המחיר-הטוב-לו (Pm ≤ Pt) — כמו-בורסות-אמת.
-function matchOrder(taker: Order): number {
-  let filledNow = 0
-  for (;;) {
-    const remTaker = taker.amountMu - taker.filledMu - filledNow
-    if (remTaker <= 0) break
-    const { bids, asks } = bookOf(taker.base, taker.quote)
-    const maker = taker.side === 'buy' ? asks[0] : bids[0]
-    if (!maker) break
-    const crosses = taker.side === 'buy' ? taker.priceMu >= maker.priceMu : taker.priceMu <= maker.priceMu
-    if (!crosses) break
-    const remMaker = maker.amountMu - maker.filledMu
-    const qty = Math.min(remTaker, remMaker)
-    if (qty <= 0) { // מייקר-מלא-שנשכח — סימון-והמשך
-      db.query("UPDATE orders SET status='filled' WHERE id=? AND filledMu>=amountMu").run(maker.id)
-      break
-    }
-    const priceMu = maker.priceMu // העסקה-תמיד במחיר-המייקר
-    const buyerName = taker.side === 'buy' ? taker.issuer : maker.issuer
-    const sellerName = taker.side === 'buy' ? maker.issuer : taker.issuer
-    const wb = wallet(buyerName); const ws = wallet(sellerName)
-    if (!wb || !ws) break
-    const quotePay = qty * priceMu
-    // קונה: שחרור-הזמנה במחיר-פקודת-הקנייה-שלו, תשלום-במחיר-העסקה, קבלת-בסיס
-    const buyOrder = taker.side === 'buy' ? taker : maker
-    wb.locked[quote] = Math.max(0, (wb.locked[quote] ?? 0) - qty * buyOrder.priceMu)
-    wb.balances[quote] = (wb.balances[quote] ?? 0) - quotePay
-    wb.balances[taker.base] = (wb.balances[taker.base] ?? 0) + qty
-    // מוכר: שחרור-נעילת-בסיס, מסירת-בסיס, קבלת-quote במחיר-העסקה
-    ws.locked[taker.base] = Math.max(0, (ws.locked[taker.base] ?? 0) - qty)
-    ws.balances[taker.base] = (ws.balances[taker.base] ?? 0) - qty
-    ws.balances[taker.quote] = (ws.balances[taker.quote] ?? 0) + quotePay
-    if (free(wb, taker.quote) < 0 || free(wb, taker.base) < 0 || free(ws, taker.base) < 0 || free(ws, taker.quote) < 0) {
-      // כנות: אי-עקביות-נעילות — לא ממציאים כסף; מפסיקים-התאמה (המצב נשאר-גלוי בספר)
-      log(`🚨 אי-עקביות-נעילות בהתאמה (${buyerName}/${sellerName}) — מילוי-נעצר כן`)
-      break
-    }
-    saveWallet(wb); saveWallet(ws)
-    const makerFilled = maker.filledMu + qty
-    if (makerFilled >= maker.amountMu) {
-      db.query('UPDATE orders SET filledMu=?, status=? WHERE id=?').run(makerFilled, 'filled', maker.id)
-    } else {
-      db.query('UPDATE orders SET filledMu=? WHERE id=?').run(makerFilled, maker.id)
-    }
+// ── מימוש-האחסון של-הליבה מעל sqlite (Task-132) — האיבר-החי מזריק-את-החנות ────
+const store: DexStore = {
+  listOpen: (base, quote) => bookOf(base, quote),
+  getWallet: (name) => wallet(name),
+  saveWallet: (w) => saveWallet(w),
+  markFilledIfComplete: (id) => db.query("UPDATE orders SET status='filled' WHERE id=? AND filledMu>=amountMu").run(id),
+  setMakerProgress: (id, filledMu, complete) => {
+    if (complete) db.query('UPDATE orders SET filledMu=?, status=? WHERE id=?').run(filledMu, 'filled', id)
+    else db.query('UPDATE orders SET filledMu=? WHERE id=?').run(filledMu, id)
+  },
+  insertFill: (f) =>
     db.query('INSERT INTO fills(base,quote,side,priceMu,amountMu,buyer,seller,createdAt) VALUES(?,?,?,?,?,?,?,?)')
-      .run(taker.base, taker.quote, taker.side, priceMu, qty, buyerName, sellerName, new Date().toISOString())
-    filledNow += qty
-  }
-  return filledNow
+      .run(f.base, f.quote, f.side, f.priceMu, f.amountMu, f.buyer, f.seller, new Date().toISOString()),
+  log,
 }
+
+// ── ליבת-ההתאמה חיה ב-engine.ts (Task-132) — matchOrderCore(taker, store) ─────
+// חילוץ-דטרמיניסטי עם הזרקת-אחסון; כל-האינווריאנטים-הכספיים מוכחים-בדיקה ב-engine.test.ts
+// (מחיר-זמן, עסקה-במחיר-המייקר, חשבונאות-נעילות מדויקת, שימור-כספים, שומר-העקביות).
 
 function operatorToken(): string | null {
   if (!existsSync(OPERATOR_ENV)) return null
@@ -310,17 +271,12 @@ async function handle(req: Request): Promise<Response> {
       w.locked[payAsset] = (w.locked[payAsset] ?? 0) + need
       saveWallet(w)
       const o = db.query('SELECT * FROM orders WHERE id=?').get(id) as Order
-      const filledNow = matchOrder(o)
-      // עדכון-שורת-הטאקר עצמו (my-orders חייב-לשקף-מילויים); IOC: שארית-מתה-מיד + שחרור-נעילתה
-      const takerFilled = o.filledMu + filledNow
-      let takerStatus: string = takerFilled >= o.amountMu ? 'filled' : 'open'
-      if (ioc && takerFilled < o.amountMu) {
-        takerStatus = 'canceled'
-        w.locked[payAsset] = Math.max(0, (w.locked[payAsset] ?? 0) - (o.amountMu - takerFilled))
-        saveWallet(w)
-      }
-      db.query('UPDATE orders SET filledMu=?, status=? WHERE id=?').run(takerFilled, takerStatus, id)
-      return new Response(JSON.stringify({ ok: true, orderId: id, filledMu: filledNow, status: takerStatus, canceled: takerStatus === 'canceled' ? 'ioc-remainder' : undefined, height: bump() }), { headers: cors })
+      const filledNow = matchOrderCore(o, store)
+      // גמר-הטאקר ב-engine (Task-132): סטטוס + שחרור-נעילת-שארית-IOC — קנייה remainder×priceMu
+      // (תיקון-באג-חי: היה remainder בלבד → remainder×(priceMu−1) נעולים-לנצח), מכירה remainder-qty.
+      const fin = finalizeTaker(o, filledNow, store)
+      db.query('UPDATE orders SET filledMu=?, status=? WHERE id=?').run(fin.filledMu, fin.status, id)
+      return new Response(JSON.stringify({ ok: true, orderId: id, filledMu: filledNow, status: fin.status, canceled: fin.status === 'canceled' ? 'ioc-remainder' : undefined, height: bump() }), { headers: cors })
     }
 
     if (op === 'transfer') {
