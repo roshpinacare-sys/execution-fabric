@@ -107,7 +107,7 @@ describe('fetchWithRecycleRetry — חוק-הניסיונות-החוזרים', (
     await fetchWithRecycleRetry(
       async () => {
         calls++
-        if (calls === 1) throw 'socket connection was closed' // eslint-disable-line no-throw-literal
+        if (calls === 1) throw 'socket connection was closed'
         return 'ok'
       },
       { retries: 1, sleep: noSleep },
