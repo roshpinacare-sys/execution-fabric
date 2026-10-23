@@ -36,7 +36,7 @@
 import { existsSync, readFileSync, writeFileSync, statSync, renameSync } from 'node:fs'
 import path from 'node:path'
 import { Database } from 'bun:sqlite'
-import { fetchWithRecycleRetry } from './app-fetch'
+import { fetchWithRecycleRetry, isRssNearCeiling } from './app-fetch'
 
 const APP_URL = process.env.FABRIC_APP_URL ?? 'http://127.0.0.1:3000'
 
@@ -1076,6 +1076,11 @@ async function remoteGatePulse(): Promise<void> {
 async function evolutionPulse(): Promise<void> {
   state.evolutionPulses++
   state.lastEvolutionAt = new Date().toISOString()
+  // Task-133-b: מרתון-LLM לא-מתחיל-מול-סגירת-כביש (מיחזור-ודאי-יהרוג-אותו-בטיסה) — דחייה-כנה
+  if (isRssNearCeiling(state.lastAppRssMb, APP_RSS_CEILING_MB)) {
+    state.lastEvolutionResult = `deferred: RSS ${state.lastAppRssMb}MB קרוב-לתקרה ${APP_RSS_CEILING_MB}MB — ממתין-לחלון-שקט (כנות, לא-כשל)`
+    return
+  }
   try {
     const res = await fetchApp(`${APP_URL}/api/evolution`, {
       method: 'POST',
@@ -1104,6 +1109,11 @@ async function evolutionPulse(): Promise<void> {
 async function buildPulse(): Promise<void> {
   state.buildPulses++
   state.lastBuildAt = new Date().toISOString()
+  // Task-133-b: הוכח-חי — בנייה-מתה-3-פעמים-רצוף-במיחזורים; לא-מתחילים-מרתון-קרוב-לתקרה
+  if (isRssNearCeiling(state.lastAppRssMb, APP_RSS_CEILING_MB)) {
+    state.lastBuildResult = `deferred: RSS ${state.lastAppRssMb}MB קרוב-לתקרה ${APP_RSS_CEILING_MB}MB — ממתין-לחלון-שקט (כנות, לא-כשל)`
+    return
+  }
   try {
     const res = await fetchApp(`${APP_URL}/api/sovereign/build`, {
       method: 'POST',
