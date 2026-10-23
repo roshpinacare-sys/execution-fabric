@@ -4,7 +4,7 @@
 // מקבל-ניסיונות-חוזרים-עם-backoff-אקספוננציאלי+jitter; כשל-לא-ניתן-לניסיון-חוזר
 // (תקציב/4xx-היגיוני/timeout) נופל-מיד-וכנה.
 import { describe, expect, test } from 'bun:test'
-import { APP_RECYCLE_RE, fetchWithRecycleRetry } from './app-fetch'
+import { APP_RECYCLE_RE, fetchWithRecycleRetry, isRssNearCeiling } from './app-fetch'
 
 const noSleep = async () => {} // בדיקה-דטרמיניסטית — אין-המתנה-אמיתית
 
@@ -113,5 +113,18 @@ describe('fetchWithRecycleRetry — חוק-הניסיונות-החוזרים', (
       { retries: 1, sleep: noSleep },
     )
     expect(calls).toBe(2)
+  })
+})
+
+describe('isRssNearCeiling — אל-תתחיל-מרתון-מול-סגירת-כביש', () => {
+  test('קרוב-לתקרה (בתוך-headroom) → נדחה', () => {
+    expect(isRssNearCeiling(1150, 1250)).toBe(true)  // 100MB headroom < 150
+    expect(isRssNearCeiling(1249, 1250)).toBe(true)
+    expect(isRssNearCeiling(1300, 1250)).toBe(true)  // מעל-התקרה עצמה
+  })
+  test('חלון-שקט (headroom מלא) → רץ', () => {
+    expect(isRssNearCeiling(1082, 1250)).toBe(false) // 168MB headroom
+    expect(isRssNearCeiling(700, 1250)).toBe(false)
+    expect(isRssNearCeiling(null, 1250)).toBe(false) // אין-מדידה — לא-חוסם
   })
 })

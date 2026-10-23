@@ -29,6 +29,14 @@ function errMessage(e: unknown): string {
   return typeof e === 'string' ? e : String(e)
 }
 
+// Task-133-b — משמעת-מרתון: פעימות-LLM-ארוכות (בנייה/התפתחות, עד-3דק') לא-מתחילות
+// כש-RSS-קרוב-לתקרה — המיחזור-הבא-ודאי-יהרוג-אותן-בטיסה (הוכח-חי: בנייה-מתה-3-פעמים-רצוף)
+// ותנפח-עוד. דחייה-כנה-של-פעימה-אחת עד-חלון-שקט. null = אין-מדידה — לא-חוסם.
+export function isRssNearCeiling(rssMb: number | null, ceilingMb: number): boolean {
+  if (rssMb === null) return false
+  return rssMb > ceilingMb - 150
+}
+
 export async function fetchWithRecycleRetry<T>(fn: () => Promise<T>, opts: RetryOpts = {}): Promise<T> {
   const retries = opts.retries ?? 2
   const baseMs = opts.baseMs ?? 8_000
