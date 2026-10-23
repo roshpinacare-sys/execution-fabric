@@ -36,8 +36,24 @@
 import { existsSync, readFileSync, writeFileSync, statSync, renameSync } from 'node:fs'
 import path from 'node:path'
 import { Database } from 'bun:sqlite'
+import { fetchWithRecycleRetry } from './app-fetch'
 
 const APP_URL = process.env.FABRIC_APP_URL ?? 'http://127.0.0.1:3000'
+
+// Task-133 — חוסן-למיחזור: הלב עצמו ממחזר-את-האפליקציה מעל תקרת-RSS (appGuard).
+// כל-לולאה-היורית-מול האפליקציה עלולה-למות-בטיסה בחלון-ההחייאה (~3-10שנ', מוכח-חי).
+// כל-עורקי-${APP_URL} עוברים-מאתה ואילך דרך-העטיפה — כשל-מחלקת-המיחזור מקבל
+// ניסיון-חוזר (8שנ'/16שנ'+jitter) במקום-להיחתם-כאמת-עסקית; כשלי-תקציב/timeout
+// נופלים-מיד-וכנים (איסור-הסתרת-אמת). appGuard עצמו אינו-עטוף — עליו-להיכשל-מהר.
+function fetchApp(url: string, init?: RequestInit): Promise<Response> {
+  return fetchWithRecycleRetry(() => fetch(url, init), {
+    retries: 2,
+    baseMs: 8_000,
+    jitterMs: 2_000,
+    onRetry: (msg, waitMs, attempt) =>
+      log(`עורק-הלב: האפליקציה-ממוחזרת-בטיסה (${msg.slice(0, 70)}) — ניסיון-${attempt} בעוד ${Math.round(waitMs / 1000)}שנ'`),
+  })
+}
 const PORT = Number(process.env.FABRIC_HEARTBEAT_PORT ?? 3031)
 // נגזרת-מיקום-עצמי (mini-services/fabric-heartbeat → שורש-הפרויקט) — אפס-נתיב-מילולי (חסם-הדליפות)
 const PROJECT_DIR = process.env.FABRIC_PROJECT_DIR ?? path.resolve(import.meta.dir, '../..')
@@ -388,7 +404,7 @@ async function tick(): Promise<void> {
   try {
     // timeout חוזי: ירי-אמת יכול לקחת דקות; אבל לעולם לא תלייה-אינסופית (לקח-10:34)
     // Task 97+98: lanes=3 — תקרת-התור-הנגוס מנוצלת-מלאה; ה-claim-האטומי מוכח.
-    const res = await fetch(`${APP_URL}/api/worker/tick?lanes=3`, {
+    const res = await fetchApp(`${APP_URL}/api/worker/tick?lanes=3`, {
       method: 'POST',
       signal: AbortSignal.timeout(180_000),
     })
@@ -623,7 +639,7 @@ async function gitPulseChecked(): Promise<void> {
     state.dbFileReplaced++
     log(`פעימת-גיט: קובץ-ה-db הוחלף (inode ${inoBefore}→${inoAfter}) — מחבר-מחדש-את-האפליקציה`)
     try {
-      const res = await fetch(`${APP_URL}/api/admin/db-reconnect`, {
+      const res = await fetchApp(`${APP_URL}/api/admin/db-reconnect`, {
         method: 'POST',
         signal: AbortSignal.timeout(15_000),
       })
@@ -875,7 +891,7 @@ async function appGuard(): Promise<void> {
   appGuardBusy = true
   state.lastAppGuardAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/health`, { signal: AbortSignal.timeout(5_000) })
+    const res = await fetchApp(`${APP_URL}/api/health`, { signal: AbortSignal.timeout(5_000) }) // appGuard — כשל-מהר, בלי-ניסיון-חוזר
     // מחזור-#10 (Task 77) — לקח-העיוורון-החי: /api/health מדווח-כישלון-בגוף
     // ({"ok":false,"db":false}) אך מחזיר-HTTP-200 — וה-guard-היסטורי-קרא-רק-את-הכותרת
     // וראה-אפליקציה-"חיה" בזמן-שמנוע-ה-db היה מנותק. מעתה: נאמנות-לגוף בלבד.
@@ -1061,7 +1077,7 @@ async function evolutionPulse(): Promise<void> {
   state.evolutionPulses++
   state.lastEvolutionAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/evolution`, {
+    const res = await fetchApp(`${APP_URL}/api/evolution`, {
       method: 'POST',
       signal: AbortSignal.timeout(180_000), // הצעה = ירי-LLM אמיתי — נותנים-רשת
     })
@@ -1089,7 +1105,7 @@ async function buildPulse(): Promise<void> {
   state.buildPulses++
   state.lastBuildAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/sovereign/build`, {
+    const res = await fetchApp(`${APP_URL}/api/sovereign/build`, {
       method: 'POST',
       signal: AbortSignal.timeout(180_000), // מחזור-בנייה = ירי-LLM אמיתי — נותנים-רשת
     })
@@ -1139,7 +1155,7 @@ async function recoveryPulse(): Promise<void> {
   state.recoveryPulses++
   state.lastRecoveryAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/sovereign/recovery`, {
+    const res = await fetchApp(`${APP_URL}/api/sovereign/recovery`, {
       method: 'POST',
       signal: AbortSignal.timeout(30_000),
     })
@@ -1169,7 +1185,7 @@ async function dispatchPulse(): Promise<void> {
   state.dispatchPulses++
   state.lastDispatchAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/sovereign/improvements/dispatch`, {
+    const res = await fetchApp(`${APP_URL}/api/sovereign/improvements/dispatch`, {
       method: 'POST',
       signal: AbortSignal.timeout(30_000),
     })
@@ -1209,7 +1225,7 @@ async function flowPulse(): Promise<void> {
   state.flowPulses++
   state.lastFlowAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/flow`, { signal: AbortSignal.timeout(15_000) })
+    const res = await fetchApp(`${APP_URL}/api/flow`, { signal: AbortSignal.timeout(15_000) })
     const d = (await res.json().catch(() => ({}))) as {
       ok?: boolean
       state?: string
@@ -1248,7 +1264,7 @@ async function treasuryPulse(): Promise<void> {
   state.treasuryPulses++
   state.lastTreasuryAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/sovereign/treasury/fixedfloat`, {
+    const res = await fetchApp(`${APP_URL}/api/sovereign/treasury/fixedfloat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ action: 'ping' }),
@@ -1288,7 +1304,7 @@ async function treasuryPulse(): Promise<void> {
 async function narratePulse(improvementId: number): Promise<void> {
   state.lastNarrationAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/sovereign/content/${improvementId}/narrate`, {
+    const res = await fetchApp(`${APP_URL}/api/sovereign/content/${improvementId}/narrate`, {
       method: 'POST',
       signal: AbortSignal.timeout(NARRATE_TIMEOUT_MS),
     })
@@ -1320,7 +1336,7 @@ async function opsPulse(): Promise<void> {
   state.opsPulses++
   state.lastOpsAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/sovereign/ops/tick`, {
+    const res = await fetchApp(`${APP_URL}/api/sovereign/ops/tick`, {
       method: 'POST',
       signal: AbortSignal.timeout(300_000), // מסירה = PUT אמיתי לגיטאחר — נותנים-רשת
     })
@@ -1353,7 +1369,7 @@ async function restorePulse(): Promise<void> {
   state.restorePulses++
   state.lastRestoreAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/sovereign/restore-drill`, {
+    const res = await fetchApp(`${APP_URL}/api/sovereign/restore-drill`, {
       method: 'POST',
       signal: AbortSignal.timeout(300_000), // clone + אימות — נותנים-רשת
     })
@@ -1388,7 +1404,7 @@ async function snapshotRestorePulse(): Promise<void> {
   state.snapshotRestorePulses++
   state.lastSnapshotRestoreAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/sovereign/restore-drill?source=snapshot`, {
+    const res = await fetchApp(`${APP_URL}/api/sovereign/restore-drill?source=snapshot`, {
       method: 'POST',
       signal: AbortSignal.timeout(60_000), // התרגיל בן-מילישניות — נותנים-רשת-ומנוע
     })
@@ -1423,7 +1439,7 @@ async function exportSyncPulse(): Promise<void> {
   state.exportSyncPulses++
   state.lastExportSyncAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/sovereign/chain-export`, {
+    const res = await fetchApp(`${APP_URL}/api/sovereign/chain-export`, {
       method: 'POST',
       signal: AbortSignal.timeout(60_000),
     })
@@ -1452,7 +1468,7 @@ async function exportRestorePulse(): Promise<void> {
   state.exportRestorePulses++
   state.lastExportRestoreAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/sovereign/restore-drill?source=export`, {
+    const res = await fetchApp(`${APP_URL}/api/sovereign/restore-drill?source=export`, {
       method: 'POST',
       signal: AbortSignal.timeout(60_000),
     })
@@ -1488,7 +1504,7 @@ async function mirrorRestorePulse(): Promise<void> {
   state.mirrorRestorePulses++
   state.lastMirrorRestoreAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/sovereign/restore-drill?source=mirror`, {
+    const res = await fetchApp(`${APP_URL}/api/sovereign/restore-drill?source=mirror`, {
       method: 'POST',
       signal: AbortSignal.timeout(60_000), // clone-מקומי — בן-שניות; נותנים-רווח-למנוע
     })
@@ -1523,7 +1539,7 @@ async function historyPulse(): Promise<void> {
   state.historyPulses++
   state.lastHistoryAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/sovereign/history-drill`, {
+    const res = await fetchApp(`${APP_URL}/api/sovereign/history-drill`, {
       method: 'POST',
       signal: AbortSignal.timeout(60_000),
     })
@@ -1558,7 +1574,7 @@ async function docsPulse(): Promise<void> {
   state.docsPulses++
   state.lastDocsAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/sovereign/docs-drill`, {
+    const res = await fetchApp(`${APP_URL}/api/sovereign/docs-drill`, {
       method: 'POST',
       signal: AbortSignal.timeout(30_000),
     })
@@ -1592,7 +1608,7 @@ async function docsHistoryPulse(): Promise<void> {
   state.docsHistoryPulses++
   state.lastDocsHistoryAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/sovereign/docs-history-drill`, {
+    const res = await fetchApp(`${APP_URL}/api/sovereign/docs-history-drill`, {
       method: 'POST',
       signal: AbortSignal.timeout(60_000),
     })
@@ -1627,7 +1643,7 @@ async function selftestPulse(): Promise<void> {
   state.selftestPulses++
   state.lastSelftestAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/sovereign/ops/selftest`, {
+    const res = await fetchApp(`${APP_URL}/api/sovereign/ops/selftest`, {
       method: 'POST',
       // לקח-חי (Task 130): הדריל-עצמו לקח 123.6ש' בחיים — 120ש' חתכו-את-הפסק-הכנה באמצע-העדות
       // ("socket closed" במקום-האמת). 240ש' נותנים-לאמת להגיע שלמה.
@@ -1668,7 +1684,7 @@ async function claimsPulse(): Promise<void> {
   state.claimsPulses++
   state.lastClaimsAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/claims?subject=claims-audit`, {
+    const res = await fetchApp(`${APP_URL}/api/claims?subject=claims-audit`, {
       method: 'POST',
       signal: AbortSignal.timeout(90_000), // הבדיקה כוללת-leak-scan ו-git — נותנים-רשת
     })
@@ -1705,7 +1721,7 @@ async function sovereigntyPulse(): Promise<void> {
   state.sovereigntyPulses++
   state.lastSovereigntyAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/sovereignty?subject=sovereignty-audit`, {
+    const res = await fetchApp(`${APP_URL}/api/sovereignty?subject=sovereignty-audit`, {
       method: 'POST',
       signal: AbortSignal.timeout(90_000), // מדידה כוללת-גיט+סריקות — נותנים-רשת
     })
@@ -1740,7 +1756,7 @@ async function magnitudePulse(): Promise<void> {
   state.magnitudePulses++
   state.lastMagnitudeAt = new Date().toISOString()
   try {
-    const res = await fetch(`${APP_URL}/api/magnitude?subject=magnitude-audit`, {
+    const res = await fetchApp(`${APP_URL}/api/magnitude?subject=magnitude-audit`, {
       method: 'POST',
       signal: AbortSignal.timeout(90_000), // מדידה כוללת-שאילתות-שרשרת — נותנים-רשת
     })
@@ -1781,7 +1797,7 @@ async function gapEvolutionPulse(distanceToTarget: number, gapTitle: string): Pr
   state.lastGapEvolutionAt = new Date().toISOString()
   state.gapEvolutions++
   try {
-    const res = await fetch(`${APP_URL}/api/evolution`, {
+    const res = await fetchApp(`${APP_URL}/api/evolution`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ mode: 'gap' }),
