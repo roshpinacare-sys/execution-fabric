@@ -891,7 +891,7 @@ async function appGuard(): Promise<void> {
   appGuardBusy = true
   state.lastAppGuardAt = new Date().toISOString()
   try {
-    const res = await fetchApp(`${APP_URL}/api/health`, { signal: AbortSignal.timeout(5_000) }) // appGuard — כשל-מהר, בלי-ניסיון-חוזר
+    const res = await fetch(`${APP_URL}/api/health`, { signal: AbortSignal.timeout(5_000) }) // appGuard — בכוונה-לא-עטוף: כשל-מהר-וזינוק; ניסיון-חוזר כאן היה-מעכב-החייאה
     // מחזור-#10 (Task 77) — לקח-העיוורון-החי: /api/health מדווח-כישלון-בגוף
     // ({"ok":false,"db":false}) אך מחזיר-HTTP-200 — וה-guard-היסטורי-קרא-רק-את-הכותרת
     // וראה-אפליקציה-"חיה" בזמן-שמנוע-ה-db היה מנותק. מעתה: נאמנות-לגוף בלבד.
