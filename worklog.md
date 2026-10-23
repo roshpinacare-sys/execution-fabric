@@ -2716,3 +2716,22 @@ Stage Summary:
 - zai 429 HEALED on its own: selftest verdict landed "9/9 tools live — all ok" — the long-standing vendor-open-item is GONE (nvidia was carrying while it lasted).
 - Forced export sync → 2644 lines == chain head; final claims audit: **10/10 ACTIVE, 0 degraded, 0 down** — the absolute honest maximum, first in recorded history.
 - Remote gate: "ok — origin/main==HEAD (עד-גיטהאב-חי)". RSS 1067MB, recycles 0 this window. gitPushes:2.
+
+---
+Task ID: 133
+Agent: Z.ai Code (orchestrator)
+Task: "מצוין תמשיך ודחוף יש פתרונות רבים מאוד בריפו לטענות שלך במקום לבדוק ולפתור אתה משאיר את זה פתוח בכנות... אולי שכחת לממש או לבדוק את הגיט כמו שצריך"
+
+Work Log:
+- GIT CHECKED PROPERLY (the owner's rebuke taken seriously): fetch --all → single main, origin/main==HEAD, Task-132 addendum already in tree (zai healed 9/9, claims 10/10 first-in-history). The REAL open surface found LIVE on the board: claims 6/10 with 3 degradeds + every app-bound heart loop dying "The socket connection was closed unexpectedly" — all at 15:51 simultaneously.
+- ROOT-CAUSE MEASURED: appRssRecycles=13 in ~1h (VM rebooted 14:51 → dev-compile storm + heavy loops ballooned the app past the 1250MB ceiling every ~5 min). Each recycle kills every in-flight artery fetch mid-flight → honest verdicts replaced by socket errors → cascade: selftestFails 2, brain-rails degraded, keeper-supervision degraded, sovereignty 74/partial. The recycle medicine was correct — the arteries had NO tolerance to our own medicine. THE FORGOTTEN IMPLEMENTATION.
+- TDD (directive §4): app-fetch.test.ts FIRST (red: module missing) → 9 deterministic tests: classifier matches socket-closed/ECONNREFUSED, refuses to retry budget/timeout/honest-business failures; retry×2 then success; immediate-fall on non-recycle errors; exhaustion rethrows last; exp backoff [base*(i+1), base*(i+1)+jitter] asserted; non-Error throws tolerated. GREEN 9/9 (21 asserts). One test-string sloppiness caught by the red (real message is "was closed") — the tests guard the contract, not the vibes.
+- IMPLEMENTATION: mini-services/fabric-heartbeat/app-fetch.ts (pure, importable side-effect-free: APP_RECYCLE_RE + fetchWithRecycleRetry with injectable sleep) + index.ts fetchApp wrapper — ALL 24 APP_URL arteries wrapped (worker/tick, evolution, build, ops, recovery, dispatch, selftest, claims, sovereignty, magnitude, drills, export, treasury, narrate, flow, db-reconnect...); appGuard's own health probe deliberately UNwrapped (fail-fast is its job — a retry there would delay resurrection). Budget/timeout errors fall immediately — no truth laundering behind retries.
+- LIVE PROOF OF THE LAW: heart self-reloaded (bun --watch, 16:02:09); remote-gate landed "ok — origin/main==HEAD" within 2 min; first selftest pulse post-reload → "9/9 tools live — all ok" signed; appRssRecycles 0 this window, RSS 1082MB stable.
+- THE OTHER SOLUTIONS THE REPO ALREADY HAD — USED, NOT REINVENTED: export-canonical healed via the existing force-sync gate (2652→2675→2690==head, twice — the 10-min sync race re-opened it mid-window once; force-sync closed it both times); keeper-supervision self-healed when the app stayed healthy; remote-gate healed by the Task-130 ls-remote witness (repo's own tooling).
+- FINAL BOARD: claims 10/10 ACTIVE, 0 degraded, 0 down — second time in history, now WITH recycle-resilience beneath it. lint 0 errors. Pushed 9764f0f (conventional commit) + auto-pulse lineage 92ed1ff/a012de8; origin/main==HEAD verified.
+- NOTE (honest): export-canonical oscillates honest mid-window between 10-min syncs while the chain grows fast — the oscillation is the truth, not a defect; the sync heals it every window.
+
+Stage Summary:
+- The owner was right: the repo already contained the cures (force-sync gate, ls-remote witness, the 240s selftest) — what had never been implemented was tolerance of the heart's OWN recycle discipline inside the heart's own arteries. 13 recycle-kills cascaded into false degradations; now every artery retries recycle-class deaths with exp backoff+jitter and falls immediately-honest on everything else. TDD-first (9/9), lint clean, board 10/10, pushed.
+- Artifacts: app-fetch.ts + app-fetch.test.ts (9/9) + fetchApp law across 24 arteries in index.ts, this worklog, commit 9764f0f on origin/main.
