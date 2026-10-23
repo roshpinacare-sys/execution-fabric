@@ -2711,3 +2711,8 @@ Work Log:
 Stage Summary:
 - The artery now heals its own stale-capture class (fresh delta + measured-superset no-op), and the dex went from a read-only shell to a TESTED exchange: matching core deterministic and store-injected, SQL layer testable on :memory:, two money bugs dead with regression proof, invariants signed I1–I7. The board's dex surface is fed by the refactored organ.
 - Artifacts: heartbeat FIX-E (fresh-delta pull decision + superset no-op), saos-dex engine.ts/store.ts/index.ts refactor, 2 live-caught fixes, engine.test.ts+store.test.ts (13/13), 3 conventional commits, this worklog.
+
+### Task-132 addendum (post-push truth):
+- zai 429 HEALED on its own: selftest verdict landed "9/9 tools live — all ok" — the long-standing vendor-open-item is GONE (nvidia was carrying while it lasted).
+- Forced export sync → 2644 lines == chain head; final claims audit: **10/10 ACTIVE, 0 degraded, 0 down** — the absolute honest maximum, first in recorded history.
+- Remote gate: "ok — origin/main==HEAD (עד-גיטהאב-חי)". RSS 1067MB, recycles 0 this window. gitPushes:2.
