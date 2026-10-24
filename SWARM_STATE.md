@@ -8,6 +8,7 @@
 ## תביעת-תחום-של-מופע-זה (לפעימה-הנוכחית)
 | תחום | ענף/נתיב | מצב |
 |---|---|---|
+| **Chief Architect Daemon (§1/§4)** | mini-services/saos-architect (:3086) — ביקורת→החלטה→ריפוי→חתימה-hash-linked כל-5-דק' | **חי-מאז Task-135** — 12/12 איברים |
 | saos-dex AMM (§3/§7.1) | mini-services/saos-dex/amm.ts + engine/store/index | **נתבע-עכשיו** — TDD |
 | Saosmartwallet HSM (§8.1) | mini-services/saos-wallet/ | **נתבע-עכשיו** — TDD |
 | Native issue→PR (§9) | mini-services/fabric-heartbeat/ (עורק-issueAudit) | **נתבע-עכשיו** |
