@@ -106,7 +106,7 @@ interface TrxHeader {
   expirationEpoch: number
 }
 
-async function buildHeader(): Promise<TrxHeader | { error: string }> {
+export async function buildHeader(): Promise<TrxHeader | { error: string }> {
   const r = await steemMesh.call<DynamicProps>('condenser_api.get_dynamic_global_properties', [])
   if (!r.ok) return { error: `dynamic-props: ${r.error}` }
   const id = r.data.head_block_id ?? ''
@@ -121,7 +121,7 @@ async function buildHeader(): Promise<TrxHeader | { error: string }> {
 }
 
 const A58_DEC = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-function stmSigToHex(stm: string): string {
+export function stmSigToHex(stm: string): string {
   // STM-base58check → 65 בייטים גלמיים-hex ([31+recid][r32][s32]) —
   // appbase מצפה-חתימות-hex (מוכח-חי: "Invalid hex character 'S'" על-STM;
   // "Missing Posting Authority" על-hex = פרסינג-מלא-עד-סוף)
@@ -139,7 +139,7 @@ function stmSigToHex(stm: string): string {
   return Buffer.from(dec.subarray(1, 66)).toString('hex')
 }
 
-async function broadcast(signed: { txHex: string; signature: string }, header: TrxHeader, ops: [string, unknown][]): Promise<{ ok: true; blockNum?: number; trxId?: string | null } | { ok: false; error: string }> {
+export async function broadcast(signed: { txHex: string; signature: string }, header: TrxHeader, ops: [string, unknown][]): Promise<{ ok: true; blockNum?: number; trxId?: string | null } | { ok: false; error: string }> {
   const trx = {
     ref_block_num: header.refBlockNum,
     ref_block_prefix: header.refBlockPrefix,

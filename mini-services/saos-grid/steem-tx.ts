@@ -18,11 +18,18 @@ import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { ripemd160 } from '@noble/hashes/ripemd160.js'
 
-// ── מזהי-פעולות — מוכחים-מול-השרשרת (עוגן-האב) ──────────────────────────────
+// ── מזהי-פעולות — מוכחים-מול-השרשרת (עוגן-האב + וקטורי-Task-137) ─────────────
+// Task-137 (2026-10-24): claim=22/create=23/delegate=40 נשלפו-מהשרשרת-עצמה
+// (condenser_api.get_transaction_hex, צליבה-3-צמתים) — שיטת-המערכת-על-3-וקטורים
+// פתרה-את-הפריסה: ל-claim יש extensions, ל-delegate אין — המדידה-הכריעה.
 export const OP_VOTE = 0
 export const OP_TRANSFER = 2
 export const OP_LIMIT_ORDER_CREATE = 5
 export const OP_CLAIM_REWARD_BALANCE = 39
+export const OP_CLAIM_ACCOUNT = 22
+export const OP_CREATE_CLAIMED_ACCOUNT = 23
+export const OP_DELEGATE_VESTING_SHARES = 40
+export const OP_ACCOUNT_CREATE = 9 // נתיב-העמלה (Task-137): op-9-קנון-לגאסי; הוכח-מול-השרשרת (steemit+justyy)
 
 const A58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 const STEEM_CHAIN_ID = new Uint8Array(32) // 32×00 — קנון-Steem-mainnet
@@ -138,8 +145,82 @@ export interface ClaimRewardBalanceOp {
   rewardSbd: number
   rewardVests: number
 }
+export interface ClaimAccountOp {
+  creator: string
+  feeRaw: number
+  feeSymbol: string
+}
+export interface AccountAuthority {
+  threshold: number
+  accountAuths: Array<[string, number]>
+  keyAuths: Array<[string, number]>
+}
+export interface CreateClaimedAccountOp {
+  creator: string
+  newAccountName: string
+  owner: AccountAuthority
+  active: AccountAuthority
+  posting: AccountAuthority
+  memoKey: string
+  jsonMetadata: string
+}
+export interface AccountCreateOp {
+  creator: string
+  newAccountName: string
+  feeRaw: number
+  owner: AccountAuthority
+  active: AccountAuthority
+  posting: AccountAuthority
+  memoKey: string
+  jsonMetadata: string
+}
+export interface DelegateVestingSharesOp {
+  delegator: string
+  delegatee: string
+  vestingSharesRaw: number
+}
 
-export function serializeOperation(opId: number, data: VoteOp | TransferOp | LimitOrderCreateOp | ClaimRewardBalanceOp): Uint8Array {
+/** מפתח-ציבורי-STM → 33 בייטים-דחוסים (b58check-מאומת — fail-closed-על-פסול). */
+export function stmPubkeyToBytes(pub: string): Uint8Array {
+  const s = pub.trim()
+  if (!s.startsWith('STM')) throw new Error('steem-tx: pubkey-missing-STM-prefix')
+  const dec = b58decode(s.slice(3))
+  if (dec.length !== 37) throw new Error(`steem-tx: pubkey-bad-length (${dec.length})`)
+  const body = dec.subarray(0, 33)
+  const chk = dec.subarray(33)
+  // Task-137: סכום-גרפן-למפתחות-ציבוריים = ripemd160-פשוט (הוכח-מהצומת-ומ-4-מפתחות-אמת)
+  const expect = ripemd160(body).slice(0, 4)
+  for (let i = 0; i < 4; i++) if (chk[i] !== expect[i]) throw new Error('steem-tx: pubkey-checksum-mismatch')
+  return body
+}
+
+/** Authority גרפן: threshold-u32-LE + מוני-accountAuths + מוני-keyAuths + (33 בייטים + weight-u16-LE).
+ *  מוכח-מול-וקטור-create_claimed_account (Task-137). */
+export function serializeAuthority(a: AccountAuthority): Uint8Array {
+  if (!Number.isSafeInteger(a.threshold) || a.threshold <= 0 || a.threshold > 0xffffffff)
+    throw new Error(`steem-tx: authority-threshold-invalid (${a.threshold})`)
+  const out: number[] = []
+  pushU32(out, a.threshold)
+  pushVarintCount(out, a.accountAuths.length)
+  pushVarintCount(out, a.keyAuths.length)
+  for (const [key, weight] of a.accountAuths) {
+    pushString(out, key)
+    if (!Number.isSafeInteger(weight) || weight <= 0 || weight > 0xffff) throw new Error('steem-tx: authority-weight-invalid')
+    pushU16(out, weight)
+  }
+  for (const [pub, weight] of a.keyAuths) {
+    const bytes = stmPubkeyToBytes(pub)
+    if (!Number.isSafeInteger(weight) || weight <= 0 || weight > 0xffff) throw new Error('steem-tx: authority-weight-invalid')
+    for (const b of bytes) out.push(b)
+    pushU16(out, weight)
+  }
+  return Uint8Array.from(out)
+}
+
+export function serializeOperation(
+  opId: number,
+  data: VoteOp | TransferOp | LimitOrderCreateOp | ClaimRewardBalanceOp | ClaimAccountOp | CreateClaimedAccountOp | DelegateVestingSharesOp | AccountCreateOp,
+): Uint8Array {
   const body: number[] = []
   if (opId === OP_VOTE) {
     const d = data as VoteOp
@@ -172,6 +253,40 @@ export function serializeOperation(opId: number, data: VoteOp | TransferOp | Lim
     body.push(...assetAmount(d.rewardSteem, 'STEEM'))
     body.push(...assetAmount(d.rewardSbd, 'SBD'))
     body.push(...assetAmount(d.rewardVests, 'VESTS'))
+  } else if (opId === OP_CLAIM_ACCOUNT) {
+    // וקטור-Task-137: creator + fee-asset + extensions-varint(0) — יש-extensions (המדידה-הכריעה)
+    const d = data as ClaimAccountOp
+    pushString(body, d.creator)
+    body.push(...assetAmount(d.feeRaw, d.feeSymbol))
+    pushVarintCount(body, 0)
+  } else if (opId === OP_CREATE_CLAIMED_ACCOUNT) {
+    // וקטור-Task-137: creator + new_name + owner/active/posting-authorities + memo-33 בייטים + json_metadata + extensions(0)
+    const d = data as CreateClaimedAccountOp
+    pushString(body, d.creator)
+    pushString(body, d.newAccountName)
+    body.push(...serializeAuthority(d.owner))
+    body.push(...serializeAuthority(d.active))
+    body.push(...serializeAuthority(d.posting))
+    for (const b of stmPubkeyToBytes(d.memoKey)) body.push(b)
+    pushString(body, d.jsonMetadata)
+    pushVarintCount(body, 0)
+  } else if (opId === OP_DELEGATE_VESTING_SHARES) {
+    // וקטור-Task-137: delegator + delegatee + asset — אין-extensions (המדידה-הכריעה)
+    const d = data as DelegateVestingSharesOp
+    pushString(body, d.delegator)
+    pushString(body, d.delegatee)
+    body.push(...assetAmount(d.vestingSharesRaw, 'VESTS'))
+  } else if (opId === OP_ACCOUNT_CREATE) {
+    // וקטור-Task-137: עמלה-**לפני**-היוצר (שונה-מ-create_claimed!), אין-op-extensions
+    const d = data as AccountCreateOp
+    body.push(...assetAmount(d.feeRaw, 'STEEM'))
+    pushString(body, d.creator)
+    pushString(body, d.newAccountName)
+    body.push(...serializeAuthority(d.owner))
+    body.push(...serializeAuthority(d.active))
+    body.push(...serializeAuthority(d.posting))
+    for (const b of stmPubkeyToBytes(d.memoKey)) body.push(b)
+    pushString(body, d.jsonMetadata)
   } else {
     throw new Error(`steem-tx: op-id-not-supported (${opId}) — כל-פעולה-חדשה-מחייבת-וקטור-מהשרשרת-קודם`)
   }
@@ -230,7 +345,11 @@ export function wifToPubkey(wif: string): string {
     throw new Error(`steem-tx: unexpected-wif-form (len=${dec.length})`)
   }
   const c33 = secp256k1.getPublicKey(scalar, true)
-  const chkPub = ripemd160(sha256(c33)).slice(0, 4)
+  // Task-137 תיקון-מדידה-חיה: סכום-גרפן-למפתחות-ציבוריים = ripemd160-פשוט-על-הגוף —
+  // הוכח-מהודעת-ה-assert-של-הצומת-עצמו (fc::ripemd160::hash(key_data)._hash[0] ==
+  // bin_key.check) ומ-4 מפתחות-אמת-של-headcorner (2026-10-24). ripemd160(sha256())
+  // היה-טעות-שמעולם-לא-נתפסה (החתימה-לא-כוללת-מפתח — השדה-היה-לתצוגה-בלבד).
+  const chkPub = ripemd160(c33).slice(0, 4)
   return 'STM' + b58encode(Uint8Array.from([...c33, ...chkPub]))
 }
 
@@ -252,20 +371,20 @@ export interface SignedTx {
   pubkey: string
 }
 
-export function signTxBytes(tx: Uint8Array, wif: string): SignedTx {
-  const digest = sha256(Uint8Array.from([...STEEM_CHAIN_ID, ...tx]))
+export function signTxBytes(tx: Uint8Array, wif: string, chainId: Uint8Array = STEEM_CHAIN_ID): SignedTx {
+  const digest = sha256(Uint8Array.from([...chainId, ...tx]))
   const sig = secp256k1.sign(digest, b58decode(wif.trim()).subarray(1, 33), { prehash: false })
   const signature = sigToSteemFormat({ r: sig.r, s: sig.s, recovery: sig.recovery ?? 0 })
   const pubkey = wifToPubkey(wif)
   // חוק-הבית: אף-חתימה-לא-יוצאת-מהדלת-בלי-שחזור-מוצלח-למפתח-שלנו-עצמנו
-  if (!verifySigRecoversWifPubkey(tx, signature, wif)) {
+  if (!verifySigRecoversWifPubkey(tx, signature, wif, chainId)) {
     throw new Error('steem-tx: signature-recovery-mismatch — fail-closed (לא משודר)')
   }
   return { txHex: Buffer.from(tx).toString('hex'), signature, pubkey }
 }
 
 /** הוכחה-עצמאית: החתימה-מאמתת-מול-הdigest-והמפתח-הנגזר-מה-WIF (noble-מאמת-את-ה-r/s-המקוריים). */
-export function verifySigRecoversWifPubkey(tx: Uint8Array, stmSig: string, wif: string): boolean {
+export function verifySigRecoversWifPubkey(tx: Uint8Array, stmSig: string, wif: string, chainId: Uint8Array = STEEM_CHAIN_ID): boolean {
   try {
     const dec = b58decode(stmSig.replace(/^STM/, ''))
     const payload = dec.subarray(0, dec.length - 4)
@@ -277,10 +396,25 @@ export function verifySigRecoversWifPubkey(tx: Uint8Array, stmSig: string, wif: 
     if (recId < 0 || recId > 3) return false
     const r = BigInt('0x' + Buffer.from(payload.subarray(2, 34)).toString('hex'))
     const s = BigInt('0x' + Buffer.from(payload.subarray(34, 66)).toString('hex'))
-    const digest = sha256(Uint8Array.from([...STEEM_CHAIN_ID, ...tx]))
+    const digest = sha256(Uint8Array.from([...chainId, ...tx]))
     const derivedPub = secp256k1.getPublicKey(b58decode(wif.trim()).subarray(1, 33), true)
     return secp256k1.verify({ r, s }, digest, derivedPub, { prehash: false })
   } catch {
     return false
   }
+}
+
+// ── יצירת-מפתחות-חיילים (Task-137 — צמיחת-צי-מבפנים) ─────────────────────────
+const SECP_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n
+
+/** סקאלר-32-בייטים → WIF-דחוס-תקני (0x80 ‖ scalar ‖ 0x01 ‖ sha256(sha256)[:4], base58).
+ *  fail-closed: אפס-או-מעל-סדר-העקומה — הקורא-מחליף-אקראיות. */
+export function generateWif(rand32: Uint8Array): string {
+  if (rand32.length !== 32) throw new Error(`steem-tx: generateWif-needs-32-bytes (${rand32.length})`)
+  const hex = Buffer.from(rand32).toString('hex')
+  const scalar = BigInt('0x' + hex)
+  if (scalar === 0n || scalar >= SECP_N) throw new Error('steem-tx: generateWif-scalar-out-of-range')
+  const payload = Uint8Array.from([0x80, ...rand32, 0x01])
+  const chk = sha256(sha256(payload)).slice(0, 4)
+  return b58encode(Uint8Array.from([...payload, ...chk]))
 }

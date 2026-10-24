@@ -435,20 +435,20 @@
     },
     "203": {
       "audioPath": "sovereign/site/audio/improvement-203.wav",
-      "sizeBytes": 675216,
+      "sizeBytes": 431376,
       "voice": "tongtong",
       "speed": 1,
-      "textChars": 118,
-      "narratedAt": "2026-10-24T16:08:00.601Z",
+      "textChars": 135,
+      "narratedAt": "2026-10-24T19:47:03.547Z",
       "worker": "sdk-tts:tongtong"
     },
     "204": {
       "audioPath": "sovereign/site/audio/improvement-204.wav",
-      "sizeBytes": 429456,
+      "sizeBytes": 725136,
       "voice": "tongtong",
       "speed": 1,
-      "textChars": 115,
-      "narratedAt": "2026-10-24T16:17:44.022Z",
+      "textChars": 177,
+      "narratedAt": "2026-10-24T19:57:17.925Z",
       "worker": "sdk-tts:tongtong"
     },
     "207": {
