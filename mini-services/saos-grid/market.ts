@@ -1,27 +1,45 @@
 // ===== לקוח-שוק-Steem — קריאה-ציבורית-בלבד, fail-closed, אפס-סודות =====
 // עוגן-אמת: כל-מחיר-וכל-יתרה מגיעים-מ-RPC-ציבורי; שגיאה = תשובת-שגיאה-גלויה, לא-המצאה.
+//
+// Task-135 §3 (מנדט-הבעלים): "הפרוטוקול מסתמך על צמתים-ציבוריים-הסובלים-ממגבלות-קצב"
+// → עתה: רשת-failover-מלאה (mesh.ts) — שובר-מעגלים-פר-צומת + הצמדה-דבקה + מדידות-חי.
+// הצמתים: סטימיט-רשמי + 3 צמתים-ציבוריים-מדודים; STEEM_RPC-ישן (env) קודם-אם-קיים.
+import { RpcMesh, type MeshEndpoint } from './mesh'
 
-const RPC_URL = process.env.STEEM_RPC ?? 'https://api.steemit.com'
-const RPC_TIMEOUT_MS = 8_000
+function parseEndpoints(): MeshEndpoint[] {
+  const out: MeshEndpoint[] = []
+  const raw = process.env.STEEM_RPC_ENDPOINTS ?? ''
+  for (const part of raw.split(',')) {
+    const s = part.trim()
+    if (!s) continue
+    const i = s.indexOf('=')
+    if (i > 0) out.push({ name: s.slice(0, i), url: s.slice(i + 1) })
+    else out.push({ name: `node-${out.length + 1}`, url: s })
+  }
+  if (out.length === 0) {
+    const legacy = process.env.STEEM_RPC
+    if (legacy) out.push({ name: 'env-legacy', url: legacy })
+    out.push(
+      { name: 'steemit', url: 'https://api.steemit.com' },
+      { name: 'justyy', url: 'https://api.justyy.com' },
+      { name: 'boylikegirl', url: 'https://steemapi.boylikegirl.club' },
+      { name: 'steampool', url: 'https://rpc.steampool.com' },
+    )
+  }
+  return out
+}
+
+export const steemMesh = new RpcMesh(parseEndpoints(), { timeoutMs: 8_000, openAfterFails: 3, halfOpenAfterMs: 30_000 })
+export function meshHealth() {
+  return steemMesh.health()
+}
 
 export type RpcResult<T> = { ok: true; data: T } | { ok: false; error: string }
 
 async function rpc<T>(method: string, params: unknown[]): Promise<RpcResult<T>> {
-  try {
-    const res = await fetch(RPC_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', method, params, id: 1 }),
-      signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
-    })
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
-    const j = (await res.json()) as { result?: T; error?: { message?: string } }
-    if (j.error) return { ok: false, error: j.error.message ?? 'rpc error' }
-    if (j.result === undefined || j.result === null) return { ok: false, error: 'empty result' }
-    return { ok: true, data: j.result }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
+  const r = await steemMesh.call<T>(method, params)
+  if (!r.ok) return { ok: false, error: r.error }
+  return { ok: true, data: r.data }
 }
 
 // ── פקודת-שוק ────────────────────────────────────────────────────────────────

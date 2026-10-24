@@ -63,6 +63,8 @@ try {
             ? ((engine.stats.floor - engine.stats.price) / engine.stats.price) * 100
             : null,
           ffRail: engine.stats.ffRail,
+          // Task-135 §3 — בריאות-רשת-ה-RPC-המקומית (failover/שובר-מעגלים — מדידה-חיה)
+          rpcMesh: market.meshHealth(),
         })
       }
       if (p === '/grid') {
