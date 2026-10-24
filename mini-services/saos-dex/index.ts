@@ -94,6 +94,7 @@ const HAND_SEEDS: Record<string, Record<string, number>> = {
   'mm-wsbd': { USDS: 100_000 },
   'depth-phive': { USDS: 40_000 },
   'depth-energy': { USDS: 40_000 },
+  'amm-loop': { USDS: 80_000 }, // Task-135 §2 — יד-ה-AMM-המהירה (זרע-זהה-ל-SPECS שבארב)
   treasury: { USDS: 5_000_000, WSTEEM: 1_000_000, SAOS: 1_000_000, WSBD: 500_000, PHIVE: 500_000, ENERGY: 500_000 },
   operator: { USDS: 2_000_000, WSTEEM: 400_000 },
 }
@@ -108,6 +109,7 @@ ensureHtlcSchema(db) // Task-135 §7.2 — ערבות-HTLC (טבלה-עצמאי�
 const seeded = seedWalletRows(db, HAND_SEEDS)
 if (seeded > 0) log(`ארנקות-זרע נזרעו (${seeded}) — ערכי-SEED זהים-לארב, מתועדים`)
 ensureWalletRow(db, 'htlc-escrow') // כספת-הערבות — כל-חוזה מזיז-כסף-אמיתי-דרכה
+ensureWalletRow(db, 'amm-loop') // Task-135: יד-ה-AMM — שורה-מובטחת-גם-בעץ-חי (seedWallets הוא first-boot-only; המימון-עד-הזרע-מגיע-מהאוצר-דרך-הארב)
 
 let height = Number(getMeta(db, 'height') ?? 0)
 const bump = (): number => { height++; setMeta(db, 'height', String(height)); return height }
@@ -276,7 +278,8 @@ function anchorPriceMu(poolId: string, currentPriceMu: number | null): number | 
   return currentPriceMu
 }
 function riskHalted(poolId: string): string | null {
-  return getMeta(db, `amm:risk-halt:${poolId}`)
+  const v = getMeta(db, `amm:risk-halt:${poolId}`)
+  return v && v.length > 0 ? v : null
 }
 
 // ── HTTP ─────────────────────────────────────────────────────────────────────
@@ -324,6 +327,10 @@ async function handle(req: Request): Promise<Response> {
         id: pl.id, base: pl.base, quote: pl.quote,
         reserveBaseMu: pl.reserveBaseMu, reserveQuoteMu: pl.reserveQuoteMu,
         priceMu: curPx,
+        // Task-135 (באג-יחידות-חי): priceMu הוא ×1e6 (תצוגה) — לא-בסקאלת-הספר.
+        // priceRatioMu = rq/rb הגלם (µ-quote-ל-µ-base) — זה-המספר-הנילחם-מול-מחירי-הספר
+        // (נתיב-הפקודות: need=amount×price — בדיוק-הסקאלה-הזו). אף-צרכן-ארב לא ישווה-עוד-סקאלות.
+        priceRatioMu: pl.reserveBaseMu > 0 ? Math.floor(pl.reserveQuoteMu / pl.reserveBaseMu) : null,
         feeBps: pl.feeBps, lpSharesMu: pl.lpSharesMu, walletName: pl.walletName,
         kGrowthBps,
         risk: {
@@ -560,6 +567,22 @@ async function handle(req: Request): Promise<Response> {
       // סליקה-ל-fleet-economy (§2/§5): קבלה-hash-linked-על-השרשרת — best-effort
       reportReceipt('dex-amm-swap', 'filled', `saos-dex:${trader}`, sha256Hex(JSON.stringify({ trader, base, quote, direction, amountInMu, outMu: r.outMu, height })), 0)
       return new Response(JSON.stringify({ ok: true, trader, base, quote, direction, amountInMu, outMu: r.outMu, feeMu: r.feeMu, priceAfterMu: r.priceAfterMu, height: bump() }), { headers: cors })
+    }
+
+    if (op === 'amm-risk-clear') {
+      // Task-135: סמכות-המפעיל בלבד — ניקוי-דגל-סיכון + קביעת-עוגן-מחיר-חדש-מהשעה.
+      // העוגן-הישן היה-עובדה-שרשרתית; קביעת-עוגן-חדש = החלטת-שולחן-מפורשת-מתועדת.
+      const base = String(body.base ?? ''); const quote = String(body.quote ?? '')
+      const pool = poolByPairRow(db, base, quote)
+      if (!pool) return new Response(JSON.stringify({ ok: false, error: 'pool-not-found' }), { status: 404, headers: cors })
+      const curPx = poolPriceMu(pool.reserveBaseMu, pool.reserveQuoteMu)
+      if (curPx === null) return new Response(JSON.stringify({ ok: false, error: 'pool-price-unmeasurable' }), { status: 400, headers: cors })
+      const prevHalt = riskHalted(pool.id)
+      setMeta(db, `amm:risk-halt:${pool.id}`, '') // ניקוי (הקורא מתייחס-לריק כלא-עצור)
+      riskWindows.delete(pool.id) // חלון-טרי — החלטת-השולחן
+      setMeta(db, `amm:seedpx:${pool.id}`, String(curPx))
+      log(`ארון-הסיכונים: המפעיל ניקה-עצירה (היה: ${prevHalt ?? 'none'}) — עוגן-חדש ${curPx}µ על בריכה ${pool.id}`)
+      return new Response(JSON.stringify({ ok: true, poolId: pool.id, prevHalt, newAnchorPriceMu: curPx, height: bump() }), { headers: cors })
     }
 
     if (op === 'htlc-initiate') {
