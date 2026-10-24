@@ -2065,6 +2065,7 @@ async function sovereignDigest(): Promise<void> {
       ['council', 3072, '/health'],
       ['vault-guardian', 3080, '/health'],
       ['wallet', 3085, '/health'], // Task-134 — HSM-החתימה (Saosmartwallet-זמן-ריצה)
+      ['architect', 3086, '/health'], // Task-135 — הארכיטקט-הריבוני (ביקורת→החלטה→ריפוי→חתימה)
     ]
     const organRows: string[] = []
     let up = 0

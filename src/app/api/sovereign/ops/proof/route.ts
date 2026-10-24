@@ -35,6 +35,7 @@ const ORGANS: Array<{ name: string; port: number; path: string }> = [
   { name: 'council', port: 3072, path: '/health' },
   { name: 'vault-guardian', port: 3080, path: '/health' },
   { name: 'wallet', port: 3085, path: '/health' }, // Task-134 — HSM-החתימה (Saosmartwallet-זמן-ריצה)
+  { name: 'architect', port: 3086, path: '/health' }, // Task-135 — הארכיטקט-הריבוני
 ]
 
 type OrganProbe = {
