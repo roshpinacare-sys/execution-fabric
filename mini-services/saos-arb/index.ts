@@ -80,6 +80,8 @@ const SEED: Record<string, { usdsMu: number; baseMu: number }> = Object.fromEntr
   SPECS.map((s) => [s.hand, { usdsMu: s.seedUsdsMu, baseMu: s.seedBaseMu }]),
 )
 
+import { askSizeMu, bidSizeMu, floatPolicy, streamPlan } from './soldiers'
+
 function operatorToken(): string | null {
   // כספת: upload/dex-operator.env (gitignored) — נקרא-בזמן-ריצה, אפס-חשיפה
   const p = join(ROOT, 'upload', 'dex-operator.env')
@@ -308,6 +310,37 @@ async function ensureFunded(st: DexState | null, card: RunCard): Promise<void> {
       if (xfer.ok) did = true
     }
   }
+  // ── רשת-החיילים (Task-136 §2): זרימת-מלאי-אמת מהאוצר לכל-חייל-לנכס-העבודה-שלו ──
+  // דירקטיבת-הבעלים: "automated inter-account liquidity streaming to feed
+  // under-resourced soldier nodes instantly" — עד-היום SEED.baseMu היה 0-לכל
+  // החיילים-מלבד-הפג → מלאי-האוצר (SAOS/WSBD/PHIVE/ENERGY) ישב-מוזנח והספרים-היו-ריקים.
+  // מעתה: צף-עבודה-מינימלי לכל-חייל (=bidQtyMu, סולם-מלא-אחד), דטרמיניסטי,
+  // בלי-משיכת-יתר-מהאוצר (streamPlan fail-closed מול-היתרה-האמת).
+  for (const asset of [...new Set(SPECS.map((s) => s.base))]) {
+    // כל-חייל ניזון אך-ורק-מנכס-העבודה-של-השוק-שלו (לא-הצלבת-נכסים בין-חיילים)
+    const deficits = SPECS.filter((s) => s.base === asset)
+      .map((s) =>
+        floatPolicy(
+          s.hand,
+          { name: s.hand, balances: st?.wallets?.find((x) => x.name === s.hand)?.balances ?? {} },
+          asset,
+          s.bidQtyMu,
+        ),
+      )
+    const treasuryBal = st?.wallets?.find((x) => x.name === 'treasury')
+    if (!treasuryBal) break
+    const plan = streamPlan({ name: 'treasury', balances: treasuryBal.balances }, deficits, asset, Math.max(...SPECS.map((s) => s.bidQtyMu)))
+    for (const t of plan) {
+      const r = await dexPost('transfer', { from: t.from, to: t.to, asset: t.asset, amountMu: t.amountMu })
+      card.actions.push({ hand: t.to, what: `stream-${t.asset}`, detail: `מהאוצר ${t.amountMu}µ → ${r.ok ? 'queued' : `נדחה: ${r.error}`}`, ok: r.ok })
+      if (r.ok) {
+        did = true
+        meshState.streams++
+        meshState.lastStreamAt = new Date().toISOString()
+        meshState.lastStream = t
+      }
+    }
+  }
   if (did) lastTopupAt = Date.now()
 }
 
@@ -386,6 +419,13 @@ function mmStepBps(spreadBps: number): number {
   return Math.max(20, Math.min(200, s))
 }
 const lastMid: Record<string, number | null> = {}
+
+// ── מצב-רשת-החיילים (Task-136 §2) — נמדד-חי על-ה-/health ──────────────────────
+const meshState = {
+  streams: 0,
+  lastStreamAt: null as string | null,
+  lastStream: null as { from: string; to: string; asset: string; amountMu: number } | null,
+}
 async function handMaker(card: RunCard, spec: HandSpec, st: DexState | null, orders: MyOrders | null): Promise<void> {
   const h = spec.hand
   // מקור-מגע: ספר-חי → נקודת-ייחוס-מוכרזת → זיכרון-אחרון (ספר-ריק-אינו-תירוץ-לשתיקה)
@@ -414,25 +454,39 @@ async function handMaker(card: RunCard, spec: HandSpec, st: DexState | null, ord
   let placed = 0
   const capReached = spec.baseCapMu > 0 && baseHeld >= spec.baseCapMu
   // סולם-קנייה-מתחת-למגע (postOnly — מייקר-טהור); נחסם-בתקרת-מלאי
+  // Task-136 §2: גודל-אמת-מוסכמת-העלות (bidSizeMu) — הנוסחה-הישנה
+  // floor(usds×1000/px/2) התעלמה מ-need=amount×price של הדקס → כל-פקודה-על
+  // שוק-זרע-יקר נדחית-בשקט (insufficient-free-funds) — החיילים-היו-אילמים.
+  let usdsRemaining = usds
   if (capReached) {
     card.actions.push({ hand: h, what: 'cap-reached', detail: `מלאי-${spec.base}=${baseHeld}µ ≥ תקרה=${spec.baseCapMu}µ — היד-מפסיקה-לקנות (AutoHedge: max_inventory_exposure)`, ok: true })
   } else {
     for (let i = 1; i <= spec.levels && bids < spec.levels; i++) {
       const px = Math.floor(mid * (1 - (step * i) / 10_000))
       if (m?.bestBid && px >= m.bestBid) continue // לא-חוצה — טהרת-מייקר
-      const qtyMu = Math.min(spec.bidQtyMu, Math.floor((usds * 1000) / px / 2))
-      if (qtyMu < 500) break
+      const qtyMu = bidSizeMu(usdsRemaining, px, spec.bidQtyMu)
+      if (qtyMu <= 0) {
+        if (i === 1) card.actions.push({ hand: h, what: 'bid-dormant', detail: `אין-כסף-אמת-לסולם (px=${px}µ, free=${usdsRemaining}µ — עלות-מינימום ${px * 500}µ) — כנות, לא-דחייה-שקטה`, ok: true })
+        break
+      }
+      usdsRemaining -= qtyMu * px // חשבונאות-עלות-אמת לרמה-הבאה
       const r = await dexPost('order', { action: 'order', base: spec.base, quote: spec.quote, side: 'buy', price: px, amount: qtyMu, issuer: h, postOnly: true })
-      card.actions.push({ hand: h, what: `bid-L${i}`, detail: `px=${px}µ mid=${mid}µ step=${step}bps qty=${qtyMu}µ`, ok: r.ok })
+      card.actions.push({ hand: h, what: `bid-L${i}`, detail: `px=${px}µ mid=${mid}µ step=${step}bps qty=${qtyMu}µ cost=${qtyMu * px}µ`, ok: r.ok })
       if (r.ok) placed++
     }
   }
   // סולם-מכירה-מעל-המגע — רק-ממלאי-אמת (אף-מכירה-באוויר)
+  // Task-136 §2: askSizeMu — חשבונאות-מלאי-אמת-לרוחב-הסולם
+  let baseRemaining = baseHeld
   for (let i = 1; i <= spec.levels && asks < spec.levels; i++) {
     const px = Math.ceil(mid * (1 + (step * i) / 10_000))
     if (m?.bestAsk && px <= m.bestAsk) continue
-    const holdMu = Math.min(baseHeld, spec.bidQtyMu)
-    if (holdMu < 500) break
+    const holdMu = askSizeMu(baseRemaining, spec.bidQtyMu)
+    if (holdMu <= 0) {
+      if (i === 1 && asks === 0) card.actions.push({ hand: h, what: 'ask-dormant', detail: `אין-מלאי-${spec.base}-אמת (free=${baseRemaining}µ) — המציין-ממתין-לזרימת-מלאי-מהאוצר (כנות)`, ok: true })
+      break
+    }
+    baseRemaining -= holdMu // חשבונאות-מלאי-אמת לרמה-הבאה
     const r = await dexPost('order', { action: 'order', base: spec.base, quote: spec.quote, side: 'sell', price: px, amount: holdMu, issuer: h, postOnly: true })
     card.actions.push({ hand: h, what: `ask-L${i}`, detail: `px=${px}µ mid=${mid}µ step=${step}bps hold=${holdMu}µ`, ok: r.ok })
     if (r.ok) placed++
@@ -706,6 +760,12 @@ function healthJson(): Record<string, unknown> {
       lastDecisionAt: ammState.lastDecisionAt, lastDecision: ammState.lastDecision,
       lastSwapAt: ammState.lastSwapAt, lastSwap: ammState.lastSwap,
       lastError: ammState.lastError,
+    },
+    soldierMesh: {
+      law: 'Task-136 §2 — כל-החיילים-במלוא-הכוח: זרימת-מלאי-מהאוצר + גודל-פקודה-אמת',
+      streams: meshState.streams,
+      lastStreamAt: meshState.lastStreamAt,
+      lastStream: meshState.lastStream,
     },
     honesty: 'הספר-סימולציה-מוצהרת; run-cards-מאומתים; אין-מפתחות; אין-המצאת-מספרים',
   }

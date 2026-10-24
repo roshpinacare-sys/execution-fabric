@@ -9,6 +9,7 @@ import './lib/install-secp-shim.cjs'
 
 import * as engine from './engine'
 import * as ff from './ff'
+import { harvestPulse, harvestState } from './harvest-engine'
 import * as market from './market'
 import { organAuth } from '../organ-auth'
 
@@ -65,7 +66,12 @@ try {
           ffRail: engine.stats.ffRail,
           // Task-135 §3 — בריאות-רשת-ה-RPC-המקומית (failover/שובר-מעגלים — מדידה-חיה)
           rpcMesh: market.meshHealth(),
+          // Task-136 §1 — מנוע-הקציר-העצמי (קיורציה+פרסים — מדידה-חיה)
+          harvest: harvestState,
         })
+      }
+      if (p === '/harvest') {
+        return Response.json({ ok: true, harvest: harvestState })
       }
       if (p === '/grid') {
         const s = engine.summary()
@@ -173,3 +179,16 @@ console.log(`[saos-grid] כספת: upload/steem.env (תבנית: steem.env.templ
 setInterval(() => void tickCycle(), CYCLE_MS)
 // מחזור-ראשון-מיידי (לקח-Task-103: אין-המתנה-בפעם-הראשונה)
 setTimeout(() => void tickCycle(), 3_000)
+
+// ── Task-136 §1: פעימת-הקציר-העצמי — קציר-פרסים + קיורציה-חתומה, כל-15 דק' ──
+const HARVEST_MS = Number(process.env.SAOS_HARVEST_MS ?? 15 * 60_000)
+setInterval(() => {
+  harvestPulse().catch((e) => {
+    harvestState.lastError = e instanceof Error ? e.message : String(e)
+  })
+}, HARVEST_MS)
+setTimeout(() => {
+  harvestPulse().catch((e) => {
+    harvestState.lastError = e instanceof Error ? e.message : String(e)
+  })
+}, 25_000)

@@ -16,6 +16,8 @@
 // ═════════════════════════════════════════════════════════════════════════════
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import ZAI from 'z-ai-web-dev-sdk'
+import { buildVerdict, parseBuildContract, patchGuard, type BuildContract, type ProposedFile } from './build-lane'
 import { GENESIS, parseBunTestOutput, receiptHash, verifyChain, type ChainLine, type SuiteRow } from './core'
 
 const PORT = 3086 // קבוע — חוזה-האיברים
@@ -200,7 +202,181 @@ function appendReceipt(rec: Omit<ChainLine, 'hash' | 'prev'>): { ok: boolean; he
   return { ok: v.ok, head: v.head, verified: v.verified, brokenAt: v.brokenAt }
 }
 
-// ── מחזור-הארכיטקט ───────────────────────────────────────────────────────────
+// ── מסילת-הבנייה-העצמית (Task-136 §5): אישיות → חוזה → LLM → שערים → בדיקות → מיזוג ──
+const buildState = {
+  attempts: 0,
+  merged: 0,
+  reverted: 0,
+  lastAt: null as string | null,
+  lastIssue: null as number | null,
+  lastVerdict: null as string | null,
+  lastError: null as string | null,
+}
+
+interface GhIssue {
+  number: number
+  title: string
+  body: string | null
+  labels: Array<{ name: string }>
+}
+
+async function fetchBuildableIssue(): Promise<GhIssue | null> {
+  const tok = githubToken()
+  if (!tok) return null
+  try {
+    const res = await fetch(`https://api.github.com/repos/${githubRepo()}/issues?state=open&labels=architect-build&per_page=20&sort=created&direction=asc`, {
+      headers: { authorization: `token ${tok}`, accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(20_000),
+    })
+    if (!res.ok) return null
+    const list = (await res.json()) as GhIssue[]
+    return (list ?? []).find((i) => !i.pull_request) ?? null
+  } catch {
+    return null
+  }
+}
+
+async function llmPropose(issue: GhIssue, contract: BuildContract): Promise<ProposedFile[] | { error: string }> {
+  try {
+    const zai = await ZAI.create()
+    const contexts = contract.files.slice(0, 4).map((f) => {
+      const p = join(ROOT, f)
+      const content = existsSync(p) ? readFileSync(p, 'utf8') : ''
+      return `### ${f}\n\`\`\`\n${content.slice(0, 12_000)}\n\`\`\``
+    }).join('\n\n')
+    const completion = await zai.chat.completions.create({
+      messages: [
+        {
+          role: 'assistant',
+          content: 'אתה-מהנדס-בכיר-במערכת-SAOS. אתה-מייצר-קבצי-קוד-מלאים-בלבד. אסור-TODO/FIXME/mock/stub/unimplemented. TypeScript-strict. בדיקות-bun:test. השב-JSON בלבד במבנה: {"files":[{"path":"...","content":"..."}]}. אף-טקסט-אחר.',
+        },
+        {
+          role: 'user',
+          content: `אישיות #${issue.number}: ${issue.title}\n\n${(issue.body ?? '').slice(0, 4_000)}\n\n## קבצי-החוזה-הנוכחיים:\n${contexts}\n\nבצע: כתוב/עדכן את קבצי-החוזה כך-שהקבלה תתמלא. השב-JSON בלבד.`,
+        },
+      ],
+      thinking: { type: 'disabled' },
+    })
+    const raw = completion.choices[0]?.message?.content ?? ''
+    const jsonM = /\{[\s\S]*\}/.exec(raw)
+    if (!jsonM) return { error: 'llm-no-json-in-response' }
+    const parsed = JSON.parse(jsonM[0]) as { files?: ProposedFile[] }
+    if (!Array.isArray(parsed.files)) return { error: 'llm-no-files-array' }
+    return parsed.files.map((f) => ({ path: String(f.path ?? ''), content: String(f.content ?? '') }))
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+async function closeIssueWithComment(n: number, comment: string, done: boolean): Promise<void> {
+  const tok = githubToken()
+  if (!tok) return
+  try {
+    await fetch(`https://api.github.com/repos/${githubRepo()}/issues/${n}/comments`, {
+      method: 'POST',
+      headers: { authorization: `token ${tok}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ body: comment.slice(0, 6_000) }),
+      signal: AbortSignal.timeout(20_000),
+    })
+    if (done) {
+      await fetch(`https://api.github.com/repos/${githubRepo()}/issues/${n}`, {
+        method: 'PATCH',
+        headers: { authorization: `token ${tok}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ state: 'closed', state_reason: 'completed' }),
+        signal: AbortSignal.timeout(20_000),
+      })
+    }
+  } catch { /* כנות: כשל-סגירה לא מפיל את המסילה */ }
+}
+
+function gitCommitAndPush(files: string[], msg: string): { ok: boolean; tail: string } {
+  try {
+    const add = Bun.spawnSync(['git', 'add', ...files], { cwd: ROOT, stdout: 'pipe', stderr: 'pipe' })
+    if (add.exitCode !== 0) return { ok: false, tail: add.stderr.toString().slice(0, 300) }
+    const commit = Bun.spawnSync(['git', 'commit', '-m', msg], { cwd: ROOT, stdout: 'pipe', stderr: 'pipe' })
+    if (commit.exitCode !== 0) return { ok: false, tail: commit.stderr.toString().slice(0, 300) }
+    const push = Bun.spawnSync(['git', 'push', 'origin', 'HEAD:main'], { cwd: ROOT, stdout: 'pipe', stderr: 'pipe' })
+    return { ok: push.exitCode === 0, tail: push.stderr.toString().slice(0, 300) }
+  } catch (e) {
+    return { ok: false, tail: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+async function buildLane(): Promise<void> {
+  const issue = await fetchBuildableIssue()
+  if (!issue) {
+    buildState.lastVerdict = 'no-buildable-issue (תור-ריק — כנות)'
+    return
+  }
+  buildState.attempts++
+  buildState.lastAt = new Date().toISOString()
+  buildState.lastIssue = issue.number
+  const contract = parseBuildContract(issue.body ?? '')
+  if (!contract) {
+    buildState.lastVerdict = `issue-${issue.number}: ללא-חוזה-בנייה-תקין — מדולג-כנות`
+    await closeIssueWithComment(issue.number, 'מסילת-הבנייה: האישיות-חסרה-חוזה ```build-contract``` תקין — לא-נבנית (אפס-בנייה-עיוורת).', false)
+    return
+  }
+  const proposed = await llmPropose(issue, contract)
+  if ('error' in proposed) {
+    buildState.lastVerdict = `issue-${issue.number}: llm-error — ${proposed.error}`
+    buildState.lastError = proposed.error
+    await closeIssueWithComment(issue.number, `מסילת-הבנייה: כשל-LLM כן — ${proposed.error}. האישיות-נשארת-פתוחה.`, false)
+    return
+  }
+  const guard = patchGuard(proposed, contract)
+  if (!guard.ok) {
+    buildState.lastVerdict = `issue-${issue.number}: patch-guard-דחה — ${guard.reason}`
+    await closeIssueWithComment(issue.number, `מסילת-הבנייה: שער-התיקונים דחה — ${guard.reason}. אפס-החלה.`, false)
+    return
+  }
+  // גיבוי-מקור → החלה → בדיקות-האיבר → שחזור-בכשל
+  const organDir = join(ROOT, 'mini-services', contract.organ)
+  const backups = new Map<string, string | null>()
+  for (const f of proposed) {
+    const p = join(ROOT, f.path)
+    backups.set(p, existsSync(p) ? readFileSync(p, 'utf8') : null)
+    mkdirSync(join(p, '..'), { recursive: true })
+    writeFileSync(p, f.content)
+  }
+  try {
+    const t = runBunTest(organDir)
+    const verdict = buildVerdict(t.tail, t.pass, t.fail, t.ok ? 0 : 1)
+    if (!verdict.ok) {
+      for (const [p, orig] of backups) {
+        if (orig === null) {
+          Bun.spawnSync(['rm', '-f', p])
+        } else {
+          writeFileSync(p, orig)
+        }
+      }
+      buildState.reverted++
+      buildState.lastVerdict = `issue-${issue.number}: כשל-בדיקות (${verdict.reason}) — שוחזר-מלא`
+      await closeIssueWithComment(issue.number, `מסילת-הבנייה: התיקון-נדד-והסוללה-אדומה (${verdict.reason}) — שוחזר-מלא-וכנה. זנב:\n\`\`\`\n${t.tail.slice(0, 2_000)}\n\`\`\``, false)
+      return
+    }
+    const msg = `feat(${contract.organ}): architect build lane — issue #${issue.number} (auto-TDD, tests ${t.pass} pass)`
+    const g = gitCommitAndPush(proposed.map((f) => f.path), msg)
+    if (!g.ok) {
+      buildState.lastVerdict = `issue-${issue.number}: בדיקות-ירוקות-אך-הדחיפה-נכשלה — ${g.tail.slice(0, 120)}`
+      buildState.lastError = g.tail.slice(0, 300)
+      await closeIssueWithComment(issue.number, `מסילת-הבנייה: הסוללה-ירוקה (${verdict.reason}) אך-הדחיפה-נכשלה — ${g.tail.slice(0, 500)}`, false)
+      return
+    }
+    buildState.merged++
+    buildState.lastVerdict = `issue-${issue.number}: מוזג-ל-main (${verdict.reason}, ${proposed.length} קבצים)`
+    await closeIssueWithComment(issue.number, `מסילת-הבנייה: ירוק-וממוזג ✅ — ${verdict.reason}; קבצים: ${proposed.map((f) => f.path).join(', ')}.`, true)
+  } finally {
+    // ניקוי-ביטחון: אם-נשארו-קבצים-שלא-נכללו-בקומיט (שום-דבר-לא-נשאר-זר-בעץ)
+    for (const f of proposed) {
+      const st = Bun.spawnSync(['git', 'status', '--porcelain', '--', f.path], { cwd: ROOT, stdout: 'pipe', stderr: 'pipe' })
+      if (st.stdout.toString().trim()) {
+        const orig = backups.get(join(ROOT, f.path))
+        if (orig !== null && orig !== undefined) writeFileSync(join(ROOT, f.path), orig)
+      }
+    }
+  }
+}
 const state = {
   cycles: 0,
   startedAt: new Date().toISOString(),
@@ -242,6 +418,13 @@ async function architectCycle(): Promise<void> {
           log(`🩹 ריפוי: Issue-${n} נפתח על ${s.name} (${s.fail} כישלונות — ה-traceback על-האישו)`)
         }
       }
+    }
+    // 2.5 BUILD (Task-136 §5) — מסילת-הבנייה-העצמית (שערים-מלאים)
+    try {
+      await buildLane()
+    } catch (e) {
+      buildState.lastError = e instanceof Error ? e.message : String(e)
+      log(`מסילת-בנייה כשלה כן: ${buildState.lastError}`)
     }
     // 3. SIGN — קבלה-hash-linked + אימות-מלא
     const rec = {
@@ -298,6 +481,7 @@ async function handle(req: Request): Promise<Response> {
       chainVerified: state.lastChain?.verified ?? 0,
       chainOk: state.lastChain?.ok ?? null,
       healsFiled: state.healsFiled,
+      build: buildState,
       lastError: state.lastError,
     }), { headers: cors })
   }
