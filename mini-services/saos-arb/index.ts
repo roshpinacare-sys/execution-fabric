@@ -458,7 +458,7 @@ const ammState = {
   lastSwap: null as Record<string, unknown> | null,
   lastError: null as string | null,
 }
-interface AmmPoolState { id: number | string; base: string; quote: string; priceMu: number | null; risk?: { halted?: string | null; windowUsedMu?: number } }
+interface AmmPoolState { id: number | string; base: string; quote: string; priceMu: number | null; priceRatioMu?: number | null; reserveBaseMu?: number; reserveQuoteMu?: number; risk?: { halted?: string | null; windowUsedMu?: number } }
 
 function ammJournal(rec: Record<string, unknown>): void {
   try {
@@ -486,10 +486,14 @@ async function ammLoop(): Promise<void> {
       return
     }
     const w = walletOf(st, 'amm-loop')
-    const bookMid = marketOf(st, 'WSTEEM', 'USDS')?.fair ?? null
+    // Task-135 (באג-יחידות): השוואה-רק-בסקאלה-האחת — מחיר-הבריכה-הגלם (rq/rb = µ-quote-ל-µ-base)
+    // מול-מגע-הספר-האמיתי (bestBid/bestAsk בלבד — אפס-fallback-זרע; אין-ספר = אין-קצה-נמדד).
+    const ammPx = pool.priceRatioMu ?? (pool.reserveBaseMu && pool.reserveBaseMu > 0 && pool.reserveQuoteMu ? Math.floor(pool.reserveQuoteMu / pool.reserveBaseMu) : null)
+    const m = marketOf(st, 'WSTEEM', 'USDS')
+    const bookMid = m && m.bestBid !== null && m.bestAsk !== null ? Math.round((m.bestBid + m.bestAsk) / 2) : m?.bestBid ?? m?.bestAsk ?? null
     const decision = ammRailDecision({
       bookMidMu: bookMid,
-      ammPriceMu: pool.priceMu,
+      ammPriceMu: ammPx,
       feeBps: 30,
       minEdgeBps: AMM_MIN_EDGE_BPS,
       freeQuoteMu: w.usdsMu,
@@ -618,9 +622,11 @@ async function cycle(): Promise<void> {
   try {
     const amm = await jget<{ pools?: AmmPoolState[] }>(`${DEX}/amm/state`)
     const pool = amm?.pools?.find((p) => p.base === 'WSTEEM' && p.quote === 'USDS') ?? null
-    const bookMid = marketOf(st, 'WSTEEM', 'USDS')?.fair ?? null
-    const edge = pool?.priceMu != null ? (bookMid !== null ? Math.round(((bookMid - pool.priceMu) / pool.priceMu) * 10_000) : null) : null
-    ammRail = { priceMu: pool?.priceMu ?? null, bookMidMu: bookMid, edgeBps: edge, lastDecision: JSON.stringify(ammState.lastDecision?.action ?? 'none') }
+    const m = marketOf(st, 'WSTEEM', 'USDS')
+    const bookMid = m && m.bestBid !== null && m.bestAsk !== null ? Math.round((m.bestBid + m.bestAsk) / 2) : m?.bestBid ?? m?.bestAsk ?? null
+    const ammPx = pool ? (pool.priceRatioMu ?? (pool.reserveBaseMu && pool.reserveBaseMu > 0 && pool.reserveQuoteMu ? Math.floor(pool.reserveQuoteMu / pool.reserveBaseMu) : null)) : null
+    const edge = ammPx !== null && bookMid !== null ? Math.round(((bookMid - ammPx) / ammPx) * 10_000) : null
+    ammRail = { priceMu: ammPx, bookMidMu: bookMid, edgeBps: edge, lastDecision: JSON.stringify(ammState.lastDecision?.action ?? 'none') }
   } catch { /* כנות: המסילה-חסרה על-הכרטיס הזה */ }
   const card: RunCard = {
     at: lastCycleAt!,
