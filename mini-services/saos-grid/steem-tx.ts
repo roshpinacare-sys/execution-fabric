@@ -236,7 +236,10 @@ export function serializeOperation(
     pushString(body, d.to)
     body.push(...assetAmount(d.amount, d.symbol))
     pushString(body, d.memo)
-    pushVarintCount(body, 0) // transfer-extensions: ריק — מוכח-מעוגן-האב (זנב-ה-transfer)
+    // Task-137 תיקון-מדידה-חיה: ל-transfer אין op-extensions (וקטור-54-בייטים-פה-אחד-2-צמתים:
+    // 10+1+41+2 — הזנב=tx-ext+sigs). עוגן-האב-הישן עבר-בריקנות — 3 אפסים-זהים (memo+op-ext+tx-ext
+    // נראו-כמו memo+tx-ext+sigs) והבייט-העודף-גרם-ל-digest-שונה → "missing required active authority"
+    // על-כל-העסקאות-החיות (נמדד-חי 2026-10-24). dhive (תבנית-Hive) ללא-op-ext — נוחת.
   } else if (opId === OP_LIMIT_ORDER_CREATE) {
     const d = data as LimitOrderCreateOp
     if (!Number.isSafeInteger(d.orderid) || d.orderid < 0) throw new Error(`steem-tx: orderid-invalid`)
@@ -371,9 +374,33 @@ export interface SignedTx {
   pubkey: string
 }
 
+// ── חוק-הקנוניות-של-גרפן (Task-137 — הוכח-מקוד-המקור-של-dhive + דחיות-חיות-מהשרשרת) ──
+// השרשרת דורשת: הביט-הגבוה של r ושל s (=בייט 0 ובייט 32) אפס, וקידוד-מינימלי
+// (בייט-מוביל-אפס מחייב ביט-גבוה בבייט הבא). noble מנרמל רק s — פרט לתיקון זה,
+// ~94% מהחתימות היו נדחות על-ידי השרשרת ("missing required active authority" /
+// "unknown key") — נמדד-חי 2026-10-24. dhive פותר ב-retry עם entropy מוגבר.
+function isGrapheneCanonical(r: bigint, s: bigint): boolean {
+  const rb = Buffer.from(r.toString(16).padStart(64, '0'), 'hex')
+  const sb = Buffer.from(s.toString(16).padStart(64, '0'), 'hex')
+  if (rb[0]! & 0x80) return false
+  if (rb[0] === 0 && !(rb[1]! & 0x80)) return false
+  if (sb[0]! & 0x80) return false
+  if (sb[0] === 0 && !(sb[1]! & 0x80)) return false
+  return true
+}
+
 export function signTxBytes(tx: Uint8Array, wif: string, chainId: Uint8Array = STEEM_CHAIN_ID): SignedTx {
   const digest = sha256(Uint8Array.from([...chainId, ...tx]))
-  const sig = secp256k1.sign(digest, b58decode(wif.trim()).subarray(1, 33), { prehash: false })
+  const scalar = b58decode(wif.trim()).subarray(1, 33)
+  // חוק-הקנוניות: retry עם entropy-מוגבר עד-חתימה-קנונית (דפוס-dhive המוכח-חי)
+  let sig = secp256k1.sign(digest, scalar, { prehash: false })
+  let attempt = 0
+  while (!isGrapheneCanonical(sig.r, sig.s)) {
+    attempt++
+    if (attempt > 64) throw new Error('steem-tx: canonical-signature-exhausted (64 ניסיונות — כנות, לא-מזל)')
+    const ent = sha256(Uint8Array.from([attempt]))
+    sig = secp256k1.sign(digest, scalar, { prehash: false, extraEntropy: ent })
+  }
   const signature = sigToSteemFormat({ r: sig.r, s: sig.s, recovery: sig.recovery ?? 0 })
   const pubkey = wifToPubkey(wif)
   // חוק-הבית: אף-חתימה-לא-יוצאת-מהדלת-בלי-שחזור-מוצלח-למפתח-שלנו-עצמנו

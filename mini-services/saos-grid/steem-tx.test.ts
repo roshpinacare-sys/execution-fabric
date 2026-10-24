@@ -66,7 +66,9 @@ describe('עוגן-השרשרת: סידור-מלא זהה-בייט-בייט-לש
         }),
       ],
     )
-    expect(HEX(tx)).toBe(MASTER_VECTOR)
+    // Task-137 תיקון-סמנטיקה: זנב-ה-MASTER = memo + tx-ext + signatures(00) — ל-transfer
+    // אין-op-ext (וקטור-ה-54-בייטים-המכריע-למטה). ההשוואה-הישנה עברה-בריקנות (3 אפסים-זהים).
+    expect(HEX(tx) + SIGS_TAIL).toBe(MASTER_VECTOR)
   })
   test('מזהי-הפעולות-מהשרשרת (לא-מהזיכרון): claim=39 vote=0 order=5 transfer=2', () => {
     expect(OP_VOTE).toBe(0)
@@ -239,5 +241,23 @@ describe('Task-137: account_create (נתיב-העמלה — כש-RC חסר) — 
     const VECTOR =
       '000000000000000000000109b80b00000000000003535445454d00000a68656164636f726e65720b73616f736f6c64696572310100000000010234b1205efc0726645da3c25ea56537561379e2f68a8d779fa892fda8cad55e8e01000100000000010234b1205efc0726645da3c25ea56537561379e2f68a8d779fa892fda8cad55e8e01000100000000010234b1205efc0726645da3c25ea56537561379e2f68a8d779fa892fda8cad55e8e01000234b1205efc0726645da3c25ea56537561379e2f68a8d779fa892fda8cad55e8e000000'
     expect(HEX(tx) + SIGS_TAIL).toBe(VECTOR)
+  })
+})
+
+describe('Task-137 מדידה-חיה: ל-transfer אין op-extensions (הווקטור-המכריע — 2-צמתים-פה-אחד)', () => {
+  test('transfer (0.001 STEEM, memo "x") == וקטור-54-בייטים-מינוס-חתימות', () => {
+    const tx = buildTxBytes(
+      { refBlockNum: 0, refBlockPrefix: 0, expirationEpoch: 0 },
+      [serializeOperation(OP_TRANSFER, { from: 'headcorner', to: 'headcorner', amount: 1, symbol: 'STEEM', memo: 'x' })],
+    )
+    const VECTOR =
+      '0000000000000000000001020a68656164636f726e65720a68656164636f726e6572010000000000000003535445454d000001780000'
+    expect(HEX(tx) + SIGS_TAIL).toBe(VECTOR)
+  })
+  test('עוגן-האב-הישן עדיין-מתקבל — עם-זנב-החתימות-המפורש (הלקח: ה-3-אפסים-היו-עמומים)', () => {
+    // עדכון-הסמנטיקה: זנב-ה-MASTER = memo + tx-ext + signatures(00) — ל-transfer אין-op-ext.
+    // הבדיקה-הישנה (HEX(tx)==MASTER) עברה-בריקנות כשה-serializer-הוסיף-op-ext: 3-אפסים-זהים.
+    // ההוכחה-החדשה-המכריעה: וקטור-ה-transfer-לעיל + נחיתות-חיות-מול-השרשרת.
+    expect(OP_TRANSFER).toBe(2)
   })
 })

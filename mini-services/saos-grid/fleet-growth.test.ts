@@ -186,3 +186,50 @@ describe('executeGrowthPulse — המנוע-המלא (סביבה-מדומה-מל
     expect(readFileSync(vault, 'utf-8')).toContain('GRID_ACCOUNTS=headcorner,saos-0001,saos-0002')
   })
 })
+
+describe('Task-137 תיקון-מדידה-חיה: JSON-הסמכויות-לשידור חייב-היות-snake_case (הצומת-מנתח-fc::json)', () => {
+  test('authorityJson מייצר weight_threshold/account_auths/key_auths בלבד', async () => {
+    const { authorityJson } = await import('./fleet-growth')
+    const j = authorityJson({ threshold: 1, accountAuths: [], keyAuths: [['STM5HhJD5WUXu8vPhDmLaC2fTuuJYkwxF62Rt17HZ5G2PbnBvuHXF', 1]] } as never)
+    const keys = Object.keys(j).sort()
+    expect(keys).toEqual(['account_auths', 'key_auths', 'weight_threshold'])
+    expect(j.weight_threshold).toBe(1)
+    expect(j.key_auths[0][0]).toBe('STM5HhJD5WUXu8vPhDmLaC2fTuuJYkwxF62Rt17HZ5G2PbnBvuHXF')
+    expect(j.key_auths[0][1]).toBe(1)
+    expect(JSON.stringify(j)).not.toContain('accountAuths')
+    expect(JSON.stringify(j)).not.toContain('keyAuths')
+    expect(JSON.stringify(j)).not.toContain('threshold:')
+  })
+})
+
+describe('Task-137 תיקון-מדידה-חיה: parseVestsRaw + backfill-הקצאות', () => {
+  test('parseVestsRaw: מחרוזת-נכס, nai-אובייקט, מחרוזת-גלמית', async () => {
+    const { parseVestsRaw } = await import('./fleet-growth')
+    expect(parseVestsRaw('325143612558.630496 VESTS')).toBe(325143612558630496)
+    expect(parseVestsRaw({ amount: '325143615139409851', precision: 6, nai: '@@000000037' })).toBe(325143615139409851)
+    expect(parseVestsRaw('196561234567890')).toBe(196561234567890)
+    expect(parseVestsRaw(null)).toBe(null)
+    expect(parseVestsRaw(undefined)).toBe(null)
+    expect(() => parseVestsRaw({ garbage: 1 })).toThrow()
+  })
+  test('backfillDelegations: חייל-בלי-הקצאה → delegate-אבסולוטי-אחד; כבר-מוקצה → אפס-שידורים', async () => {
+    const { backfillDelegations, DELEGATE_VESTS_FALLBACK_RAW } = await import('./fleet-growth')
+    const calls: string[][] = []
+    const deps = {
+      log: () => {},
+      buildHeader: async () => ({ refBlockNum: 1, refBlockPrefix: 2, expirationEpoch: 3 }),
+      call: async () => ({ ok: true, data: { head_block_number: 1, head_block_id: '00000000deadbeef000000000000000000000000', total_vesting_fund_shares: null, total_vesting_shares: { amount: '325143615139409851', precision: 6 } } }),
+      broadcast: async (_s: unknown, _h: unknown, ops: [string, unknown][]) => { calls.push([String(ops[0][0]), JSON.stringify(ops[0][1])]); return { ok: true, blockNum: 5, trxId: 't' } },
+    } as never
+    const state = { soldiers: [{ name: 'saos-0001', createdAt: 'x', trxId: 't', delegatedVestsRaw: null }, { name: 'saos-0002', createdAt: 'x', trxId: 't', delegatedVestsRaw: 123 }], created: 2, delegated: 1, lastCycleAt: null, lastError: null, lastResult: '', running: false, lastPath: null } as never
+    await backfillDelegations(deps, state, 'headcorner', TEST_WIF)
+    expect(calls.length).toBe(1) // רק-saos-0001
+    expect(calls[0]![0]).toBe('delegate_vesting_shares')
+    const body = JSON.parse(calls[0]![1]) as { vesting_shares: string }
+    expect(body.vesting_shares).toBe(`${(DELEGATE_VESTS_FALLBACK_RAW / 1e6).toFixed(6)} VESTS`)
+    // פעם-שנייה-על-אותו-מצב (אחרי-עדכון-הרשומה) → אפס
+    state.soldiers[0]!.delegatedVestsRaw = DELEGATE_VESTS_FALLBACK_RAW
+    await backfillDelegations(deps, state, 'headcorner', TEST_WIF)
+    expect(calls.length).toBe(1)
+  })
+})

@@ -32,6 +32,7 @@ import {
 } from './steem-tx'
 
 export const DELEGATE_SP_FLOOR = 1 // רצפת-SP-לחייל-חדש (ההקצאה-הזולה-שנותנת-RC-לעבודה)
+export const DELEGATE_VESTS_FALLBACK_RAW = 2_000_000_000 // ≈1.026-SP-ביחס-המדוד-היום (3,458-SP/6,741,344-vests) — השרשרת-היא-הסמכות-הסופית
 export const ACCOUNT_CREATE_FEE_RAW = 3_000 // 3.000 STEEM — נמדד-חי-מעמדות-העדים-המובילים (2026-10-24)
 export const FEE_SAFETY_X = 2 // רצפת-ביטחון: אחרי-תשלום-העמלה נשארים-לפחות ×2 עמלות-בקופה
 const RC_INSUFFICIENT_RE = /Resource Credits|needs \d+ RC/i // הוכח-חי: "has 1069368631445 RC, needs 7632622660355 RC"
@@ -130,8 +131,30 @@ function registerSoldierInVault(vault: VaultData, path: string, name: string, wi
 interface DynProps {
   head_block_number: number
   head_block_id: string
-  total_vesting_fund_shares: string
-  total_vesting_shares: string
+  total_vesting_fund_shares: string | null | { amount: string }
+  total_vesting_shares: string | null | { amount: string }
+}
+
+/** ניתוח-vests-גלמיים-מכל-פורמט-שהצמתים משגרים: נכס-תצוגה ('X.Y VESTS' → ×1e6),
+ *  nai-אובייקט (amount-גלם), מחרוזת-גלמית ('NNN' → כמו-שהיא). null/חסר → null. */
+export function parseVestsRaw(v: unknown): number | null {
+  if (v === null || v === undefined) return null
+  if (typeof v === 'string') {
+    const m = /^([\d,]+(?:\.\d+)?)\s*(VESTS)?\s*$/.exec(v.trim())
+    if (!m) throw new Error(`fleet-growth: vests-parse-failed (${v})`)
+    const digits = m[1]!.replace(/,/g, '')
+    if (digits.includes('.')) {
+      const [int, frac = ''] = digits.split('.')
+      return parseInt(`${int}${frac.padEnd(6, '0').slice(0, 6)}`, 10)
+    }
+    return parseInt(digits, 10)
+  }
+  if (typeof v === 'object' && typeof (v as { amount?: unknown }).amount === 'string') {
+    const a = (v as { amount: string }).amount
+    if (!/^\d+$/.test(a)) throw new Error(`fleet-growth: vests-nai-parse-failed (${a})`)
+    return parseInt(a, 10)
+  }
+  throw new Error(`fleet-growth: vests-shape-unknown (${JSON.stringify(v).slice(0, 60)})`)
 }
 
 interface RawAccount {
@@ -146,6 +169,16 @@ function assetRaw(s: string): number {
   const prec = m[2] === 'VESTS' ? 6 : 3
   const f = (frac ?? '').padEnd(prec, '0').slice(0, prec)
   return parseInt(`${int}${f}`, 10)
+}
+
+/** JSON-סמכות-לשידור — snake_case בלבד (fc::json-של-הצומת מנתח account_auths/key_auths;
+ *  camelCase = סמכות-ריקה-נתפסת → "missing required active authority" — נמדד-חי Task-137). */
+export function authorityJson(a: AccountAuthority): {
+  weight_threshold: number
+  account_auths: Array<[string, number]>
+  key_auths: Array<[string, number]>
+} {
+  return { weight_threshold: a.threshold, account_auths: a.accountAuths, key_auths: a.keyAuths }
 }
 
 /** הכנת-חייל: יצירה-עם-מפתחות-חדשים + הקצאת-רצפת-RC. מחזיר-כנות-או-זורק-אמת. */
@@ -169,6 +202,7 @@ async function createAndFund(
   }
   const wifs = { owner: genKey(), active: genKey(), posting: genKey(), memo: genKey() }
   const auth = (pub: string): AccountAuthority => ({ threshold: 1, accountAuths: [], keyAuths: [[wifToPubkey(pub), 1]] })
+  const authJson = (pub: string) => authorityJson(auth(pub))
   const createOpBody = {
     owner: auth(wifs.owner),
     active: auth(wifs.active),
@@ -182,8 +216,8 @@ async function createAndFund(
     [
       opName,
       path === 'fee'
-        ? { creator: vault.creator, new_account_name: name, fee: `${(feeRaw / 1000).toFixed(3)} STEEM`, owner: createOpBody.owner, active: createOpBody.active, posting: createOpBody.posting, memo_key: createOpBody.memoKey, json_metadata: '' }
-        : { creator: vault.creator, new_account_name: name, owner: createOpBody.owner, active: createOpBody.active, posting: createOpBody.posting, memo_key: createOpBody.memoKey, json_metadata: '', extensions: [] },
+        ? { creator: vault.creator, new_account_name: name, fee: `${(feeRaw / 1000).toFixed(3)} STEEM`, owner: authJson(wifs.owner), active: authJson(wifs.active), posting: authJson(wifs.posting), memo_key: createOpBody.memoKey, json_metadata: '' }
+        : { creator: vault.creator, new_account_name: name, owner: authJson(wifs.owner), active: authJson(wifs.active), posting: authJson(wifs.posting), memo_key: createOpBody.memoKey, json_metadata: '', extensions: [] },
     ],
   ]
   const createTx = buildTxBytes(header, [
@@ -204,13 +238,13 @@ async function createAndFund(
   state.created++
   state.lastPath = path
   deps.log(`fleet-growth: החייל ${name} נוצר (${path === 'fee' ? `עמלה ${(feeRaw / 1000).toFixed(3)} STEEM` : 'RC-עצמי'}) בבלוק ${createRes.blockNum} — כספת-עודכנה (4 מפתחות)`)
-  // הקצאת-רצפת-RC
+  // הקצאת-רצפת-RC (אבסולוטית-בשרשרת — חוזרת-בבטחה)
   const dyn = await deps.call<DynProps>('condenser_api.get_dynamic_global_properties', [])
   if (!dyn.ok || !dyn.data) {
     state.lastError = `dynamic-props: ${dyn.error ?? 'no-data'}`
     return false
   }
-  const vests = vestsForSp(DELEGATE_SP_FLOOR, parseInt(dyn.data.total_vesting_fund_shares, 10), parseInt(dyn.data.total_vesting_shares, 10))
+  const vests = vestsFromProps(dyn.data)
   const vestsStr = `${(vests / 1e6).toFixed(6)} VESTS`
   const delegateOps: [string, unknown][] = [['delegate_vesting_shares', { delegator: vault.creator, delegatee: name, vesting_shares: vestsStr, extensions: [] }]]
   const delegateTx = buildTxBytes(header, [serializeOperation(OP_DELEGATE_VESTING_SHARES, { delegator: vault.creator, delegatee: name, vestingSharesRaw: vests })])
@@ -226,6 +260,47 @@ async function createAndFund(
   state.delegated++
   deps.log(`fleet-growth: ${name} קיבל ${vestsStr} (${DELEGATE_SP_FLOOR} SP רצפת-RC) — בלוק ${delegateRes.blockNum}`)
   return true
+}
+
+/** חישוב-הקצאה: יחס-חי-כשה-fund-זמין; ברירת-מחדל-מדודה-כשהצומת מסתיר-את-ה-fund (נמדד-2026-10-24). */
+function vestsFromProps(d: DynProps): number {
+  const fund = parseVestsRaw(d.total_vesting_fund_shares)
+  const shares = parseVestsRaw(d.total_vesting_shares)
+  if (fund !== null && shares !== null) return vestsForSp(DELEGATE_SP_FLOOR, fund, shares)
+  return DELEGATE_VESTS_FALLBACK_RAW
+}
+
+/** backfill: חיילים-קיימים-בלי-הקצאה → delegate-אבסולוטי (אידמפוטנטי-בשרשרת — ההקצאה-היא-ערך-מוחלט). */
+export async function backfillDelegations(
+  deps: Pick<GrowthDeps, 'buildHeader' | 'call' | 'broadcast' | 'log'>,
+  state: FleetGrowthState,
+  creator: string,
+  activeWif: string,
+): Promise<void> {
+  const pending = state.soldiers.filter((s) => s.delegatedVestsRaw === null)
+  if (pending.length === 0) return
+  const header = await deps.buildHeader()
+  if ('error' in header) {
+    state.lastError = `header: ${header.error}`
+    return
+  }
+  const dyn = await deps.call<DynProps>('condenser_api.get_dynamic_global_properties', [])
+  const vests = dyn.ok && dyn.data ? vestsFromProps(dyn.data) : DELEGATE_VESTS_FALLBACK_RAW
+  const vestsStr = `${(vests / 1e6).toFixed(6)} VESTS`
+  for (const s of pending) {
+    const delegateOps: [string, unknown][] = [['delegate_vesting_shares', { delegator: creator, delegatee: s.name, vesting_shares: vestsStr, extensions: [] }]]
+    const tx = buildTxBytes(header, [serializeOperation(OP_DELEGATE_VESTING_SHARES, { delegator: creator, delegatee: s.name, vestingSharesRaw: vests })])
+    const signed = signTxBytes(tx, activeWif)
+    const res = await deps.broadcast(signed, header, delegateOps)
+    if (!res.ok) {
+      state.lastError = `backfill-delegate(${s.name}): ${res.error}`
+      deps.log(`fleet-growth: backfill-נדחה ל-${s.name} — ${res.error.slice(0, 140)}`)
+      return
+    }
+    s.delegatedVestsRaw = vests
+    state.delegated++
+    deps.log(`fleet-growth: backfill — ${s.name} קיבל ${vestsStr} (בלוק ${res.blockNum})`)
+  }
 }
 
 /** פעימת-צמיחה: עד-maxNew חיילים-חדשים (מדיניות-נשק-מדוד, לא-מקלעת). */
@@ -245,6 +320,15 @@ export async function executeGrowthPulse(deps: GrowthDeps, state: FleetGrowthSta
       return
     }
     state.lastError = null
+    // ── שלב-0: חיילים-ידועים-בכספת-שאינם-במצב-החי (הפעלה-מחדש) → נרשמים-לbackfill ──
+    for (const acct of vault.accounts) {
+      if (acct === vault.creator || !/^saos-\d+$/.test(acct)) continue
+      if (!state.soldiers.some((s) => s.name === acct)) {
+        state.soldiers.push({ name: acct, createdAt: 'pre-boot (מהכספת)', trxId: null, delegatedVestsRaw: null })
+        deps.log(`fleet-growth: ${acct} זוהה-מהכספת — נכנס-לתור-הקצאה`)
+      }
+    }
+    await backfillDelegations(deps, state, vault.creator, vault.creatorActiveWif)
     let created = 0
     let delegated = 0
     for (let i = 0; i < maxNew; i++) {
