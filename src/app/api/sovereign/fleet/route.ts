@@ -44,8 +44,10 @@ export async function GET() {
 
   const gridData = (grid.data ?? {}) as Record<string, unknown>
   const harvest = (gridData.harvest ?? {}) as Record<string, unknown>
-  const fleetGrowth = (growth.data ?? {}) as Record<string, unknown>
-  const hiveState = (hive.data ?? {}) as Record<string, unknown>
+  const growthWrap = (growth.data ?? {}) as Record<string, unknown>
+  const fleetGrowth = (growthWrap.fleetGrowth ?? {}) as Record<string, unknown>
+  const hiveWrap = (hive.data ?? {}) as Record<string, unknown>
+  const hiveState = (hiveWrap.hive ?? {}) as Record<string, unknown>
   const walletData = (wallet.data ?? {}) as Record<string, unknown>
   const architectData = (architect.data ?? {}) as Record<string, unknown>
   const dexData = (dex.data ?? {}) as Record<string, unknown>

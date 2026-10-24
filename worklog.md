@@ -2876,3 +2876,23 @@ Stage Summary:
 - The pubkey-checksum bug — found by measurement, fixed at the root, regression-locked.
 - Honest open items: RC 7.14× short for free claims (SP growth via curation closes it over time); fee path waits for liquid ≥ 6.000 STEEM outside resting orders; HIVE custody waits for a valid key; export-canonical oscillation persists (pre-existing).
 - Artifacts: steem-tx.ts (3 new ops + authority + generateWif + chainId param + checksum fix), fleet-growth.ts (+12 tests), hive-tx.ts (+7 tests), index.ts wiring (/fleet-growth, /hive/state, /api/sovereign/fleet), giant aed78e6, Domain f473251.
+
+---
+Task ID: 137-b
+Agent: Z.ai Code (orchestrator)
+Task: Task-137 תיקון-השורש-החי — צמיחת-הצי-הפכה-לאמת-על-השרשרת (saos-0001 + saos-0002 נולדו).
+
+Work Log:
+- הרצת-מחזור-צמיחה-חי → claim נדחה (RC 7.14× חסר — מדיד) → נתיב-העמלה-חסם-כנה (נזיל 1.444 < רצפת 6.000).
+- חקירת-"Missing Active Authority": ניסויים-מבדילים (העברה-עצמית, verify_authority, get_required_signatures, וריאנטי-בייט-שחזור) → גילוי-שהגריד-משדר-active-דרך-dhive (הזמנות-מוגבלות-נחתו-ב-19:46) — הנתיב-שלנו-היה-הבעיה.
+- שורש-1 (בקוד-מקור-dhive, node_modules): גרפן-דורש-חתימה-קנונית-מלאה — ביט-גבוה של r ושל s אפס + קידוד-מינימלי. noble מנרמל-רק-s (~6% קנוני-אקראי). תיקון: isGrapheneCanonical + retry-entropy (דפוס-dhive).
+- שורש-2 (ווקטור-מכריע-חדש, 2-צמתים): ל-transfer אין op-extensions — עוגן-האב-של-Task-136 עבר-בריקנות (3-אפסים-זהים: memo+op-ext+tx-ext ≡ memo+tx-ext+sigs). הבייט-העודף-שיבש-את-כל-ה-digests-של-transfer. תיקון + הווקטור-החדש-כבדיקה.
+- שורש-3: JSON-הסמכויות-בשידור-נשלח-camelCase (accountAuths) — fc::json-מנתח-סמכות-ריקה. תיקון: authorityJson (snake_case, snake_case-בדיקה).
+- שורש-4: total_vesting_fund_shares=null-בצמתים-המודרניים (nai-אובייקטים) → parseVestsRaw (נכס/nai/גלם) + ברירת-מחדל-מדודה (2e9-raw ≈ 1.026-SP) + backfillDelegations-אידמפוטנטי (ההקצאה-אבסולוטית-בשרשרת).
+- חי: העברה-עצמית-נחתה-דרך-הנתיב-שלנו (בלוק 110725285) → מחזור-צמיחה: saos-0001 נולד (trx 8f6f7e2f…, 20:52:06) → backfill הקצה-לו → saos-0002 נולד-והוקצה (trx dbb466d7…, 20:56:54). שרשרת-מאמתת: 2,000 VESTS received לשניהם, 8 מפתחות-בכספת, GRID_ACCOUNTS=headcorner,saos-0001,saos-0002.
+- /api/sovereign/fleet תוקן (מיפוי-עטיפות) → מציג 3 חיילים, צמיחה-חיה, שער-HIVE-כנה.
+
+Stage Summary:
+- הצי-כבר-לא-חשבון-אחד: headcorner + saos-0001 + saos-0002 — נולדו-מההון-העצמי (2×3.000-STEEM עמלות), מפתחותיהם-בכספת, לכל-אחד רצפת-RC. המנוע-ממשיך-כל-30-דק' — כשהכלכלה-מאפשרת, חייל-נוסף-נולד-אוטומטית.
+- ארבעה-שורשים-תוקנים-בשורש-עם-בדיקות-מנעלות (66-בדיקות-בגריד; 207-סה"כ-ב-6-איברים / 0-כשלים; lint-0).
+- שיעור-מתועד: וקטור-בודד-עם-זנב-אמביגואי-לא-מוכח-סמנטיקה — חובה-וקטור-מבדיל-לכל-פעולה.
