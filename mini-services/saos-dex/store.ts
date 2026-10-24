@@ -8,6 +8,7 @@
 // store.test.ts מכסה-עתה את-כל-השכבה הזאת על :memory:, כולל בדיקת-הרגרסיה של-ה-INSERT.
 import { Database } from 'bun:sqlite'
 import type { Balances, DexStore, Order, WalletRec } from './engine'
+import type { Pool } from './amm'
 
 export const DDL = `
 CREATE TABLE IF NOT EXISTS wallets(
@@ -24,6 +25,14 @@ CREATE TABLE IF NOT EXISTS fills(
   side TEXT NOT NULL, priceMu INTEGER NOT NULL, amountMu INTEGER NOT NULL,
   buyer TEXT NOT NULL, seller TEXT NOT NULL, createdAt TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS pools(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, base TEXT NOT NULL, quote TEXT NOT NULL,
+  reserveBaseMu INTEGER NOT NULL, reserveQuoteMu INTEGER NOT NULL,
+  feeBps INTEGER NOT NULL, lpSharesMu INTEGER NOT NULL, walletName TEXT NOT NULL,
+  createdAt TEXT NOT NULL, UNIQUE(base, quote));
+CREATE TABLE IF NOT EXISTS lp_positions(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, poolId INTEGER NOT NULL, holder TEXT NOT NULL,
+  sharesMu INTEGER NOT NULL, updatedAt TEXT NOT NULL, UNIQUE(poolId, holder));
 `
 
 export function ensureSchema(db: Database): void {
@@ -54,6 +63,13 @@ export function walletRow(db: Database, name: string): WalletRec | null {
 
 export function saveWalletRow(db: Database, w: WalletRec): void {
   db.query('UPDATE wallets SET credits=?, balances=?, locked=? WHERE name=?').run(w.credits, JSON.stringify(w.balances), JSON.stringify(w.locked), w.name)
+}
+
+// ארנק-חדש-בטוח: INSERT OR IGNORE — שמירת-ארנק-שלא-נוצר-מעולם הייתה-שקטה-ומאודת
+// (הבדיקה-של-Task-134 תפסה: ארנק-בריכת-AMM חדש לא-היה-נוצר וכל-ההחלפה הייתה אובדת)
+export function ensureWalletRow(db: Database, name: string): boolean {
+  const info = db.query('INSERT OR IGNORE INTO wallets(name,credits,balances,locked) VALUES(?,0,?,?)').run(name, '{}', '{}')
+  return Number(info.changes) > 0
 }
 
 export function bookRows(db: Database, base: string, quote: string): { bids: Order[]; asks: Order[] } {
@@ -91,6 +107,43 @@ export function insertFillRow(
 }
 export function myOrdersRows(db: Database, issuer: string): Order[] {
   return db.query('SELECT * FROM orders WHERE issuer=? ORDER BY id DESC LIMIT 200').all(issuer) as Order[]
+}
+
+// ── שכבת-ה-AMM (Task-134): שורות-בריכות-ומניות-LP ─────────────────────────────
+export function insertPoolRow(db: Database, p: Pool & { walletName: string }): number {
+  const info = db
+    .query('INSERT INTO pools(base,quote,reserveBaseMu,reserveQuoteMu,feeBps,lpSharesMu,walletName,createdAt) VALUES(?,?,?,?,?,?,?,?)')
+    .run(p.base, p.quote, p.reserveBaseMu, p.reserveQuoteMu, p.feeBps, p.lpSharesMu, p.walletName, new Date().toISOString())
+  return Number(info.lastInsertRowid)
+}
+export function updatePoolRow(db: Database, p: Pool): void {
+  if (p.id === undefined) throw new Error('updatePoolRow: pool.id חסר')
+  db.query('UPDATE pools SET reserveBaseMu=?, reserveQuoteMu=?, lpSharesMu=? WHERE id=?').run(
+    p.reserveBaseMu, p.reserveQuoteMu, p.lpSharesMu, p.id,
+  )
+}
+export function poolRow(db: Database, id: number): Pool | null {
+  const r = db.query('SELECT * FROM pools WHERE id=?').get(id) as
+    | { id: number; base: string; quote: string; reserveBaseMu: number; reserveQuoteMu: number; feeBps: number; lpSharesMu: number; walletName: string }
+    | null
+  return r ? { ...r } : null
+}
+export function poolByPairRow(db: Database, base: string, quote: string): Pool | null {
+  const r = db.query('SELECT * FROM pools WHERE base=? AND quote=?').get(base, quote) as
+    | { id: number; base: string; quote: string; reserveBaseMu: number; reserveQuoteMu: number; feeBps: number; lpSharesMu: number; walletName: string }
+    | null
+  return r ? { ...r } : null
+}
+export function allPoolRows(db: Database): Pool[] {
+  return db
+    .query('SELECT * FROM pools ORDER BY id')
+    .all() as Pool[]
+}
+export function upsertLpPositionRow(db: Database, poolId: number, holder: string, deltaSharesMu: number): void {
+  db.query(
+    `INSERT INTO lp_positions(poolId,holder,sharesMu,updatedAt) VALUES(?,?,?,?)
+     ON CONFLICT(poolId,holder) DO UPDATE SET sharesMu=sharesMu+excluded.sharesMu, updatedAt=excluded.updatedAt`,
+  ).run(poolId, holder, deltaSharesMu, new Date().toISOString())
 }
 
 // ה-DexStore המלא מעל מופע-db נתון — זהו-החיבור-בין-הליבה-הטהורה לבין-ה-sqlite.

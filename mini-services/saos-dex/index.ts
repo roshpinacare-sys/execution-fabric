@@ -16,6 +16,11 @@
 //  POST /saos-dex/api/dex/transfer       → { from, to, asset, amount | amountMu }
 //  POST /saos-dex/api/dex/fuel           → { to, amount }
 //  POST /saos-dex/api/dex/wrap           → { action:'mint', asset, amount } — לארנת-האופרטור
+//  Task-134 (§3/§7.1 — מנוע-ההחלפות-הפנימי):
+//  GET  /saos-dex/api/dex/amm/state      → { ok, pools:[{id,base,quote,reserves,priceMu,feeBps,lpShares}] }
+//  GET  /saos-dex/api/dex/amm/quote      → { ok, outMu, feeMu, priceAfterMu } ?base&quote&direction&amountInMu
+//  POST /saos-dex/api/dex/amm-seed       → { base, quote, reserveBaseMu, reserveQuoteMu } — הזרמת-נזילות מארנק-האופרטור
+//  POST /saos-dex/api/dex/amm-swap       → { trader, base, quote, direction, amountInMu, minOutMu } — החלפה-מיידית
 //  GET  /saos-dex | /health              → חיות-כנה
 // אימות-POST: x-saos-operator מול upload/dex-operator.env (נקרא-בזמן-ריצה; אפס-חשיפה).
 // אריתמטיקה: µ-שלמים בלבד בכל-נתיבי-הכסף (mu = 1e-6); אפס-צפים-בפנקס.
@@ -25,16 +30,24 @@ import { Database } from 'bun:sqlite'
 import { join, resolve } from 'path'
 import { existsSync, readFileSync, mkdirSync } from 'fs'
 import { free, finalizeTaker, matchOrderCore, type Order, type WalletRec } from './engine'
+import { applySwap, quoteSwap, seedPool, type Pool } from './amm'
 import {
+  allPoolRows,
   bookRows,
   createSqliteStore,
   ensureSchema,
+  ensureWalletRow,
   getMeta,
+  insertFillRow,
+  insertPoolRow,
   myOrdersRows,
   placeOrderRow,
+  poolByPairRow,
   seedWallets as seedWalletRows,
   saveWalletRow,
   setMeta,
+  updatePoolRow,
+  upsertLpPositionRow,
   walletRow,
 } from './store'
 
@@ -196,6 +209,39 @@ async function handle(req: Request): Promise<Response> {
     return new Response(JSON.stringify({ ok: true, issuer, orders }), { headers: cors })
   }
 
+  // ── Task-134: AMM — מסילות-הקריאה (הצגת-מחיר טהורה — מסילת-ה-arb) ─────────────
+  if (p === '/saos-dex/api/dex/amm/state' && req.method === 'GET') {
+    const pools = allPoolRows(db).map((pl) => {
+      // צמיחת-המכפלה מאז-הזריעה — חשבון-BigInt (בריכות-ענק: rb·rq חורג-מ-2^53)
+      const k0 = BigInt(getMeta(db, `amm:seedk:${pl.id}`) ?? '0')
+      const k1 = BigInt(pl.reserveBaseMu) * BigInt(pl.reserveQuoteMu)
+      const kGrowthBps = k0 > 0n ? Number((k1 * 10_000n) / k0) - 10_000 : 0
+      return {
+        id: pl.id, base: pl.base, quote: pl.quote,
+        reserveBaseMu: pl.reserveBaseMu, reserveQuoteMu: pl.reserveQuoteMu,
+        priceMu: pl.reserveBaseMu > 0 ? Math.floor((pl.reserveQuoteMu * 1_000_000) / pl.reserveBaseMu) : null,
+        feeBps: pl.feeBps, lpSharesMu: pl.lpSharesMu, walletName: pl.walletName,
+        kGrowthBps,
+      }
+    })
+    return new Response(JSON.stringify({ ok: true, pools, at: new Date().toISOString() }), { headers: cors })
+  }
+  if (p === '/saos-dex/api/dex/amm/quote' && req.method === 'GET') {
+    const base = url.searchParams.get('base') ?? ''; const quote = url.searchParams.get('quote') ?? ''
+    const direction = url.searchParams.get('direction') ?? ''
+    const amountInMu = Math.round(Number(url.searchParams.get('amountInMu') ?? 0))
+    const pool = poolByPairRow(db, base, quote)
+    if (!pool) return new Response(JSON.stringify({ ok: false, error: 'pool-not-found', hint: 'POST amm-seed first' }), { status: 404, headers: cors })
+    if (direction !== 'baseToQuote' && direction !== 'quoteToBase')
+      return new Response(JSON.stringify({ ok: false, error: 'bad-direction' }), { status: 400, headers: cors })
+    try {
+      const q = quoteSwap(pool, direction, amountInMu)
+      return new Response(JSON.stringify({ ok: true, base, quote, direction, amountInMu, ...q }), { headers: cors })
+    } catch (e) {
+      return new Response(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }), { status: 400, headers: cors })
+    }
+  }
+
   if (req.method === 'POST' && p.startsWith('/saos-dex/api/dex/')) {
     const tok = operatorToken()
     const got = req.headers.get('x-saos-operator') ?? ''
@@ -290,6 +336,76 @@ async function handle(req: Request): Promise<Response> {
       wt.balances[asset] = (wt.balances[asset] ?? 0) + amt
       saveWallet(wt)
       return new Response(JSON.stringify({ ok: true, action, asset, amountMu: amt, to, height: bump() }), { headers: cors })
+    }
+
+    if (op === 'amm-seed') {
+      // §3: הזרמת-נזילות — האופרטור מזרים מהארנק-שלו-עצמו לבריכה (שימור-גלובלי-מלא)
+      const base = String(body.base ?? ''); const quote = String(body.quote ?? '')
+      const rb = Math.round(Number(body.reserveBaseMu ?? 0)); const rq = Math.round(Number(body.reserveQuoteMu ?? 0))
+      const opw = wallet('operator')
+      if (!opw) return new Response(JSON.stringify({ ok: false, error: 'operator-wallet-missing' }), { status: 400, headers: cors })
+      if (free(opw, base) < rb || free(opw, quote) < rq)
+        return new Response(JSON.stringify({ ok: false, error: 'insufficient-free-funds' }), { status: 400, headers: cors })
+      if (poolByPairRow(db, base, quote))
+        return new Response(JSON.stringify({ ok: false, error: 'pool-exists' }), { status: 409, headers: cors })
+      let pool: Pool
+      try {
+        pool = seedPool(base, quote, rb, rq, 30)
+      } catch (e) {
+        return new Response(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }), { status: 400, headers: cors })
+      }
+      const walletName = `AMM:${base}/${quote}`
+      ensureWalletRow(db, walletName)
+      const pw = wallet(walletName)!
+      pw.balances[base] = (pw.balances[base] ?? 0) + rb
+      pw.balances[quote] = (pw.balances[quote] ?? 0) + rq
+      saveWallet(pw)
+      opw.balances[base] = (opw.balances[base] ?? 0) - rb
+      opw.balances[quote] = (opw.balances[quote] ?? 0) - rq
+      saveWallet(opw)
+      const id = insertPoolRow(db, { ...pool, walletName })
+      setMeta(db, `amm:seedk:${id}`, (BigInt(rb) * BigInt(rq)).toString()) // אנקור-הצמיחה (k0) — חתום-ב-meta
+      upsertLpPositionRow(db, id, 'operator', pool.lpSharesMu)
+      log(`AMM: בריכה-נזרעה ${base}/${quote} — ${rb}µ/${rq}µ, מניות-זרע ${pool.lpSharesMu}`)
+      return new Response(JSON.stringify({ ok: true, poolId: id, base, quote, reserveBaseMu: rb, reserveQuoteMu: rq, lpSharesMu: pool.lpSharesMu, height: bump() }), { headers: cors })
+    }
+
+    if (op === 'amm-swap') {
+      // §7.1: החלפה-מיידית-פנימית — אפס-RPC-חיצוני, אפס-גז; fail-closed על minOut
+      const trader = String(body.trader ?? '')
+      const base = String(body.base ?? ''); const quote = String(body.quote ?? '')
+      const direction = String(body.direction ?? '')
+      const amountInMu = Math.round(Number(body.amountInMu ?? 0))
+      const minOutMu = Math.round(Number(body.minOutMu ?? 0))
+      const pool = poolByPairRow(db, base, quote)
+      if (!pool) return new Response(JSON.stringify({ ok: false, error: 'pool-not-found' }), { status: 404, headers: cors })
+      if (direction !== 'baseToQuote' && direction !== 'quoteToBase')
+        return new Response(JSON.stringify({ ok: false, error: 'bad-direction' }), { status: 400, headers: cors })
+      const w = wallet(trader)
+      if (!w) return new Response(JSON.stringify({ ok: false, error: 'unknown-trader' }), { status: 400, headers: cors })
+      if (existsSync(HALT_PATH)) return new Response(JSON.stringify({ ok: false, error: 'halted' }), { status: 423, headers: cors })
+      const inAsset = direction === 'baseToQuote' ? base : quote
+      const outAsset = direction === 'baseToQuote' ? quote : base
+      if (free(w, inAsset) < amountInMu)
+        return new Response(JSON.stringify({ ok: false, error: 'insufficient-free-funds' }), { status: 400, headers: cors })
+      let r: ReturnType<typeof applySwap>
+      try {
+        r = applySwap(pool, direction, amountInMu, minOutMu)
+      } catch (e) {
+        return new Response(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }), { status: 400, headers: cors })
+      }
+      // העברת-כספים: סוחר ← in, בריכה → out; עמלה+מחיק נשארים-בעתודות (A1)
+      w.balances[inAsset] = (w.balances[inAsset] ?? 0) - amountInMu
+      w.balances[outAsset] = (w.balances[outAsset] ?? 0) + r.outMu
+      saveWallet(w)
+      const pw = wallet(pool.walletName)
+      if (!pw) return new Response(JSON.stringify({ ok: false, error: 'pool-wallet-missing' }), { status: 500, headers: cors })
+      pw.balances[inAsset] = (pw.balances[inAsset] ?? 0) + amountInMu
+      pw.balances[outAsset] = (pw.balances[outAsset] ?? 0) - r.outMu
+      saveWallet(pw)
+      updatePoolRow(db, r.pool)
+      insertFillRow(db, { base, quote, side: `amm-${direction}`, priceMu: amountInMu > 0 ? Math.floor((r.outMu * 1_000_000) / amountInMu) : 0, amountMu: r.outMu, buyer: trader, seller: pool.walletName })
+      return new Response(JSON.stringify({ ok: true, trader, base, quote, direction, amountInMu, outMu: r.outMu, feeMu: r.feeMu, priceAfterMu: r.priceAfterMu, height: bump() }), { headers: cors })
     }
 
     return new Response(JSON.stringify({ ok: false, error: 'unknown-dex-op' }), { status: 404, headers: cors })
