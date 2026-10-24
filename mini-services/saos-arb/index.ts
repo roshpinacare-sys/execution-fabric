@@ -21,6 +21,7 @@
 import { readFileSync, existsSync, appendFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { gateMarkets, gateSummary, type MarketRow } from './markets'
+import { ammRailDecision } from './amm-rail'
 import { organAuth } from '../organ-auth'
 
 const PORT = Number(process.env.SAOS_ARB_PORT ?? 3071)
@@ -65,12 +66,16 @@ const SPECS: HandSpec[] = [
   { hand: 'mm-wsbd', base: 'WSBD', quote: 'USDS', mode: 'mm', levels: 2, seedUsdsMu: 100_000, seedBaseMu: 0, baseCapMu: 120_000, bidQtyMu: 4_000 },
   { hand: 'depth-phive', base: 'PHIVE', quote: 'USDS', mode: 'depth', levels: 1, seedUsdsMu: 40_000, seedBaseMu: 0, baseCapMu: 200_000, bidQtyMu: 6_000 },
   { hand: 'depth-energy', base: 'ENERGY', quote: 'USDS', mode: 'depth', levels: 1, seedUsdsMu: 40_000, seedBaseMu: 0, baseCapMu: 100_000, bidQtyMu: 4_000 },
+  // Task-135 §2/§7.1 — יד-ה-AMM-המהירה: סוחרת-בבריכה-הפנימית-מול-הספר (ממומנת-עד-הזרע; mode-peg = לא-מסולמת-במייקר)
+  { hand: 'amm-loop', base: 'WSTEEM', quote: 'USDS', mode: 'peg', levels: 0, seedUsdsMu: 80_000, seedBaseMu: 0, baseCapMu: 0, bidQtyMu: 0 },
 ]
 const HANDS = SPECS.map((s) => s.hand)
 type Hand = string
 const specOf = (h: Hand): HandSpec => SPECS.find((s) => s.hand === h)!
 
 // זרע-ידוע (מתועד) — בסיס-ה-MTM-הכנה; מימון-אוטומטי-מהאוצר-עד-הזרע-בלבד
+// Task-135: תיקון-bug-חי — SEED[HAND_PEG].wsteemMu היה undefined (השדה הוא baseMu)
+// → wGap=NaN → עטיפת-ה-WSTEEM-1:1 היתה-מנוטרלת-בשקט. עתה השדה-האמיתי.
 const SEED: Record<string, { usdsMu: number; baseMu: number }> = Object.fromEntries(
   SPECS.map((s) => [s.hand, { usdsMu: s.seedUsdsMu, baseMu: s.seedBaseMu }]),
 )
@@ -103,6 +108,7 @@ interface RunCard {
     realSteemSbd: number | null // מהשוק-האמיתי :3070 (SBD-ל-STEEM)
     impliedSteemUsd: number | null // realSteemSbd × SBD≈USD (צליבה-מתויגת)
     parityMu: number | null // steemUsd × 1000 → מחיר-ספר (µ-USDS-ל-יחידה)
+    ammRail?: { priceMu: number | null; bookMidMu: number | null; edgeBps: number | null; lastDecision: string } | null
     sources: string[]
   }
   book: { internalMidMu: number | null; bestBid: number | null; bestAsk: number | null; premiumBps: number | null }
@@ -292,7 +298,7 @@ async function ensureFunded(st: DexState | null, card: RunCard): Promise<void> {
   const op = st?.wallets?.find((x) => x.name === 'operator')
   const opSteem = op?.balances?.STEEM ?? 0
   const peg = walletOf(st, HAND_PEG)
-  const wGap = SEED[HAND_PEG].wsteemMu - peg.wsteemMu
+  const wGap = SEED[HAND_PEG].baseMu - peg.wsteemMu // Task-135: היה .wsteemMu (undefined→NaN)
   if (wGap > 1000 && opSteem > wGap + 1000) {
     const mint = await dexPost('wrap', { action: 'mint', asset: 'WSTEEM', amount: wGap })
     card.actions.push({ hand: HAND_PEG, what: 'wrap-mint-1:1', detail: `${wGap}µ STEEM→WSTEEM (גיבוי-נעול) → ${mint.ok ? 'queued' : `נדחה: ${mint.error}`}`, ok: mint.ok })
@@ -434,6 +440,100 @@ async function handMaker(card: RunCard, spec: HandSpec, st: DexState | null, ord
   if (placed === 0 && !capReached) card.actions.push({ hand: h, what: 'rest', detail: `bids=${bids} asks=${asks} — הסולם-כבר-מצוטט`, ok: true })
 }
 
+// ── לולאת-ה-AMM-המהירה (Task-135 §2 — נפח-גבוה רציף) ────────────────────────────────────
+// קצב-מהיר (ברירת-מחדל 4ש׳) על-הבריכה-הפנימית מול-הספר: מדידת-פער → הכרעת-קלי
+// → החלפה-אמיתית (מאחורי-ארון-הסיכונים-של-הדקס + מינום-guard) → יומן-כנה.
+const AMM_LOOP_MS = Number(process.env.SAOS_AMM_LOOP_MS ?? 4_000)
+const AMM_MIN_EDGE_BPS = Number(process.env.SAOS_AMM_MIN_EDGE_BPS ?? 80)
+const AMM_MAX_NOTIONAL_MU = Number(process.env.SAOS_AMM_MAX_NOTIONAL_MU ?? 20_000)
+const AMM_JOURNAL = join(STATE_DIR, 'amm-loop.jsonl')
+const ammState = {
+  cycles: 0,
+  swaps: 0,
+  volumeBaseMu: 0,
+  volumeQuoteMu: 0,
+  lastDecisionAt: null as string | null,
+  lastDecision: null as Record<string, unknown> | null,
+  lastSwapAt: null as string | null,
+  lastSwap: null as Record<string, unknown> | null,
+  lastError: null as string | null,
+}
+interface AmmPoolState { id: number | string; base: string; quote: string; priceMu: number | null; risk?: { halted?: string | null; windowUsedMu?: number } }
+
+function ammJournal(rec: Record<string, unknown>): void {
+  try {
+    appendFileSync(AMM_JOURNAL, JSON.stringify(rec) + '\n')
+  } catch { /* כנות: כשל-יומן לא מפיל את הלולאה */ }
+}
+
+async function ammLoop(): Promise<void> {
+  if (halted) return
+  ammState.cycles++
+  try {
+    const [st, amm] = await Promise.all([
+      jget<DexState>(`${DEX}/state`),
+      jget<{ ok?: boolean; pools?: AmmPoolState[] }>(`${DEX}/amm/state`),
+    ])
+    const pool = amm?.pools?.find((p) => p.base === 'WSTEEM' && p.quote === 'USDS') ?? null
+    if (!pool || pool.priceMu === null) {
+      ammState.lastDecision = { action: 'hold', reason: 'pool-not-found' }
+      ammState.lastDecisionAt = new Date().toISOString()
+      return
+    }
+    if (pool.risk?.halted) {
+      ammState.lastDecision = { action: 'hold', reason: `pool-risk-halt: ${pool.risk.halted}` }
+      ammState.lastDecisionAt = new Date().toISOString()
+      return
+    }
+    const w = walletOf(st, 'amm-loop')
+    const bookMid = marketOf(st, 'WSTEEM', 'USDS')?.fair ?? null
+    const decision = ammRailDecision({
+      bookMidMu: bookMid,
+      ammPriceMu: pool.priceMu,
+      feeBps: 30,
+      minEdgeBps: AMM_MIN_EDGE_BPS,
+      freeQuoteMu: w.usdsMu,
+      freeBaseMu: w.wsteemMu,
+      kellyWinProb: 0.55,
+      kellyRatio: 1.2,
+      kellyCapFrac: 0.1,
+      maxNotionalMu: AMM_MAX_NOTIONAL_MU,
+    })
+    ammState.lastDecision = decision as unknown as Record<string, unknown>
+    ammState.lastDecisionAt = new Date().toISOString()
+    if (decision.action !== 'swap') return
+    // הגנת-מינום: quote-חי-לציפייה → minOut = 99.9% (fail-closed על-החלקה)
+    const q = await jget<{ ok?: boolean; outMu?: number }>(
+      `${DEX}/amm/quote?base=WSTEEM&quote=USDS&direction=${decision.direction}&amountInMu=${decision.amountInMu}`,
+    )
+    if (!q?.ok || !q.outMu) {
+      ammState.lastDecision = { ...decision, blocked: 'quote-failed' }
+      return
+    }
+    const minOutMu = Math.floor(q.outMu * 0.999)
+    const r = await dexPost('amm-swap', {
+      trader: 'amm-loop', base: 'WSTEEM', quote: 'USDS',
+      direction: decision.direction, amountInMu: decision.amountInMu, minOutMu,
+    })
+    if (!r.ok) {
+      ammState.lastError = r.error ?? 'amm-swap-refused'
+      ammJournal({ at: new Date().toISOString(), decision, minOutMu, refused: r.error ?? 'unknown' })
+      return
+    }
+    ammState.swaps++
+    ammState.lastError = null
+    const outMu = Number((r.data as { outMu?: number })?.outMu ?? 0)
+    ammState.volumeBaseMu += decision.direction === 'quoteToBase' ? outMu : decision.amountInMu
+    ammState.volumeQuoteMu += decision.direction === 'quoteToBase' ? decision.amountInMu : outMu
+    ammState.lastSwap = { at: new Date().toISOString(), direction: decision.direction, amountInMu: decision.amountInMu, outMu, minOutMu, edgeBps: decision.edgeBps }
+    ammState.lastSwapAt = ammState.lastSwap.at
+    ammJournal({ at: ammState.lastSwap.at, ...ammState.lastSwap })
+    log(`AMM-loop: הושלמה-החלפה #${ammState.swaps} — ${decision.direction} ${decision.amountInMu}µ → ${outMu}µ (edge ${decision.edgeBps}bps)`)
+  } catch (e) {
+    ammState.lastError = e instanceof Error ? e.message : String(e)
+  }
+}
+
 // ── מחזור ────────────────────────────────────────────────────────────────────
 function appendCard(card: RunCard): void {
   lastCard = card
@@ -513,12 +613,22 @@ async function cycle(): Promise<void> {
   const realSteemSbd = g.grid?.price ?? null
   const impliedSteemUsd = realSteemSbd ? realSteemSbd * 1 : null // SBD≈USD — צליבה-מתויגת
   const parity = steemUsd ? Math.round(steemUsd * 1000) : null
+  // Task-135 §7.1 — מסילת-ה-quote-AMM על-הכרטיס (פער-ספר-מול-בריכה גלוי)
+  let ammRail: { priceMu: number | null; bookMidMu: number | null; edgeBps: number | null; lastDecision: string } | null = null
+  try {
+    const amm = await jget<{ pools?: AmmPoolState[] }>(`${DEX}/amm/state`)
+    const pool = amm?.pools?.find((p) => p.base === 'WSTEEM' && p.quote === 'USDS') ?? null
+    const bookMid = marketOf(st, 'WSTEEM', 'USDS')?.fair ?? null
+    const edge = pool?.priceMu != null ? (bookMid !== null ? Math.round(((bookMid - pool.priceMu) / pool.priceMu) * 10_000) : null) : null
+    ammRail = { priceMu: pool?.priceMu ?? null, bookMidMu: bookMid, edgeBps: edge, lastDecision: JSON.stringify(ammState.lastDecision?.action ?? 'none') }
+  } catch { /* כנות: המסילה-חסרה על-הכרטיס הזה */ }
   const card: RunCard = {
     at: lastCycleAt!,
     cycle: cycles,
     truth: {
       steemUsd, feedOk, feedStale, realSteemSbd, impliedSteemUsd, parityMu: parity,
-      sources: ['dex/price-proof:external.steemUsd (coingecko+coinpaprika+binance — מדיד)', 'saos-grid:realPrice (שוק-הפנים-האמת, SBD-ל-STEEM)', 'צליבת-SBD≈USD (הנחה-מתויגת)'],
+      ammRail,
+      sources: ['dex/price-proof:external.steemUsd (coingecko+coinpaprika+binance — מדיד)', 'saos-grid:realPrice (שוק-הפנים-האמת, SBD-ל-STEEM)', 'dex/amm/state (מחיר-הבריכה-הפנימית — מדיד)', 'צליבת-SBD≈USD (הנחה-מתויגת)'],
     },
     book: { internalMidMu: null, bestBid: null, bestAsk: null, premiumBps: null },
     actions: [], fills: [], hands: {}, mtmPnlMu: 0,
@@ -583,6 +693,14 @@ function healthJson(): Record<string, unknown> {
     consecErrors, lastError,
     hands: HANDS,
     minEdgeBps: MIN_EDGE_BPS,
+    ammRail: {
+      loopMs: AMM_LOOP_MS, minEdgeBps: AMM_MIN_EDGE_BPS, maxNotionalMu: AMM_MAX_NOTIONAL_MU,
+      cycles: ammState.cycles, swaps: ammState.swaps,
+      volumeBaseMu: ammState.volumeBaseMu, volumeQuoteMu: ammState.volumeQuoteMu,
+      lastDecisionAt: ammState.lastDecisionAt, lastDecision: ammState.lastDecision,
+      lastSwapAt: ammState.lastSwapAt, lastSwap: ammState.lastSwap,
+      lastError: ammState.lastError,
+    },
     honesty: 'הספר-סימולציה-מוצהרת; run-cards-מאומתים; אין-מפתחות; אין-המצאת-מספרים',
   }
 }
@@ -645,6 +763,8 @@ Bun.serve({
   },
 })
 
-log(`איבר-השוק-החריף חי על :${PORT} — גריד+ארב על הדקס-הריבוני (${DEX}); מחזור ${CYCLE_MS / 1000}ש'; הפרמיה-מעל-פאריטי-אמת = הרווח-הנמדד; run-cards ב-${CARDS_PATH}`)
+log(`איבר-השוק-החריף חי על :${PORT} — גריד+ארב על הדקס-הריבוני (${DEX}); מחזור ${CYCLE_MS / 1000}ש'; לולאת-AMM ${AMM_LOOP_MS}ms (קלי+ארון-סיכונים); run-cards ב-${CARDS_PATH}`)
 void cycle()
 setInterval(() => void cycle(), CYCLE_MS)
+void ammLoop()
+setInterval(() => void ammLoop(), AMM_LOOP_MS)
