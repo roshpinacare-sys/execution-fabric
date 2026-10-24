@@ -63,6 +63,7 @@ const DEX_URL = 'http://127.0.0.1:3010/saos-dex/api/dex/state' // Task 106 — �
 const ARB_URL = 'http://127.0.0.1:3071/health' // Task 106 — איבר-השוק-החריף (גריד+ארב על הדקס)
 const COUNCIL_URL = 'http://127.0.0.1:3072/health' // Task 107 — מועצת-השולחן (AutoHedge+agency-agents מותאם)
 const VAULT_GUARDIAN_URL = 'http://127.0.0.1:3080/health' // T-111 — שומר-הכספת (ריבונות-מפתחות: census + שחזור-אוטומטי-מהגיט)
+const WALLET_URL = 'http://127.0.0.1:3085/health' // Task-134 — HSM-החתימה (Saosmartwallet-זמן-ריצה: כספת-AES-256-GCM + חתימה-אטומה)
 
 interface WatchState {
   up: boolean
@@ -95,7 +96,7 @@ interface Event {
   msg: string
 }
 
-const watches: Record<'app' | 'heartbeat' | 'witness' | 'metrics' | 'grid' | 'dex' | 'arb' | 'council' | 'vault-guardian', WatchState> = {
+const watches: Record<'app' | 'heartbeat' | 'witness' | 'metrics' | 'grid' | 'dex' | 'arb' | 'council' | 'vault-guardian' | 'wallet', WatchState> = {
   app: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null },
   heartbeat: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null },
   witness: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null },
@@ -105,6 +106,7 @@ const watches: Record<'app' | 'heartbeat' | 'witness' | 'metrics' | 'grid' | 'de
   arb: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null }, // Task 106
   council: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null }, // Task 107
   'vault-guardian': { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null }, // T-111
+  wallet: { up: false, fails: 0, restarts: 0, lastCheckAt: null, lastResult: null, lastRestartAt: null }, // Task-134 — HSM
 }
 
 const mirror: MirrorState = {
@@ -134,7 +136,7 @@ function loadState(): void {
       events?: Event[]
     }
     if (typeof s.ticks === 'number') ticks = s.ticks
-    for (const key of ['app', 'heartbeat', 'witness', 'metrics', 'grid', 'dex', 'arb'] as const) {
+    for (const key of ['app', 'heartbeat', 'witness', 'metrics', 'grid', 'dex', 'arb', 'council', 'vault-guardian', 'wallet'] as const) {
       const p = s.watches?.[key]
       if (p) Object.assign(watches[key], p, { up: false, fails: 0 }) // רעננות-חיים-מתחילה-מאפס; הראיות-נשמרות
     }
@@ -318,6 +320,7 @@ async function watchService(
     : name === 'arb' ? 'saos-arb' // Task 106 — איבר-השוק-החריף
     : name === 'council' ? 'saos-council' // Task 107 — מועצת-השולחן
     : name === 'vault-guardian' ? 'vault-guardian' // T-111 — שומר-הכספת
+    : name === 'wallet' ? 'saos-wallet' // Task-134 — HSM-החתימה (Saosmartwallet-זמן-ריצה)
     : 'chain-witness'
   const dir = path.isAbsolute(dirName) ? dirName : path.join(PROJECT_ROOT, 'mini-services', dirName)
   try {
@@ -510,6 +513,7 @@ async function check(): Promise<void> {
     watchService('arb', ARB_URL), // Task 106 — השוק-החריף נשמר-כמו-כולם
     watchService('council', COUNCIL_URL), // Task 107 — המועצה נשמרת-כמו-כולם
     watchService('vault-guardian', VAULT_GUARDIAN_URL), // T-111 — שומר-הכספת נשמר-כמו-כולם
+    watchService('wallet', WALLET_URL), // Task-134 — HSM-החתימה נשמר-כמו-כולם
   ])
 }
 

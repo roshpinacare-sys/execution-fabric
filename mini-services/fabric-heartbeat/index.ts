@@ -33,7 +33,7 @@
 // דיסציפלינה: אף סוד לא נוגע/נדפס כאן (ה-credential-helper קורא את קובץ-הסמכות
 // בזמן-ריצה); אין-force-push; כשל-סריקת-דליפות = אין-push (כנות); כל-כשל נרשם-וממשיך.
 
-import { existsSync, readFileSync, writeFileSync, statSync, renameSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, statSync, renameSync, appendFileSync } from 'node:fs'
 import path from 'node:path'
 import { Database } from 'bun:sqlite'
 import { fetchWithRecycleRetry, isRssNearCeiling } from './app-fetch'
@@ -204,6 +204,10 @@ interface State {
   lastKeeperGuardResult: string | null
   lastRemoteGateAt: string | null
   lastRemoteGateResult: string | null
+  issueAudits: number
+  issuesFiled: number
+  lastIssueAuditAt: string | null
+  lastIssueAuditResult: string | null
   dbFileReplaced: number
   lastReconnectResult: string | null
   restorePulses: number
@@ -328,6 +332,10 @@ const state: State = {
   lastKeeperGuardResult: null,
   lastRemoteGateAt: null,
   lastRemoteGateResult: null,
+  issueAudits: 0,
+  issuesFiled: 0,
+  lastIssueAuditAt: null,
+  lastIssueAuditResult: null,
   dbFileReplaced: 0,
   lastReconnectResult: null,
   restorePulses: 0,
@@ -1008,6 +1016,169 @@ async function keeperGuard(): Promise<void> {
     state.lastKeeperGuardResult = `down (${keeperGuardFails}/${KEEPER_GUARD_FAILS_TO_RESTART})`
   }
   keeperGuardBusy = false
+}
+
+// ===== עורק-טו (Task-134, §9): מבקר-ה-Issues-העצמי — עובד-ה-issue→PR-הילידי =====
+// אישור-הבעלים (24/10) העביר-סמכות-API-מלאה (טוקן-מאוחסן-מחוץ-לעץ). הלב מבקר
+// פערים-מדודים-אמיתיים ופותח-GitHub-Issue-עם-קריטריוני-TDD-קשיחים — התור-שה-רשת-
+// (evolution) אוכלת. אפס-ספאם: דדופ-מקומי (jsonl) + תקרת-3-לפעימה + זריעה-חתומה-פעם-אחת.
+const ISSUE_AUDIT_MS = 6 * 60 * 60_000
+const ISSUE_AUDIT_FIRST_MS = 3 * 60_000
+const ISSUE_FILED_LOG = path.join(PROJECT_DIR, 'upload', 'issue-audit.jsonl')
+const ISSUE_SEED_FLAG = path.join(PROJECT_DIR, 'upload', 'issue-audit-seeded.flag')
+
+function githubToken(): string | null {
+  try {
+    const p = process.env.GITHUB_TOKEN_PATH ?? '/home/z/.saos-secrets/github.token'
+    if (existsSync(p)) {
+      const t = readFileSync(p, 'utf8').trim()
+      if (t.length > 20) return t
+    }
+  } catch { /* כנות-בהמשך */ }
+  return process.env.GITHUB_TOKEN && process.env.GITHUB_TOKEN.length > 20 ? process.env.GITHUB_TOKEN : null
+}
+function githubRepo(): string {
+  try {
+    const url = git(['config', '--get', 'remote.origin.url']).out.trim()
+    const m = url.match(/github\.com[:/](.+?)(?:\.git)?$/)
+    if (m?.[1]) return m[1]
+  } catch { /* fallback */ }
+  return process.env.GITHUB_REPO ?? 'roshpinacare-sys/execution-fabric'
+}
+
+interface GapIssue {
+  title: string
+  body: string
+  label: string
+}
+function seedGapIssues(): GapIssue[] {
+  // זריעת-Task-134: שלושת-הפערים-המדודים-האמיתיים של-§7 (מנדט-הבעלים) — כל-אחד עם קריטריוני-TDD
+  return [
+    {
+      label: 'saos-arb',
+      title: 'feat(saos-arb): AMM quote rail — wire dex amm/quote into price-proof (§7.1)',
+      body: [
+        '## פער-מדוד (Task-134 audit)',
+        'saos-arb מקריא רק את ספר-הפקודות ו-feed חיצוני; מנוע-ה-AMM (נפרס: mini-services/saos-dex/amm.ts, GET /saos-dex/api/dex/amm/quote) לא נצרך על-ידי אף-מסילת-מחיר.',
+        '',
+        '## קריטריוני-TDD (חוק-קבלה — אף-PR בלעדיהם לא מתמזג)',
+        '1. בדיקות-יחידה: רייל-ה-quote מגיב fail-closed כש-amm/quote מחזיר pool-not-found/שגיאת-minOut (לא ממציא-מחיר).',
+        '2. אינווריאנט: ה-parity בין-מחיר-הספר למחיר-ה-AMM מדווח ב-bps (מדידה-גלויה, לא-החלטה-נסתרת).',
+        '3. אינטגרציה-חיה: cycle-ארב אחד עם quote-AMM ביומן (run-card) — הוכחה-חתומה.',
+        '4. אפס-TODO/stub — מימוש-מלא בלבד.',
+      ].join('\n'),
+    },
+    {
+      label: 'saos-desk',
+      title: 'feat(saos-desk): risk cabinet pre-trade gate for amm-swap + reserve-drift guard (§7.3)',
+      body: [
+        '## פער-מדוד (Task-134 audit)',
+        'POST /saos-dex/api/dex/amm-swap חי ללא-שער-סיכונים-מקדים: אין-תקרת-החלפה-לחלון, אין-גרדיאן-סטיית-עתודות (reserve-drift) — הבריכה חשופה לניקוז-בודד-גדול.',
+        '',
+        '## קריטריוני-TDD (חוק-קבלה)',
+        '1. בדיקת-יחידה: החלפה-החורגת-מתקרת-החלון (µ-שלמים) נדחית 429-כנה בלי-שינוי-מצב.',
+        '2. בדיקת-יחידה: סטיית-עתודות-מעבר-לסף-המוגדר (bps מאז-אנקור-הזריעה amm:seedk) עוצרת-החלפות (halt כנה + דגל-על-הלוח).',
+        '3. אינווריאנט: השער קודם-ל-debit — אפס-כסף-זז-לפני-אישור-סיכונים.',
+        '4. אפס-TODO/stub — מימוש-מלא בלבד.',
+      ].join('\n'),
+    },
+    {
+      label: 'saos-dex',
+      title: 'feat(saos-dex): HTLC atomic-swap bridge verifier (§7.2 — zero-external-RPC bridging)',
+      body: [
+        '## פער-מדוד (Task-134 audit)',
+        'מנוע-ה-AMM חי (בריכות/החלפות/עמלה-30bps/שימור-כספים מוכחים-בדיקות+חי), אך-גשר-הנכסים-הפנימי-בין-כספות-ה-Saosmartwallet-לבריכות אינו-קיים: אין-מאמת-HTLC (hashlock+timeout) טהור-ודטרמיניסטי.',
+        '',
+        '## קריטריוני-TDD (חוק-קבלה)',
+        '1. בדיקות-יחידה: מאמת-HTLC טהור (µ-שלמים) — redeem עם-preimage-נכון-לפני-timeout ✓; redeem-שגוי ✗; refund-אחרי-timeout ✓; refund-לפני-timeout ✗.',
+        '2. אינווריאנט: sha256(preimage) חייב-להתאים ל-hashlock — ורק-נתיב-אחד (redeem/refund) נסגר-לכל-פעולה (אין-הוצאה-כפולה).',
+        '3. אינטגרציה: חיבור-מאומת לכספת-ה-HSM (saos-wallet /sign, חתימת-ה-commitment) — קבלה-ב-audit.jsonl.',
+        '4. אפס-RPC-חיצוני, אפס-TODO/stub — מימוש-מלא.',
+      ].join('\n'),
+    },
+  ]
+}
+
+function alreadyFiled(title: string): boolean {
+  try {
+    if (!existsSync(ISSUE_FILED_LOG)) return false
+    const log = readFileSync(ISSUE_FILED_LOG, 'utf8')
+    return log.includes(title)
+  } catch {
+    return false
+  }
+}
+function markFiled(title: string, issueNumber: number): void {
+  try {
+    appendFileSync(ISSUE_FILED_LOG, JSON.stringify({ at: new Date().toISOString(), title, issueNumber }) + '\n')
+  } catch { /* כנות: כשל-רישום לא מפיל את העורק */ }
+}
+
+async function fileIssue(issue: GapIssue): Promise<number | null> {
+  const tok = githubToken()
+  if (!tok) return null
+  const res = await fetch(`https://api.github.com/repos/${githubRepo()}/issues`, {
+    method: 'POST',
+    headers: { authorization: `token ${tok}`, 'content-type': 'application/json', accept: 'application/vnd.github+json' },
+    body: JSON.stringify({ title: issue.title, body: issue.body, labels: [issue.label, 'sovereign-audit', 'TDD-required'] }),
+    signal: AbortSignal.timeout(30_000),
+  })
+  if (res.status === 201) {
+    const d = (await res.json()) as { number: number }
+    return d.number
+  }
+  log(`עורק-ה-Issues: פתיחת-issue נדחתה HTTP ${res.status} (כנות)`)
+  return null
+}
+
+async function issueAuditPulse(): Promise<void> {
+  state.issueAudits++
+  state.lastIssueAuditAt = new Date().toISOString()
+  const tok = githubToken()
+  if (!tok) {
+    state.lastIssueAuditResult = 'skipped: אין-סמכות-API (טוקן-בעלים לא נמצא) — כנות'
+    return
+  }
+  let filed = 0
+  try {
+    // זריעה-חתומה-פעם-אחת: שלושת-הפערים-המדודים של-§7
+    if (!existsSync(ISSUE_SEED_FLAG)) {
+      for (const gi of seedGapIssues()) {
+        if (filed >= 3) break
+        if (alreadyFiled(gi.title)) continue
+        const n = await fileIssue(gi)
+        if (n !== null) {
+          markFiled(gi.title, n)
+          filed++
+          log(`עורק-ה-Issues: Issue #${n} נפתח — ${gi.title.slice(0, 70)}`)
+        }
+      }
+      if (filed > 0) writeFileSync(ISSUE_SEED_FLAG, new Date().toISOString())
+    }
+    // ביקורת-שוטפת: טענות-שקועות → issue (דדופ-מקומי; תקרה-3)
+    const res = await fetchApp(`${APP_URL}/api/claims?subject=claims-audit`, { signal: AbortSignal.timeout(60_000) })
+    const d = (await res.json().catch(() => null)) as { claims?: Array<{ id: string; status: string; evidence?: string }> } | null
+    const sunk = (d?.claims ?? []).filter((c) => c.status === 'down')
+    for (const c of sunk) {
+      if (filed >= 3) break
+      const title = `fix(claims): ${c.id} down — TDD recovery mandate`
+      if (alreadyFiled(title)) continue
+      const n = await fileIssue({
+        label: 'claims',
+        title,
+        body: `## פער-מדוד (ביקורת-הלב)\nהטענה \`${c.id}\` במצב **down**.\n\nעדות-חיה: ${c.evidence ?? '—'}\n\n## קריטריוני-TDD\n1. בדיקה-שמוכיחה-את-הכשל-המדוד (אדום).\n2. תיקון-מינימלי-שהופך-אותה-ירוקה.\n3. הוכחת-ביקורת-חיה שהטענה חוזרת-ל-active על-הלוח.\n4. אפס-TODO/stub.`,
+      })
+      if (n !== null) {
+        markFiled(title, n)
+        filed++
+      }
+    }
+    state.issuesFiled += filed
+    state.lastIssueAuditResult = filed > 0 ? `filed ${filed} issue(s) — תור-העבודה-הילידי ניזון` : 'audit ok — אף-פער-חדש שדורש-issue (כנות)'
+    if (filed > 0) log(`עורק-ה-Issues: ${state.lastIssueAuditResult}`)
+  } catch (e) {
+    state.lastIssueAuditResult = `failed: ${e instanceof Error ? e.message : String(e)}`
+  }
 }
 
 // ===== עורק-יד (מחזור-הרפואה-החיה): עד-שער-הבריאות-הרחוק — כנות-על-החוץ =====
@@ -1893,6 +2064,7 @@ async function sovereignDigest(): Promise<void> {
       ['arb', 3071, '/health'],
       ['council', 3072, '/health'],
       ['vault-guardian', 3080, '/health'],
+      ['wallet', 3085, '/health'], // Task-134 — HSM-החתימה (Saosmartwallet-זמן-ריצה)
     ]
     const organRows: string[] = []
     let up = 0
@@ -2034,6 +2206,8 @@ setInterval(() => void appGuard(), APP_GUARD_MS)
 setInterval(() => void keeperGuard(), KEEPER_GUARD_MS) // מחזור-הרפואה-החיה: עורק-יג
 setTimeout(() => void remoteGatePulse(), REMOTE_GATE_FIRST_MS) // עורק-יד: עד-השער-הרחוק
 setInterval(() => void remoteGatePulse(), REMOTE_GATE_PULSE_MS)
+setTimeout(() => void issueAuditPulse(), ISSUE_AUDIT_FIRST_MS) // עורק-טו (Task-134, §9): מבקר-ה-Issues-העצמי
+setInterval(() => void issueAuditPulse(), ISSUE_AUDIT_MS)
 
 void tick() // פעימה-ראשונה מיידית
 void appGuard() // בדיקת-בריאות ראשונה מיידית
