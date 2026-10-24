@@ -1,180 +1,218 @@
 // ═════════════════════════════════════════════════════════════════════════════
-// risk.test.ts — ארון-הסיכונים (saos-desk gate, הנחיית-בעלים §7.3/§2) — TDD
-// החוק: כל-מוטציית-כסף עוברת-את-השער-לפני-החיוב; דחייה = אפס-שינוי-מצב.
+// risk.test.ts — ארון-הסיכונים האדפטיבי (Task-136 §1 — דירקטיבת-הבעלים) — TDD
+// החוק-הישן: כל-מוטציית-כסף עוברת-את-השער לפני-החיוב; דחייה = אפס-שינוי-מצב.
+// החוק-החדש (Task-136): אין-עצירות-מלאכותיות — השער אדפטיבי:
+//   • תקרה-בודדת = אחוז-מעומק-הבריכה (צומחת-אוטומטית עם-הנזילות, לא מספר-קבוע)
+//   • חלון = דלי-טוקנים מתמלא-רציף (HF לעולם לא נחנק על-ידי קיר-דקה)
+//   • סטייה = עיגון-עצמי-חתום (עיגון-עוקב-מחיר-אמת), halt רק-על-אירוע-שלמות
 // ═════════════════════════════════════════════════════════════════════════════
 import { describe, expect, test } from 'bun:test'
 import {
   DEFAULT_RISK,
+  INTEGRITY_CEILING_BPS,
+  depthSingleCapMu,
   driftBps,
   kellyFraction,
   kellySizeMu,
   preTradeGate,
+  windowRefill,
   type GateInput,
   type RiskConfig,
   type RiskWindow,
 } from './risk'
 
-const CFG: RiskConfig = { windowCapMu: 250_000, windowMs: 60_000, maxSingleSwapMu: 100_000, maxDriftBps: 500 }
-
-function freshWindow(startMs = 1_000_000): RiskWindow {
-  return { startMs, usedMu: 0 }
+const CFG: RiskConfig = {
+  windowCapMu: 250_000,
+  windowMs: 60_000,
+  singleCapPpm: 100_000, // 10% מעומק-צד-הכניסה
+  maxDriftBps: 1_500,
+  integrityCeilingBps: INTEGRITY_CEILING_BPS,
 }
 
-describe('kellyFraction — מינוף-קלי דטרמיניסטי', () => {
+function freshBucket(lastMs = 1_000_000, availMu = CFG.windowCapMu): RiskWindow {
+  return { lastMs, availMu }
+}
+
+// ── קלי (נשמר-מ-Tash-135: החוזה לא-השתנה) ────────────────────────────────────
+describe('kellyFraction/kellySizeMu — מינוף-קלי דטרמיניסטי', () => {
   test('f*=(p(b+1)-1)/b — המתמטיקה המדויקת', () => {
-    expect(kellyFraction(0.4, 2)).toBeCloseTo(0.1) // (0.4*3-1)/2
-    expect(kellyFraction(0.6, 1)).toBeCloseTo(0.2) // (0.6*2-1)/1
-    expect(kellyFraction(0.5, 1)).toBe(0) // אפס-קצה: אין-יתרון → אפס
+    expect(kellyFraction(0.4, 2)).toBeCloseTo(0.1)
+    expect(kellyFraction(0.6, 1)).toBeCloseTo(0.2)
+    expect(kellyFraction(0.5, 1)).toBe(0)
   })
-  test('תקרה (cap) נאכפת — השוק-אינו-קזינו', () => {
-    expect(kellyFraction(0.9, 5, 0.25)).toBe(0.25) // f* גולמי=1.06 → מוגבל-ל-0.25
-    expect(kellyFraction(0.6, 2, 0.15)).toBe(0.15) // f* גולמי=0.4 → מוגבל-ל-0.15
+  test('תקרה (cap) נאכפת', () => {
+    expect(kellyFraction(0.9, 5, 0.25)).toBe(0.25)
   })
-  test('קלט-פסול → 0 (fail-closed, לא-זריקה)', () => {
-    expect(kellyFraction(-0.1, 2)).toBe(0)
-    expect(kellyFraction(1.1, 2)).toBe(0)
+  test('קלט-פסול → 0 (השולחן-לא-זורק, הוא-מצווה-אפס)', () => {
     expect(kellyFraction(NaN, 2)).toBe(0)
-    expect(kellyFraction(0.5, 0)).toBe(0)
     expect(kellyFraction(0.5, -1)).toBe(0)
-    expect(kellyFraction(0.5, Infinity)).toBe(0)
+    expect(kellyFraction(1.5, 2)).toBe(0)
+    expect(kellySizeMu(0.5, 1, 0)).toBe(0)
+    expect(kellySizeMu(0.5, 1, -100)).toBe(0)
+  })
+  test('kellySizeMu — רצפה-לטובת-השולחן', () => {
+    expect(kellySizeMu(0.6, 1, 1_000_000, 0.25)).toBe(200_000)
+    expect(kellySizeMu(0.6, 1, 999_999, 0.25)).toBe(199_999) // floor
   })
 })
 
-describe('kellySizeMu — גודל-פוזיציה ב-µ שלמים', () => {
-  test('רצפה-תמיד-לטובת-השולחן: אף-פעם לא מעגלים-מעלה', () => {
-    expect(kellySizeMu(0.4, 2, 1_000)).toBe(100) // 1000×0.1
-    expect(kellySizeMu(0.4, 2, 999)).toBe(99) // 99.9 → 99 (floor)
-    expect(kellySizeMu(0.6, 1, 333)).toBe(66) // f(0.6,b=1)=0.2 → 66.6 → 66
+describe('driftBps — מדידת-סטייה', () => {
+  test('שני-הכיוונים |ערך|', () => {
+    expect(driftBps(1_100, 1_000)).toBe(1_000)
+    expect(driftBps(900, 1_000)).toBe(1_000)
   })
-  test('קלט-פסול/יתרה-ריקה → 0', () => {
-    expect(kellySizeMu(0.4, 2, 0)).toBe(0)
-    expect(kellySizeMu(0.4, 2, -5)).toBe(0)
-    expect(kellySizeMu(NaN, 2, 1_000)).toBe(0)
-    expect(kellySizeMu(0.4, 2, NaN)).toBe(0)
-  })
-  test('הגודל לעולם אינו חורג מהיתרה-הפנויה', () => {
-    const s = kellySizeMu(0.9, 5, 10_000, 0.25)
-    expect(s).toBeLessThanOrEqual(10_000)
-    expect(s).toBe(2_500) // cap 0.25 → 2500
+  test('קלט-לא-מדיד → null', () => {
+    expect(driftBps(0, 1_000)).toBeNull()
+    expect(driftBps(1_000, NaN)).toBeNull()
   })
 })
 
-describe('preTradeGate — השער לפני-החיוב (fail-closed)', () => {
-  const base = (over: Partial<GateInput> = {}): GateInput => ({
-    amountInMu: 10_000,
-    driftBps: null,
-    halted: false,
-    nowMs: 1_000_500,
-    ...over,
+// ── Task-136: תקרה-בודדת אדפטיבית לעומק ─────────────────────────────────────
+describe('depthSingleCapMu — תקרה-צומחת-עם-הנזילות (לא-מספר-קבוע)', () => {
+  test('10% מעומק-צד-הכניסה — רצפה-לטובת-הבריכה', () => {
+    expect(depthSingleCapMu(15_613, 100_000)).toBe(1_561) // הבריכה-החיה של-Task-135
+    expect(depthSingleCapMu(1_000_000, 100_000)).toBe(100_000)
+    expect(depthSingleCapMu(999_999, 100_000)).toBe(99_999) // floor
   })
+  test('התקרה-צומחת-אוטומטית כשהבריכה-מעמיקה — זהו-הלב-של-האדפטיביות', () => {
+    const thin = depthSingleCapMu(15_000, 100_000)
+    const deep = depthSingleCapMu(150_000, 100_000)
+    expect(thin).toBe(1_500)
+    expect(deep).toBe(15_000) // ×10 בדיוק — התקרה רודפת את העומק
+  })
+  test('קלט-פסול → 0 (אפס-זריקה; השער פשוט לא מאשר)', () => {
+    expect(depthSingleCapMu(0, 100_000)).toBe(0)
+    expect(depthSingleCapMu(-5, 100_000)).toBe(0)
+    expect(depthSingleCapMu(1_000, NaN)).toBe(0)
+    expect(depthSingleCapMu(1_000, 0)).toBe(0)
+  })
+  test('ברירת-מחדל: אין-מעבר-למחצה-מהעתודה גם ב-ppm גבוה (גג-שלמות)', () => {
+    // גם אם ppm מוגדר 500k (50%), הפונקציה חוסמת מעל 250k (25%) — ניקוז-בהחלט-אחד-אסור
+    expect(depthSingleCapMu(1_000, 500_000)).toBe(250)
+  })
+})
 
-  test('halt → 423 ואפס-שינוי-חלון', () => {
-    const win = freshWindow()
-    const v = preTradeGate(base({ halted: true }), CFG, win)
+// ── Task-136: דלי-טוקנים — מילוי-רציף, HF לעולם לא נחנק ────────────────────
+describe('windowRefill — דלי-טוקנים מתמלא-רציף', () => {
+  test('מילוי-ליניארי: חצי-חלון → חצי-קיבולת', () => {
+    const w = windowRefill({ lastMs: 0, availMu: 0 }, CFG, 30_000)
+    expect(w.availMu).toBe(125_000)
+    expect(w.lastMs).toBe(30_000)
+  })
+  test('מוגבל-לקיבולת — אין-צבירה-על-הגג', () => {
+    const w = windowRefill({ lastMs: 0, availMu: 200_000 }, CFG, 60_000)
+    expect(w.availMu).toBe(250_000)
+  })
+  test('זמן-נסוג (now<last) → אפס-מילוי, לא-חיובי', () => {
+    const w = windowRefill({ lastMs: 10_000, availMu: 5 }, CFG, 5_000)
+    expect(w.availMu).toBe(5)
+    expect(w.lastMs).toBe(10_000)
+  })
+  test('קצב-קבוע: 250kµ/60s = 4,166µ/s — ספירת-עצימות-מדויקת', () => {
+    const w = windowRefill({ lastMs: 0, availMu: 0 }, CFG, 1_000)
+    expect(w.availMu).toBe(4_166) // floor(250000*1000/60000)
+  })
+})
+
+// ── השער-המקדים האדפטיבי ─────────────────────────────────────────────────────
+describe('preTradeGate v2 — סדר-חומרה: halt → קלט → תקרת-עומק → סטייה → דלי', () => {
+  test('halt → 423, אפס-צריכה (דגל-שלמות נשאר)', () => {
+    const v = preTradeGate({ amountInMu: 100, driftBps: null, reserveInMu: 1_000_000, halted: true, nowMs: 1_000 }, CFG, freshBucket())
     expect(v.allow).toBe(false)
-    if (!v.allow) {
-      expect(v.httpStatus).toBe(423)
-      expect(v.reason).toBe('halted')
-      expect(v.window).toBe(win) // אותו-אובייקט — לא נגענו
-    }
+    if (!v.allow) expect(v.httpStatus).toBe(423)
   })
-
-  test('סכום-פסול (0/שלילי/שבר/NaN) → 400', () => {
-    for (const amountInMu of [0, -1, 1.5, NaN, Infinity]) {
-      const v = preTradeGate(base({ amountInMu }), CFG, freshWindow())
+  test('קלט-פסול → 400 אפס-צריכה', () => {
+    for (const bad of [0, -1, 1.5, NaN, Infinity]) {
+      const v = preTradeGate({ amountInMu: bad as number, driftBps: null, reserveInMu: 1_000_000, halted: false, nowMs: 1_000 }, CFG, freshBucket())
       expect(v.allow).toBe(false)
       if (!v.allow) expect(v.httpStatus).toBe(400)
     }
   })
-
-  test('תקרת-החלפה-בודדת → 429', () => {
-    const v = preTradeGate(base({ amountInMu: 100_001 }), CFG, freshWindow())
-    expect(v.allow).toBe(false)
-    if (!v.allow) expect(v.reason).toBe('single-swap-cap')
-  })
-
-  test('סטיית-עתודות-מעבר-לסף → 423; סטייה-בתוך-הסף עוברת; null (אין-מדידה) עובר', () => {
-    const over = preTradeGate(base({ driftBps: 501 }), CFG, freshWindow())
-    expect(over.allow).toBe(false)
-    if (!over.allow) expect(over.httpStatus).toBe(423)
-    const under = preTradeGate(base({ driftBps: 500 }), CFG, freshWindow())
-    expect(under.allow).toBe(true)
-    const unmeasured = preTradeGate(base({ driftBps: null }), CFG, freshWindow())
-    expect(unmeasured.allow).toBe(true)
-  })
-
-  test('תקרת-החלון: חריגה → 429 window-cap בלי-שינוי-מצב', () => {
-    const win: RiskWindow = { startMs: 1_000_000, usedMu: 200_000 }
-    const v = preTradeGate(base({ amountInMu: 50_001 }), CFG, win)
+  test('תקרת-עומק: 10% מהעתודה — מעל-זה נדחה 429 עם-המדידה-בתשובה', () => {
+    const v = preTradeGate({ amountInMu: 1_562, driftBps: null, reserveInMu: 15_613, halted: false, nowMs: 1_000 }, CFG, freshBucket())
     expect(v.allow).toBe(false)
     if (!v.allow) {
-      expect(v.reason).toBe('window-cap')
       expect(v.httpStatus).toBe(429)
-      expect(v.window.usedMu).toBe(200_000) // לא נגענו
+      expect(v.reason).toContain('depth-cap')
+      expect(v.reason).toContain('1561')
     }
   })
-
-  test('היתר: חלון-מתמלא במדויק (usedMu += amount) — שלושה-צעדים-עד-התקרה', () => {
-    const win = freshWindow()
-    const v1 = preTradeGate(base({ amountInMu: 100_000 }), CFG, win)
-    expect(v1.allow).toBe(true)
-    if (!v1.allow) throw new Error('v1 חייב-לעבור')
-    expect(v1.window.usedMu).toBe(100_000)
-    const v2 = preTradeGate(base({ amountInMu: 100_000 }), CFG, v1.window)
-    expect(v2.allow).toBe(true)
-    if (!v2.allow) throw new Error('v2 חייב-לעבור')
-    expect(v2.window.usedMu).toBe(200_000)
-    const v3 = preTradeGate(base({ amountInMu: 50_000 }), CFG, v2.window)
-    expect(v3.allow).toBe(true)
-    if (!v3.allow) throw new Error('v3 חייב-לעבור')
-    expect(v3.window.usedMu).toBe(250_000) // בדיוק-התקרה — עדיין-עובר
+  test('תקרת-עומק אקטואלית על הבריכה-החיה: 1,561µ עובר', () => {
+    const v = preTradeGate({ amountInMu: 1_561, driftBps: null, reserveInMu: 15_613, halted: false, nowMs: 1_000 }, CFG, freshBucket())
+    expect(v.allow).toBe(true)
   })
-
-  test('רוטציית-חלון: חלוף-windowMs מאפס את-התקרה', () => {
-    const win: RiskWindow = { startMs: 1_000_000, usedMu: 250_000 }
-    const v = preTradeGate(base({ amountInMu: 10_000, nowMs: 1_000_000 + CFG.windowMs }), CFG, win)
+  test('סטייה-רכה (≤maxDrift) → allow, reAnchor=false', () => {
+    const v = preTradeGate({ amountInMu: 100, driftBps: 1_499, reserveInMu: 1_000_000, halted: false, nowMs: 1_000 }, CFG, freshBucket())
+    expect(v.allow).toBe(true)
+    if (v.allow) expect(v.reAnchor).toBe(false)
+  })
+  test('סטייה-בינונית (maxDrift<drift≤integrity) → allow + reAnchor=true — עיגון-עצמי, אין-עצירה', () => {
+    // ההנחיה: השוק ממשיך-לסחור; העוגן-עוקב-אחרי-מחיר-האמת-והריפוי-חתום-על-השרשרת
+    const v = preTradeGate({ amountInMu: 100, driftBps: 3_000, reserveInMu: 1_000_000, halted: false, nowMs: 1_000 }, CFG, freshBucket())
     expect(v.allow).toBe(true)
     if (v.allow) {
-      expect(v.window.usedMu).toBe(10_000)
-      expect(v.window.startMs).toBe(1_000_000 + CFG.windowMs)
+      expect(v.reAnchor).toBe(true)
+      expect(v.driftBps).toBe(3_000)
     }
   })
-
-  test('אינווריאנט-השער-קודם-לחיוב: דחיות-חוזרות לא משנות-שום-דבר', () => {
-    const win = freshWindow()
-    for (let i = 0; i < 5; i++) {
-      const v = preTradeGate(base({ amountInMu: CFG.windowCapMu + 1 }), CFG, win)
-      expect(v.allow).toBe(false)
+  test('סטיית-שלמות (>integrityCeiling) → 423 — זהו-ניקוז, לא-גילוי-מחיר', () => {
+    const v = preTradeGate({ amountInMu: 100, driftBps: INTEGRITY_CEILING_BPS + 1, reserveInMu: 1_000_000, halted: false, nowMs: 1_000 }, CFG, freshBucket())
+    expect(v.allow).toBe(false)
+    if (!v.allow) {
+      expect(v.httpStatus).toBe(423)
+      expect(v.reason).toContain('integrity-drift')
     }
-    expect(win.usedMu).toBe(0)
-    expect(win.startMs).toBe(1_000_000)
+  })
+  test('drift null (אין-מדידה) → allow, reAnchor=false (העוגן-ייקבע-בחיבור)', () => {
+    const v = preTradeGate({ amountInMu: 100, driftBps: null, reserveInMu: 1_000_000, halted: false, nowMs: 1_000 }, CFG, freshBucket())
+    expect(v.allow).toBe(true)
+    if (v.allow) expect(v.reAnchor).toBe(false)
+  })
+  test('דלי: צריכה מדויקת + דחיית-רוקן בלי-צריכה', () => {
+    const v1 = preTradeGate({ amountInMu: 100, driftBps: null, reserveInMu: 1_000_000, halted: false, nowMs: 1_000 }, CFG, freshBucket(1_000, 150))
+    expect(v1.allow).toBe(true)
+    if (v1.allow) expect(v1.window.availMu).toBe(50)
+    const v2 = preTradeGate({ amountInMu: 51, driftBps: null, reserveInMu: 1_000_000, halted: false, nowMs: 1_000 }, CFG, freshBucket(1_000, 50))
+    expect(v2.allow).toBe(false)
+    if (!v2.allow) expect(v2.httpStatus).toBe(429)
+    if (!v2.allow) expect(v2.window.availMu).toBe(50) // אפס-צריכה בדחייה
+  })
+  test('HF לעולם לא נחנק: 20 החלפות-1kµ כל-250ms — כולן עוברות על דלי-ריק-בהתחלה', () => {
+    // קצב-מילוי: 4,166µ/s; צריכה: 4×1kµ/s → נשארים-חיים לנצח
+    let win = freshBucket(0, 0)
+    for (let i = 0; i < 20; i++) {
+      const now = (i + 1) * 250 // המדידה-הראשונה אחרי-250ms — לא על-ציר-האפס
+      win = windowRefill(win, CFG, now)
+      const v = preTradeGate({ amountInMu: 1_000, driftBps: null, reserveInMu: 1_000_000, halted: false, nowMs: now }, CFG, win)
+      expect(v.allow).toBe(true)
+      if (v.allow) win = v.window
+    }
+  })
+  test('פיצוץ-פתאומי נשאר-חסום: 300kµ בבת-אחת > קיבולת-הדלי → 429 (מניעת-ניקוז-נפחי)', () => {
+    const v = preTradeGate({ amountInMu: 300_000, driftBps: null, reserveInMu: 5_000_000, halted: false, nowMs: 1_000 }, CFG, freshBucket(1_000, 250_000))
+    expect(v.allow).toBe(false)
+    if (!v.allow) expect(v.httpStatus).toBe(429)
+  })
+  test('סדר-החומרה: halt קודם לקלט-פסול', () => {
+    const v = preTradeGate({ amountInMu: -1, driftBps: null, reserveInMu: 1_000_000, halted: true, nowMs: 1_000 }, CFG, freshBucket())
+    expect(v.allow).toBe(false)
+    if (!v.allow) expect(v.reason).toBe('halted')
+  })
+  test('דטרמיניזם — אותם-קלטים → אותו-פסק-דין', () => {
+    const a = preTradeGate({ amountInMu: 500, driftBps: 2_000, reserveInMu: 50_000, halted: false, nowMs: 7_777 }, CFG, freshBucket(1_000, 10_000))
+    const b = preTradeGate({ amountInMu: 500, driftBps: 2_000, reserveInMu: 50_000, halted: false, nowMs: 7_777 }, CFG, freshBucket(1_000, 10_000))
+    expect(a).toEqual(b)
   })
 })
 
-describe('driftBps — מדידת-סטיית-המחיר מעוגן-הזריעה', () => {
-  test('+20% מחיר → 2000bps', () => {
-    expect(driftBps(120_000, 100_000)).toBe(2_000)
+describe('DEFAULT_RISK — ברירות-המחדל-האדפטיביות', () => {
+  test('התצורה-החדשה: ppm עומק + עיגון-רך + תקרת-שלמות; אין-עוד maxSingleSwapMu קבוע', () => {
+    expect(DEFAULT_RISK.singleCapPpm).toBe(100_000) // 10%
+    expect(DEFAULT_RISK.maxDriftBps).toBe(1_500)
+    expect(DEFAULT_RISK.integrityCeilingBps).toBe(5_000)
+    expect((DEFAULT_RISK as unknown as Record<string, unknown>).maxSingleSwapMu).toBeUndefined()
   })
-  test('-10% מחיר → 1000bps (סטייה-בכיוון-השני נמדדת באותה-מידה)', () => {
-    expect(driftBps(90_000, 100_000)).toBe(1_000)
-  })
-  test('אותו-מחיר → 0', () => {
-    expect(driftBps(120_000, 120_000)).toBe(0)
-  })
-  test('אין-מדידה (0/שלילי/NaN) → null — הקורא מחליט-כנה', () => {
-    expect(driftBps(0, 100_000)).toBeNull()
-    expect(driftBps(100_000, 0)).toBeNull()
-    expect(driftBps(NaN, 100_000)).toBeNull()
-    expect(driftBps(100_000, Infinity)).toBeNull()
-  })
-})
-
-describe('DEFAULT_RISK — גדרות-ברירת-מחדל סניטיות', () => {
-  test('הגדרות-ברירת-המחדל קיימות והגיוניות (µ-שלמים, חלון-חיובי)', () => {
-    expect(DEFAULT_RISK.windowCapMu).toBeGreaterThan(0)
-    expect(DEFAULT_RISK.windowMs).toBeGreaterThanOrEqual(1_000)
-    expect(DEFAULT_RISK.maxSingleSwapMu).toBeGreaterThan(0)
-    expect(DEFAULT_RISK.maxSingleSwapMu).toBeLessThanOrEqual(DEFAULT_RISK.windowCapMu)
-    expect(DEFAULT_RISK.maxDriftBps).toBeGreaterThan(0)
+  test('INTEGRITY_CEILING_BPS = 5,000bps (50%) — אירוע-שלמות בלבד', () => {
+    expect(INTEGRITY_CEILING_BPS).toBe(5_000)
   })
 })
