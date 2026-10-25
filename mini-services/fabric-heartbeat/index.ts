@@ -201,6 +201,7 @@ interface State {
   lastAppRssMb: number | null
   lastAppGuardAt: string | null
   lastAppGuardResult: string | null
+  lastAppGuardDetail: string | null
   keeperRestarts: number
   lastKeeperGuardAt: string | null
   lastKeeperGuardResult: string | null
@@ -330,6 +331,7 @@ const state: State = {
   lastAppRssMb: null,
   lastAppGuardAt: null,
   lastAppGuardResult: null,
+  lastAppGuardDetail: null,
   keeperRestarts: 0,
   lastKeeperGuardAt: null,
   lastKeeperGuardResult: null,
@@ -946,7 +948,10 @@ async function appGuard(): Promise<void> {
         appGuardBusy = false
         return
       }
-      state.lastAppGuardResult = `ok — ${decision.reason}`
+      // Task-140: חוזה-המכונה נשמר — lastAppGuardResult === 'ok' במדויק (claims.ts:156 +
+      // sovereignty.ts:194 משווים-בדיוק); הסיבה-המלאה חיה בשדה-נפרד.
+      state.lastAppGuardResult = 'ok'
+      state.lastAppGuardDetail = decision.reason
       appGuardBusy = false
       return
     }

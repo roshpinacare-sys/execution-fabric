@@ -7,14 +7,10 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
-  // Task-140 (מדידה-חיה): ה-organs כותבים-קבצי-מצב-רצוף (db/, sovereign/, mini-services/,
-  // dev.log) — כל-כתיבה-הציפה-את-ה-watcher ותרמה-לצמיחת-RSS-רציפה (+2MB/שנ'). מקור-האמת
-  // של-הקומפילציה הוא src/ בלבד — מתעלמים-מכל-השאר-שנכתב-ברציפות.
-  turbopack: {
-    watchOptions: {
-      ignored: ["**/db/**", "**/sovereign/**", "**/mini-services/**", "**/dev.log", "**/tool-results/**", "**/fabric-backups/**"],
-    },
-  },
+  // Task-140: נמדד-ונדחה — הסכמה של Next 16 במכונה מכירה watchOptions רק ברמה-העליונה
+  // ורק עם pollIntervalMs (אין ignored לנתיבים). ניסיון turbopack.watchOptions.ignored
+  // נדחה ע"י השרת ("Unrecognized key(s)"). הסחרור מטופל בשורש: תקרה-מכוילת + חלון-שקט
+  // (mini-services/fabric-heartbeat/app-guard.ts) — לא-בקונפיג.
 };
 
 export default nextConfig;
