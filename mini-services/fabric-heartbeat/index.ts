@@ -859,11 +859,15 @@ function gitPulse(): void {
 let appGuardFails = 0
 let appGuardBusy = false
 
-// מחזור-הזיכרון-החי (Task 130-b): תקרת-RSS לשרת-ה-dev — ה-heap-cap מגביל רק את-ערימת-V8;
+// מחזור-הזיכרון-החי (Task 130-b → Task-140 כיול-למדידה): תקרת-RSS לשרת-ה-dev — ה-heap-cap מגביל רק את-ערימת-V8;
 // ה-RSS-האמיתי (מפות-מקור, טורבופק, מאגרים-חוץ-ערימתיים) צומח-ללא-תקרה והגרעין כבר הרג את-השרת
 // ב-2.1GB תוך-כ-35דק' גם-עם-התקרה. מעתה: הלב מודד-את-ה-RSS בעצמו (VmRSS מ-/proc) וממחזר
 // את-השרת מעל-התקרה — מיחזור-ממושמע של-שרת-dev במקום-הריגת-OOM עיוורת של-הגרעין.
-const APP_RSS_CEILING_MB = 1250
+// Task-140 (מדידה-חיה 2026-10-25): התקרה-הישנה 1250 ישבה-מתחת-לשיא-העבודה-האמיתי (נמדד 1306–1319MB)
+// — כל-חימום-חצה-אותה → 30-מחזורי-כפייה ב-53דק' (קפיצות-חימום +500MB ב-12שנ'). התקרה-החדשה 1500
+// = מעל-השיא-הנמדד, 600MB-מתחת-לקו-ההרג-ההיסטורי; טווח-תכנון 1400 → מיחזור-חלון-שקט בין-עבודות.
+const APP_RSS_CEILING_MB = 1500
+const APP_RSS_PRE_BAND_MB = 1400
 function appServerRssMb(): number | null {
   try {
     const pid = Bun.spawnSync(['bash', '-c', 'pgrep -f "next-server" | head -1'], {
@@ -915,14 +919,26 @@ async function appGuard(): Promise<void> {
     }
     if (res.ok && bodyOk) {
       appGuardFails = 0
-      // Task 130-b: מדידת-RSS חיה בכל-ביקורת — מיחזור-ממושמע מעל-התקרה (לפני-שהגרעין ייאלץ)
+      // Task 130-b → Task-140: מדידת-RSS חיה בכל-ביקורת — החלטת-מיחזור טהורה (app-guard.ts):
+      // כפייה מעל-התקרה; חלון-שקט מתוכנן בטווח-התכנון-כשהלב-בטל; המתנה-כנה-כשעסוק.
       const rss = appServerRssMb()
       state.lastAppRssMb = rss
-      if (rss !== null && rss > APP_RSS_CEILING_MB) {
-        state.appRssRecycles++
-        log(`שומר-האפליקציה: תקרת-RSS — ${rss}MB > ${APP_RSS_CEILING_MB}MB — מיחזור-ממושמע (#${state.appRssRecycles})`)
+      const decision = recycleDecision({
+        rssMb: rss,
+        ceilingMb: APP_RSS_CEILING_MB,
+        bandMb: APP_RSS_PRE_BAND_MB,
+        idle: !state.tickBusy,
+      })
+      if (decision.action === 'forced' || decision.action === 'planned') {
+        if (decision.action === 'forced') {
+          state.appRssRecycles++
+          log(`שומר-האפליקציה: מיחזור-כפייה (#${state.appRssRecycles}) — ${decision.reason}`)
+        } else {
+          state.appRssPlannedRecycles++
+          log(`שומר-האפליקציה: מיחזור-חלון-שקט-מתוכנן (#${state.appRssPlannedRecycles}) — ${decision.reason}`)
+        }
         try {
-          killAndRespawnApp(`תקרת-RSS (${rss}MB)`)
+          killAndRespawnApp(decision.reason)
         } catch (e) {
           state.lastAppGuardResult = `rss-recycle spawn failed: ${e instanceof Error ? e.message : String(e)}`
           log(`שומר-האפליקציה: כשל-מיחזור-RSS כן — ${state.lastAppGuardResult}`)
@@ -930,7 +946,7 @@ async function appGuard(): Promise<void> {
         appGuardBusy = false
         return
       }
-      state.lastAppGuardResult = 'ok'
+      state.lastAppGuardResult = `ok — ${decision.reason}`
       appGuardBusy = false
       return
     }
