@@ -44,6 +44,7 @@ interface DripState {
   lastError: string | null
 }
 const dripState: DripState = { cycles: 0, lastPulseAt: null, lastResult: null, transfersBroadcast: 0, lastError: null }
+let dripRunning = false // נעילת-בודד (Task-138): ידני+אוטומטי אף-פעם-לא-רצים-במקביל — אפס-טפטוף-כפול
 const DRIP_RESERVE_PCT = Number(process.env.SAOS_DRIP_RESERVE_PCT ?? 10)
 const DRIP_BUY_TARGET_MU = Number(process.env.SAOS_DRIP_BUY_TARGET_MU ?? 150) // 0.150 SBD
 const DRIP_SELL_TARGET_MU = Number(process.env.SAOS_DRIP_SELL_TARGET_MU ?? 600) // 0.600 STEEM
@@ -63,6 +64,19 @@ async function dripBalances(names: string[]): Promise<Record<string, { steemMu: 
 }
 
 async function executeDripPulse(): Promise<void> {
+  if (dripRunning) {
+    dripState.lastResult = { status: 'skipped — פעימה-קודמת-עוד-בריצה (נעילת-בודד)' }
+    return
+  }
+  dripRunning = true
+  try {
+    await executeDripPulseInner()
+  } finally {
+    dripRunning = false
+  }
+}
+
+async function executeDripPulseInner(): Promise<void> {
   dripState.cycles++
   dripState.lastPulseAt = new Date().toISOString()
   try {
