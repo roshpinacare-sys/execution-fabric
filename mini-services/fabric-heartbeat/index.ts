@@ -37,6 +37,7 @@ import { existsSync, readFileSync, writeFileSync, statSync, renameSync, appendFi
 import path from 'node:path'
 import { Database } from 'bun:sqlite'
 import { fetchWithRecycleRetry, isRssNearCeiling } from './app-fetch'
+import { recycleDecision } from './app-guard'
 
 const APP_URL = process.env.FABRIC_APP_URL ?? 'http://127.0.0.1:3000'
 
@@ -196,6 +197,7 @@ interface State {
   lastNarrationResult: string | null
   appRestarts: number
   appRssRecycles: number
+  appRssPlannedRecycles: number
   lastAppRssMb: number | null
   lastAppGuardAt: string | null
   lastAppGuardResult: string | null
@@ -324,6 +326,7 @@ const state: State = {
   lastNarrationResult: null,
   appRestarts: 0,
   appRssRecycles: 0,
+  appRssPlannedRecycles: 0,
   lastAppRssMb: null,
   lastAppGuardAt: null,
   lastAppGuardResult: null,
