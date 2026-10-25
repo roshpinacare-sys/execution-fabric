@@ -2896,3 +2896,25 @@ Stage Summary:
 - הצי-כבר-לא-חשבון-אחד: headcorner + saos-0001 + saos-0002 — נולדו-מההון-העצמי (2×3.000-STEEM עמלות), מפתחותיהם-בכספת, לכל-אחד רצפת-RC. המנוע-ממשיך-כל-30-דק' — כשהכלכלה-מאפשרת, חייל-נוסף-נולד-אוטומטית.
 - ארבעה-שורשים-תוקנים-בשורש-עם-בדיקות-מנעלות (66-בדיקות-בגריד; 207-סה"כ-ב-6-איברים / 0-כשלים; lint-0).
 - שיעור-מתועד: וקטור-בודד-עם-זנב-אמביגואי-לא-מוכח-סמנטיקה — חובה-וקטור-מבדיל-לכל-פעולה.
+
+---
+Task ID: 138
+Agent: Z.ai Code (orchestrator)
+Task: EMERGENCY SYSTEM DIRECTIVE (25/10) — §1 owner-endpoint hardening, §2 pipeline resumption, §3 audit reconciliation (multi-soldier trading), §4 architect verification, §5 zero-mock proof.
+
+Work Log:
+- MEASURED FIRST: full gate audit — app /api/* centrally guarded by src/proxy.ts (live: public XFF mutation → 401; with x-operator-key → 201); saos-dex/saos-grid/saos-council/vault-guardian organAuth-locked (live 401s); **saos-wallet HSM /sign WIDE OPEN** (anonymous POST returned a real ed25519 signature, 200) — the directive's §1 hole, found live.
+- §1 FIXED (TDD): organ-auth.ts refactored to pure verifyOrganToken (7 tests, constant-time, deny-by-default); wallet /sign gated (401 anon + audit.jsonl "unauthorized-sign: 401"; 200 with organ token); dex HTLC signing now carries the organ token (fail-closed without). upload/* chmod impossible (tmpfs enforces 0777 — documented, compensating controls noted).
+- §3 ROOT 1 (fuel, not keys): 4 hands loaded (fingerprint headcorner+saos-0001..3, mode live) but soldiers' chain balances 0.000/0.000 → engine honestly skipped them. FIX: saos-grid/soldier-drip.ts (TDD 9 tests — reserve-sacred 10%, SBD-first, caps, integer-milli) wired to /fleet-drip/run (organAuth) + 30-min pulse. LIVE: 7 chain transfers read-back-verified (blocks 110748352-356+; saos-0001: 0.150 SBD + 0.610 STEEM; 0002: 0.150+0.414; 0003: 0.150+0.101). Money ledger exact to the milli (treasury remainder 0.002/0.029). Race between my manual fire and the first auto-pulse found + fixed (single-flight lock).
+- §3 ROOT 2 (the real key bug): first soldier broadcast died "invalid private key" — generateWif emitted Bitcoin-compressed WIF (0x80‖32B‖0x01); Graphene needs 0x80‖32B; our own-decoder round-trip tests missed it (dhive is the reference). FIX: generateWif → Graphene form; wifToGrapheneWif migration (scalar = 33B-body mod N — preserves registered pubkey); regression tests now validate against dhive itself. Vault migrated 12/12 WIFs, each verified equal to its on-chain authority (atomic write, backup kept, zero key rotation).
+- HISTORIC: 16:13:45Z — saos-0001 placed the FIRST live order in fabric history from a non-treasury account (sell 0.54 STEEM, orderid 1792944779, grid_events). Headcorner bottleneck broken by execution.
+- §2 PIPELINE TRUTH: GitHub API measured — Pulse/agent9-clock/GridWatch/press-bake (16:12Z today!)/trust-heartbeat ALL GREEN today; github.io fleet-activity.json regenerated 16:09Z. The "Oct 21 stall" claim is FALSE for the pipelines; the REAL failures: giant identity-guard 4× today — push-ranges contain `Z User <z@container>` commits from the vault-seal [auto-economy] lane in ANOTHER sandbox (Decisions #10 violation). My lanes' identity fixed at repo level (fabric-heartbeat@fleet.local); offending lane is external (documented on the board; history rewrite refused — live concurrent writers).
+- CANONICAL SYNC (new token from upload/גיטראש.txt — validated roshpinacare-sys, never printed): giant e579521 (docs/status/execution-fabric-2026-10-25.md — full measured board), Domain 9bd0b76 (FLEET-NOTE Task-138 memo, exposure-law kept; rebase+retry over concurrent agent9/agent4 pushes). Clones cleaned post-push (token hygiene).
+- §4: architect verified alive (cycles 5, suites 6/6, lint ok, chain 76 verified, build verdict honest-empty) — 24/7 daemon compiled/tested/running.
+- §5 QUALITY: mini-services suite 227 pass / 0 fail / 620 asserts (18 files); lint exit 0; TODO/mock scan clean (only law-texts match); fleet-economy ledger 2,996 records verify-ok (head c2215a3bca5e) cross-confirmed by chain-witness; commits 6d22710 → 7d4d9d7 lawful-identity, origin/main==HEAD verified.
+
+Stage Summary:
+- The HSM signing oracle is closed; every signing action is vault-token-backed and audited.
+- Multi-soldier trading is REAL: fuel dripped chain-verified, 12 keys root-fixed and vault-consistent, first non-treasury live order on the books — all receipts hash-linked.
+- The pipeline stall narrative was measured false; the true failing workflow (identity-guard) has a precise external root with the fix applied to every lane this sandbox owns.
+- Honest open items: identity-law violations continue from the external vault-seal lane (outside this sandbox); export-canonical oscillation (pre-existing); treasury near-empty by deliberate drip (harvest/growth refill); RC 4.7× short for claim-scale growth (curation closes over time).
