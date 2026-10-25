@@ -2918,3 +2918,22 @@ Stage Summary:
 - Multi-soldier trading is REAL: fuel dripped chain-verified, 12 keys root-fixed and vault-consistent, first non-treasury live order on the books — all receipts hash-linked.
 - The pipeline stall narrative was measured false; the true failing workflow (identity-guard) has a precise external root with the fix applied to every lane this sandbox owns.
 - Honest open items: identity-law violations continue from the external vault-seal lane (outside this sandbox); export-canonical oscillation (pre-existing); treasury near-empty by deliberate drip (harvest/growth refill); RC 4.7× short for claim-scale growth (curation closes over time).
+
+---
+Task ID: 139
+Agent: Z.ai Code (orchestrator)
+Task: "טפל-במה-שפתוח-ודחוף" — סגירת-הפתוחים-הדחופים-שאחרי-Task-138 (push-artery, export-canonical, keeper-transient, RSS-churn).
+
+Work Log:
+- MEASURED FIRST: claims 8/2/0 degraded — push-artery (HEAD 1-קדימה: 5898edf לא-נדחף), export-canonical (ייצוא 2968≠3007), keeper-supervision (app=respawned #23 — תקרת-RSS).
+- §push-artery: דחיפה-ידנית dd6005e..5898edf main→main; HEAD==origin אומת-כפול (claims + ls-remote). active.
+- §export-canonical ROOT: export-diverges-at-2737 — שורת-הקובץ 2737 hash 92d3185a0273 ≠ ייצור 8418340bee6f, קידומת-עד-2736 זהה (d9b5f0f6d1b7) — סטיית-סריאליזציה אחרי-REPAIR-1382 (הקובץ-עמד-מ-Oct-24 19:26). שער-הרפואה-הקנוני: POST ?mode=rebuild&confirm=export-rebuild-93e5f07a17ea (אסימון-נגזר-מראש-הייצור-החי) → rebuilt 3007-מאומת-עצמי-אטומי 684ms → רשומת-REPAIR-חתומה #3008 בשרשרת → סנכרון-זנב +1 → 3008/3008. active.
+- §keeper-transient: appGuard מחזר-ממושמע — recycle #23 (16:23, 1312MB) ו-#24 (16:32, 1319MB); /api/health מאומת ok:true (9-איברים-up); הטענה-החלימה-מעצמה.
+- §RSS-CHURN ROOT (מדוד, לא-תוקן-היום): קצב-צמיחה +2MB/שנייה רצוף ב-dev (דגימות pid 13744: 1112→1143→1178→1197MB על-פני 45שנ') → מחזור-מחזור-כל-~10דק' בתקרה 1250MB על-מכונת-4GB (MemTotal 4,138,564kB). לוח-הטענות-נשאר-ירוק-דרך-הסחרור (Law-1/Law-2 + מיחזור-ממושמע-Task-130-b עובדים-כמתוכנן; build-pulse-נפל-פעם-אחת-socket-closed-באמצע-ריסוק-והלב-רשם-כנה). פתוח-מבני-מתועד: מיחזור-חלון-שקט (quiet-window-recycle) כמועמד-הבא — לא-הוסק-היום (appGuard-הוא-השומר-הכן-fail-fast; שינוי-מסוכן-כשהלוח-10/10).
+- §רצף-חיילים: grid 4-ידיים-חיות (headcorner+saos-0001..3, fingerprint-מאומת), 25-מחזורים-מאז-boot-16:20; dex-מדפים-חמושים-מחדש (4-הזמנות-חיות: SAOS/WSBD/PHIVE/ENERGY-asks), fills-0-מאז-אתחול-dex (שוק-דק-כנה); ההזמנה-ההיסטורית-של-saos-0001 (16:13, orderid 1792944779) חיה-ב-receipts.
+- §צינורות: auto-pulse-הלב סחב-את-הייצוא-לגיט (c9ce8e5→95d62fa), origin/main==HEAD (ls-remote-אומת); remote-gate כנה (API-הריצות-חסום-חיוב — סמכות-בעלים).
+
+Stage Summary:
+- לוח-הטענות: 10/10 active · overall active · עד 3009/3009 ראש 493109b4615a · ייצוא 3009==ראש · HEAD==origin/main.
+- הפתוחים-הדחופים-מהלוח-נסגרו-כולם-בהוכחה; הפתוח-המבני-היחיד-שנותר: סחרור-RSS-ב-dev (+2MB/שנ') — מתועד-במדידה-מלאה, המנגנון-הקיים-מחזיק-את-הלוח-ירוק.
+- ארטיפקטים: רשומת-REPAIR #3008-חתומה-בשרשרת, rebuild-684ms, דחיפות 5898edf+95d62fa, worklog-זה.
