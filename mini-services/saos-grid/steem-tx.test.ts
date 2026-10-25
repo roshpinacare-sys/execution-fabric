@@ -19,7 +19,9 @@ import {
   signTxBytes,
   varint,
   verifySigRecoversWifPubkey,
+  wifToGrapheneWif,
   wifToPubkey,
+  generateWif,
 } from './steem-tx'
 
 // WIF-בדיקה-קנוני (privkey=1, 52-char compressed — וקטור-פומבי-מתועד-בכל-מקורות-התחום;
@@ -259,5 +261,46 @@ describe('Task-137 מדידה-חיה: ל-transfer אין op-extensions (הווק
     // הבדיקה-הישנה (HEX(tx)==MASTER) עברה-בריקנות כשה-serializer-הוסיף-op-ext: 3-אפסים-זהים.
     // ההוכחה-החדשה-המכריעה: וקטור-ה-transfer-לעיל + נחיתות-חיות-מול-השרשרת.
     expect(OP_TRANSFER).toBe(2)
+  })
+})
+
+// ═════════════════════════════════════════════════════════════════════════════
+// דירקטיבת-בעלים 25/10 §3 — תאימות-dhive (הייחוס): הלקח-החי — ראונד-טריפ-מול-המפענח
+// שלנו-בלבד העגל-באג-צורת-WIF (0x80+32B+0x01 — Bitcoin-דחוס) ש-dhive דחה ("invalid
+// private key") בפעם-הראשונה-שהחיילים-ניסו-לשדר. מעתה: כל-מפתח-חדש נבדק-מול-הייחוס.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('תאימות-dhive: generateWif גרפני-טהור + wifToGrapheneWif (הגירה)', () => {
+  test('generateWif → 51-תווים, dhive-מקבל, והמפתח-הפומבי-זהה-בשני-המפענחים', async () => {
+    const dhive = await import('@hiveio/dhive')
+    const wif = generateWif(new Uint8Array(32).fill(7))
+    expect(wif.length).toBe(51) // 37 בייטים בקידוד-base58 (לא-52 של-צורת-bitcoin)
+    const pk = dhive.PrivateKey.fromString(wif) // זורק-על-צורה-לא-גרפנית
+    expect(wifToPubkey(wif)).toBe(pk.createPublic().toString())
+  })
+
+  test('wifToGrapheneWif: צורת-bitcoin (38B) → גרפני (37B) באותו-מפתח-פומבי (הגירה-שומרת-מפתח)', async () => {
+    const dhive = await import('@hiveio/dhive')
+    // בונה-צורת-bitcoin-מדומה: [0x80, 32×9, 0x01] + checksum — הצורה-שהמחולל-הישן-פלט
+    const rand32 = new Uint8Array(32).fill(9)
+    const { createHash } = await import('crypto')
+    const payload = Uint8Array.from([0x80, ...rand32, 0x01])
+    const chk = createHash('sha256').update(createHash('sha256').update(payload).digest()).digest().subarray(0, 4)
+    const { b58encode } = await import('./steem-tx')
+    const legacy = b58encode(Uint8Array.from([...payload, ...chk]))
+    expect(legacy.length).toBe(52)
+    const fixed = wifToGrapheneWif(legacy!)
+    expect(fixed.length).toBe(51)
+    expect(wifToPubkey(fixed)).toBe(wifToPubkey(legacy!)) // אותו-סקאלר (33B mod N) — אפס-רוטציה
+    const pk = dhive.PrivateKey.fromString(fixed) // dhive-מקבל-את-המוגר
+    expect(pk).toBeTruthy()
+  })
+
+  test('wifToGrapheneWif: גרפני-קיים → אידמפוטנטי (זהות-ערך)', () => {
+    const good = generateWif(new Uint8Array(32).fill(3))
+    expect(wifToGrapheneWif(good)).toBe(good)
+  })
+
+  test('wifToGrapheneWif: WIF-פגום → זורק (fail-closed)', () => {
+    expect(() => wifToGrapheneWif('not-a-real-wif')).toThrow()
   })
 })

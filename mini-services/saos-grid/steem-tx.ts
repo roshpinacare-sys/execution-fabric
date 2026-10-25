@@ -45,7 +45,7 @@ function b58decode(s: string): Uint8Array {
   return Uint8Array.from((hex.length % 2 ? '0' + hex : hex).match(/../g)!.map((h) => parseInt(h, 16)))
 }
 
-function b58encode(b: Uint8Array): string {
+export function b58encode(b: Uint8Array): string {
   let n = BigInt('0x' + Buffer.from(b).toString('hex'))
   let o = ''
   while (n > 0n) {
@@ -434,14 +434,43 @@ export function verifySigRecoversWifPubkey(tx: Uint8Array, stmSig: string, wif: 
 // ── יצירת-מפתחות-חיילים (Task-137 — צמיחת-צי-מבפנים) ─────────────────────────
 const SECP_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n
 
-/** סקאלר-32-בייטים → WIF-דחוס-תקני (0x80 ‖ scalar ‖ 0x01 ‖ sha256(sha256)[:4], base58).
+/** סקאלר-32-בייטים → WIF-גרפני-תקני (0x80 ‖ scalar ‖ sha256(sha256)[:4], base58 — אין-בייט-דגל-דחוס).
  *  fail-closed: אפס-או-מעל-סדר-העקומה — הקורא-מחליף-אקראיות. */
 export function generateWif(rand32: Uint8Array): string {
   if (rand32.length !== 32) throw new Error(`steem-tx: generateWif-needs-32-bytes (${rand32.length})`)
   const hex = Buffer.from(rand32).toString('hex')
   const scalar = BigInt('0x' + hex)
   if (scalar === 0n || scalar >= SECP_N) throw new Error('steem-tx: generateWif-scalar-out-of-range')
-  const payload = Uint8Array.from([0x80, ...rand32, 0x01])
+  // דירקטיבת-בעלים 25/10 §3 — תיקון-שורש-מדידה-חיה: Graphene-דורש WIF-לא-דחוס
+  // (payload = 0x80 + 32B בלבד). הצורה-הקודמת (0x80+32B+0x01 — קונבנציית-Bitcoin-דחוס)
+  // נדחתה-על-ידי dhive ("invalid private key") — הבאג-נתפס-חי-כשהחיילים-ניסו-לראשונה
+  // לשדר (יתרות-אפס-הסתירו-אותו-עד-הטפטוף-הראשון).
+  const payload = Uint8Array.from([0x80, ...rand32])
   const chk = sha256(sha256(payload)).slice(0, 4)
   return b58encode(Uint8Array.from([...payload, ...chk]))
+}
+
+// ── הגירת-WIF-מורשת (דירקטיבת-בעלים 25/10 §3): צורת-bitcoin-דחוסה (0x80+32B+0x01)
+// → גרפני-טהור (0x80+32B) באותו-מפתח-פומבי-רשום-בשרשרת. הסקאלר-הרשום = (גוף-33B) mod N
+// (דפוס-wifToPubkey-הקיים) — ההגירה-משמרת-אותו-בדיוק, אפס-רוטציה-מפתחות, אפס-נגיעה-בשרשרת.
+export function wifToGrapheneWif(wif: string): string {
+  const dec = b58decode(wif.trim())
+  if (dec.length < 5) throw new Error('steem-tx: wif-too-short')
+  const payload = dec.subarray(0, dec.length - 4)
+  const chk = dec.subarray(dec.length - 4)
+  const expect = sha256(sha256(payload)).slice(0, 4)
+  for (let i = 0; i < 4; i++) if (chk[i] !== expect[i]) throw new Error('steem-tx: wif-checksum-mismatch (corrupt key)')
+  let scalar: Uint8Array
+  if (dec.length === 38 && dec[0] === 0x80 && dec[33] === 0x01) {
+    const body = BigInt('0x' + Buffer.from(dec.subarray(1, 34)).toString('hex'))
+    const mod = body % SECP_N
+    scalar = Uint8Array.from(Buffer.from(mod.toString(16).padStart(64, '0'), 'hex'))
+  } else if (dec.length === 37 && dec[0] === 0x80) {
+    scalar = dec.subarray(1, 33)
+  } else {
+    throw new Error(`steem-tx: unexpected-wif-form (len=${dec.length})`)
+  }
+  const out = Uint8Array.from([0x80, ...scalar])
+  const chk2 = sha256(sha256(out)).slice(0, 4)
+  return b58encode(Uint8Array.from([...out, ...chk2]))
 }

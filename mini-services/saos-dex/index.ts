@@ -198,9 +198,12 @@ function reportReceipt(kind: string, status: string, worker: string, outputHash:
 const WALLET_SIGN = process.env.SAOS_WALLET_SIGN ?? 'http://127.0.0.1:3085/sign'
 async function signCommitment(commitmentJson: string): Promise<HtlcContract['commitmentSig']> {
   try {
+    // דירקטיבת-בעלים 25/10 §1: ה-HSM נעול-טוקן — החתימה-שלנו-נושאת-את-טוקן-האיבר (fail-closed: אין-טוקן = אין-חתימה)
+    const tok = organToken()
+    if (!tok) throw new Error('organ-token-missing — HSM-נעול (כנות, לא-עוקפים)')
     const res = await fetch(WALLET_SIGN, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-saos-organ': tok },
       body: JSON.stringify({ keyId: 'mesh-identity', payload: commitmentJson }),
       signal: AbortSignal.timeout(4_000),
     })

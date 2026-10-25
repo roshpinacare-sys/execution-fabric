@@ -11,6 +11,7 @@
 import { join, resolve } from 'path'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, statSync } from 'fs'
 import { createHash, generateKeyPairSync, randomBytes, createPrivateKey } from 'node:crypto'
+import { organAuth } from '../organ-auth'
 import {
   SealVaultError,
   ed25519KeyFromPkcs8,
@@ -135,6 +136,14 @@ async function handle(req: Request): Promise<Response> {
     )
   }
   if (req.method === 'POST' && p === '/sign') {
+    // ── דירקטיבת-בעלים 25/10 §1: ה-HSM הוא-כתר-היהלומים — אין-חתימה-אנונימית-אפילו-מלולאה.
+    // deny-by-default: כל-נסיון-חתימה בלי-טוקן-איבר-תקף נדחה, נספר, ונרשם-ב-audit.jsonl.
+    const deny = organAuth(req)
+    if (deny) {
+      state.refuses++
+      audit('none', 'none', 'none', false, `unauthorized-sign: ${deny.status}`)
+      return deny
+    }
     if (poisoned) {
       state.refuses++
       audit('none', 'none', 'none', false, 'poisoned-vault')

@@ -11,9 +11,11 @@ import * as engine from './engine'
 import * as ff from './ff'
 import { broadcast, buildHeader, harvestPulse, harvestState } from './harvest-engine'
 import { executeGrowthPulse, type FleetGrowthState } from './fleet-growth'
+import { dripPlan, type DripTransfer } from './soldier-drip'
 import { hiveCustodyCheck, hiveMeshFromEnv } from './hive-tx'
 import * as market from './market'
 import { steemMesh } from './market'
+import { OP_TRANSFER, buildTxBytes, serializeOperation, signTxBytes } from './steem-tx'
 import { organAuth } from '../organ-auth'
 
 const PORT = Number(process.env.PORT ?? 3070)
@@ -29,6 +31,107 @@ const GROWTH_MAX_NEW = Math.max(1, Math.min(3, Number(process.env.SAOS_GROWTH_MA
 // ── Task-137 §2: רכבת-הדבורה (Hive) — מדידה-חיה-עם-שער-כספת-כנה ──
 const hiveMesh = hiveMeshFromEnv()
 let hiveState: { custody: { ok: boolean; pubkey: string | null; error: string | null; authorityPubkeys: string[] | null } | null; checkedAt: string | null; lastError: string | null } = { custody: null, checkedAt: null, lastError: null }
+
+// ══ דירקטיבת-בעלים 25/10 §3: טפטוף-הון-אוצר→חיילים ═══════════════════════════
+// השורש-הנמדד-חי (16:00Z): לחיילים-מפתחות-טעונים-אך-0.000 STEEM/SBD → המנוע-מדלג-בכנות.
+// התיקון: טפטוף-מדוד-מהאוצר (רזרבה-קודשת 10%) — SBD-קודם (קנייה-חיה-זולה), STEEM-שני (מכירה-חיה).
+// כל-העברה: חתימה-ACTIVE-של-האוצר → שידור-סינכרוני → קריאה-חוזרת-מהשרשרת-בטרם-נספרת.
+interface DripState {
+  cycles: number
+  lastPulseAt: string | null
+  lastResult: Record<string, unknown> | null
+  transfersBroadcast: number
+  lastError: string | null
+}
+const dripState: DripState = { cycles: 0, lastPulseAt: null, lastResult: null, transfersBroadcast: 0, lastError: null }
+const DRIP_RESERVE_PCT = Number(process.env.SAOS_DRIP_RESERVE_PCT ?? 10)
+const DRIP_BUY_TARGET_MU = Number(process.env.SAOS_DRIP_BUY_TARGET_MU ?? 150) // 0.150 SBD
+const DRIP_SELL_TARGET_MU = Number(process.env.SAOS_DRIP_SELL_TARGET_MU ?? 600) // 0.600 STEEM
+const DRIP_MAX_TRANSFERS = Number(process.env.SAOS_DRIP_MAX_TRANSFERS ?? 6)
+
+function parseChainAsset(s: string | undefined): number {
+  const v = parseFloat(String(s ?? '0'))
+  return Number.isFinite(v) ? Math.round(v * 1000) : 0
+}
+
+async function dripBalances(names: string[]): Promise<Record<string, { steemMu: number; sbdMu: number }> | { error: string }> {
+  const r = await steemMesh.call<Array<Record<string, string>>>('condenser_api.get_accounts', [names])
+  if (!r.ok) return { error: `get_accounts: ${r.error}` }
+  const out: Record<string, { steemMu: number; sbdMu: number }> = {}
+  for (const a of r.data ?? []) out[a.name] = { steemMu: parseChainAsset(a.balance), sbdMu: parseChainAsset(a.sbd_balance) }
+  return out
+}
+
+async function executeDripPulse(): Promise<void> {
+  dripState.cycles++
+  dripState.lastPulseAt = new Date().toISOString()
+  try {
+    const names = engine
+      .fingerprint()
+      .split(',')
+      .map((s) => s.split(':')[0].trim())
+      .filter(Boolean)
+    if (names.length < 2) {
+      dripState.lastResult = { status: 'no-soldiers (חיילים-נולדים-דרך-צמיחת-הצי-קודם)' }
+      return
+    }
+    const bals = await dripBalances(names)
+    if ('error' in bals) {
+      dripState.lastError = bals.error
+      dripState.lastResult = { status: 'balances-error' }
+      return
+    }
+    const treasury = names[0]
+    const treasuryWifKey = `${treasury.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_ACTIVE_WIF`
+    const envRaw = (await import('fs')).readFileSync('/home/z/my-project/upload/steem.env', 'utf-8')
+    const activeWif = envRaw.match(new RegExp(`${treasuryWifKey}=(\\S+)`))?.[1] ?? null
+    if (!activeWif) {
+      dripState.lastError = 'custody-gated: אין-ACTIVE-WIF-לאוצר'
+      dripState.lastResult = { status: 'custody-gated' }
+      return
+    }
+    const plan = dripPlan({
+      treasury: { steemMu: bals[treasury]?.steemMu ?? 0, sbdMu: bals[treasury]?.sbdMu ?? 0 },
+      soldiers: names.slice(1).map((n) => ({ name: n, steemMu: bals[n]?.steemMu ?? 0, sbdMu: bals[n]?.sbdMu ?? 0 })),
+      reservePct: DRIP_RESERVE_PCT,
+      buySideTargetSbdMu: DRIP_BUY_TARGET_MU,
+      sellSideTargetSteemMu: DRIP_SELL_TARGET_MU,
+      maxTransfersPerPulse: DRIP_MAX_TRANSFERS,
+    })
+    const executed: Record<string, unknown>[] = []
+    for (const t of plan.transfers as DripTransfer[]) {
+      const header = await buildHeader()
+      if ('error' in header) {
+        dripState.lastError = header.error
+        break
+      }
+      const sym = t.asset
+      const chainAmount = `${(t.amountMu / 1000).toFixed(3)} ${sym}`
+      const opData = { from: treasury, to: t.to, amount: t.amountMu, symbol: sym, memo: 'fleet-drip §3 — דלק-מסחר לחייל (רזרבת-אוצר-קודשת)' }
+      const tx = buildTxBytes(header, [serializeOperation(OP_TRANSFER, opData)])
+      const signed = signTxBytes(tx, activeWif)
+      const b = await broadcast(signed, header, [
+        ['transfer', { from: treasury, to: t.to, amount: chainAmount, memo: opData.memo }],
+      ])
+      if (!b.ok) {
+        executed.push({ to: t.to, asset: sym, amountMu: t.amountMu, status: 'rejected', error: b.error })
+        dripState.lastError = `transfer-broadcast: ${b.error}`
+        continue
+      }
+      // קריאה-חוזרת: יתרת-הנמען-חייבת-לשקף (אימות-לאחר-מעשה — דפוס-הקציר)
+      const after = await dripBalances([t.to])
+      const got = 'error' in after ? null : after[t.to]?.[sym === 'STEEM' ? 'steemMu' : 'sbdMu'] ?? null
+      const verified = got !== null && got > 0
+      if (verified) dripState.transfersBroadcast++
+      executed.push({ to: t.to, asset: sym, amountMu: t.amountMu, trxId: b.trxId ?? null, blockNum: b.blockNum ?? null, status: verified ? 'broadcast+verified' : 'broadcast-טרם-נמדד-בקריאה-חוזרת (כנות)', recipientBalanceMu: got })
+      console.log(`[saos-grid] טפטוף: ${t.amountMu / 1000} ${sym} → ${t.to} (${t.reason}) — ${verified ? 'נקרא-חזרה-מהשרשרת' : 'שודר'}`)
+    }
+    dripState.lastResult = { status: 'pulse-done', planSkipped: plan.skipped, executed }
+    dripState.lastError = plan.transfers.length === 0 ? null : dripState.lastError
+  } catch (e) {
+    dripState.lastError = e instanceof Error ? e.message : String(e)
+  }
+}
 async function hiveProbe(): Promise<void> {
   try {
     const env = (await import('fs')).readFileSync('/home/z/my-project/upload/steem.env', 'utf-8')
@@ -126,6 +229,15 @@ try {
       }
       if (p === '/fleet-growth') {
         return Response.json({ ok: true, fleetGrowth })
+      }
+      if (p === '/fleet-drip') {
+        return Response.json({ ok: true, drip: dripState })
+      }
+      if (p === '/fleet-drip/run' && req.method === 'POST') {
+        const deny = organAuth(req)
+        if (deny) return deny
+        await executeDripPulse()
+        return Response.json({ ok: true, drip: dripState })
       }
       if (p === '/fleet-growth/run' && req.method === 'POST') {
         const deny = organAuth(req)
@@ -270,6 +382,15 @@ setInterval(() => {
 setTimeout(() => {
   void growthPulse()
 }, 40_000)
+
+// ── דירקטיבת-בעלים 25/10 §3: פעימת-טפטוף-דלק-לחיילים — כל-30 דק' (האוצר-מחליט-על-רזרבה) ──
+const DRIP_MS = Number(process.env.SAOS_DRIP_MS ?? 30 * 60_000)
+setInterval(() => {
+  void executeDripPulse()
+}, DRIP_MS)
+setTimeout(() => {
+  void executeDripPulse()
+}, 70_000) // אחרי-המחזור-הראשון-של-הגריד — שהידיים-כבר-טעונות
 
 // ── Task-137 §2: סקר-כספת-דבורה כל-15 דק' — השער-נפתח-אוטומטית-כשמפתח-תקף-מופיע ──
 const HIVE_PROBE_MS = Number(process.env.SAOS_HIVE_PROBE_MS ?? 15 * 60_000)
