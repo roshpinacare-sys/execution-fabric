@@ -522,6 +522,33 @@
       "textChars": 111,
       "narratedAt": "2026-10-26T14:38:05.768Z",
       "worker": "sdk-tts:tongtong"
+    },
+    "234": {
+      "audioPath": "sovereign/site/audio/improvement-234.wav",
+      "sizeBytes": 1349136,
+      "voice": "tongtong",
+      "speed": 1,
+      "textChars": 146,
+      "narratedAt": "2026-10-26T14:48:11.247Z",
+      "worker": "sdk-tts:tongtong"
+    },
+    "237": {
+      "audioPath": "sovereign/site/audio/improvement-237.wav",
+      "sizeBytes": 934416,
+      "voice": "tongtong",
+      "speed": 1,
+      "textChars": 134,
+      "narratedAt": "2026-10-26T15:28:07.115Z",
+      "worker": "sdk-tts:tongtong"
+    },
+    "240": {
+      "audioPath": "sovereign/site/audio/improvement-240.wav",
+      "sizeBytes": 360336,
+      "voice": "tongtong",
+      "speed": 1,
+      "textChars": 94,
+      "narratedAt": "2026-10-26T15:57:53.784Z",
+      "worker": "sdk-tts:tongtong"
     }
   }
 }
