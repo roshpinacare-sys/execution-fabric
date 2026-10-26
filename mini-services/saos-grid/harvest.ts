@@ -72,3 +72,21 @@ export function curationCandidates(discussions: Discussion[], p: CurationPolicy)
     .sort((a, b) => (b.pendingPayout - a.pendingPayout) || (a.author < b.author ? -1 : 1))
     .slice(0, Math.max(0, p.limit))
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// דירקטיבת-141 §2 — סבב-קיורציה-פר-חייל + שער-RC-מדיד (ליבה-טהורה)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/** סבב-הקיורציה: פעימה-k → החשבון-ה-k בסדר-הכספת (האוצר-ראשון). דטרמיניסטי-לחלוטין. */
+export function rotationAccount(order: string[], pulseIndex: number): string | null {
+  if (!Array.isArray(order) || order.length === 0) return null
+  const i = Number.isSafeInteger(pulseIndex) && pulseIndex > 0 ? pulseIndex : 0
+  return order[i % order.length]!
+}
+
+/** שער-RC-מדיד להצבעה: mana חייב-להיות-נמדד (לא-null) ומעל-המינימום.
+ *  לא-נמדד = fail-closed — אין-שידור-על-מצב-לא-מאומת (אפס-סערת-שידורים-נכשלים). */
+export function rcVoteGate(rcMana: number | null, minMana: number): boolean {
+  if (rcMana === null || !Number.isFinite(rcMana)) return false
+  return rcMana >= minMana
+}

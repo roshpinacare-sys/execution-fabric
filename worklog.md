@@ -2975,3 +2975,39 @@ Stage Summary:
 - מעגל-הסחרור-במצב-היציב-המתוכנן שלו: מחזור-נקי-כל-~10דק', ללא-הריגות-אמצע-עבודה, עם-התאוששות-לוח-מלאה-תוך-דקה.
 - פתוח-מבני-מתועד: צמיחת-RSS-רציפה-ב-dev (+~2MB/שנ') — אין-מנגנון-ignore-ב-Next-16-המותקן (נמדד); הפתרון-המבני-האמיתי-הוא-build-ייצור-אסור-בסביבה-זו.
 - ארטיפקטים: app-guard.ts+9-בדיקות, index.ts (חוזה+קצב), next.config.ts-כנה, worklog-140+140-b.
+---
+Task ID: 141-d
+Agent: swarm-worker-141-d (pipelines)
+Task: ULTIMATE SWARM DIRECTIVE §5 — סנכרון-צינורות: מדידת-FleetHQ/giant/github.io, טבילה-מאולצת-של-עיתון-יומי, עדכון-מעקדי-סטטוס.
+
+Work Log:
+- MEASURED FIRST (owner token via Authorization headers only, never printed): FleetHQ alive — pushed_at 2026-10-26T15:06:12Z, 11,392 runs in window; latest: runtime-pacemaker #4057 success 15:03:58Z, identity-guard #976 success 15:01:06Z, office-ci #1150 success 15:01:06Z, pages-deploy #56 success 15:01:06Z. FleetHQ has NO press-bake workflow (22 workflows scanned) — the daily-paper lane lives in Domain (workflow press-bake.yml id 384427573).
+- PRESS-BAKE: run #81 already force-dispatched today 14:27:31Z by G76-e (success; receipt FleetHQ receipts/press-rebake-2026-10-26.json). Per directive I force-dispatched again: POST /repos/roshpinacare-sys/Domain/actions/workflows/384427573/dispatches {"ref":"main"} → HTTP 204 at 15:09:53Z; run #82 id 40346608688 → completed/success 15:11:08Z (~75s); bake commit 4f1e10f787 "press: daily edition baked 2026-10-26T15:11:02Z [skip ci]"; press/edition-state.json at=2026-10-26T15:10:58.748Z (steemUsd 0.05023, worldHeight 1,746,480, fillsTotal 255,721). Editions #78–#82 today ALL success — daily papers NOT stalled.
+- giant: identity-guard since 25/10 = 12 failure + 6 cancelled + 4 success, latest failures #212–#214 at 14:55:21Z; root cause MEASURED persisting: 6 of last-20 commits signed `Z User <z@container>` (external vault-seal/vault-sync [auto-economy] lane, 14:09–14:18Z) — outside this sandbox. Other giant pipelines green: trust-heartbeat 3/3, swallow-watch 5/5, fleet-rail-guardian 4/4.
+- roshpinacare-sys.github.io: fleet-activity.json moved to receipts/ path; generatedAt = 2026-10-26T15:01:49.903Z — FRESH. Activity pipeline alive.
+- status.json / quality-report.json HONEST FINDING: FleetHQ sovereign-stack/health/status.json exists but stale (ts 2026-10-25T16:54:22Z, all_ok=false — llamacpp-local DOWN, owned by its own probe lane); NO quality-report.json / quality/report.json anywhere (FleetHQ tree 3,931 paths: 0 quality* matches; local execution-fabric tree: 0 status.json/quality* matches). NOT fabricated — creation requires code+push outside agent scope.
+- Artifacts: sovereign/site/2026-10-26T15-12-16-pipeline-sync.md (full measured narration, site format); sovereign-pulse.md left untouched (has no pipelines section; hourly-rolled by fabric-heartbeat — per instruction). No code, no service state, no git push touched.
+
+Stage Summary:
+- Directive §5 satisfied with first-hand evidence: daily press re-baked NOW (dispatch HTTP 204, run #82 success, bake commit landed); fleet-activity.json fresh; FleetHQ green across the board.
+- Honest blockers recorded: (1) quality/report.json does not exist anywhere measured — needs a code-owned generator, orchestrator decision; (2) FleetHQ health status.json stale 22h (llamacpp-local down on its runner); (3) giant identity-guard keeps failing from the EXTERNAL identity-violating vault-seal lane (z@container commits continue 14:09–14:18Z today) — unfixable from this sandbox.
+---
+Task ID: 141
+Agent: Z.ai Code (orchestrator + swarm)
+Task: ULTIMATE SWARM DIRECTIVE (26/10 15:47) — פעימת-swarm-מקבילה: עורק-FF, בריכות-AMM, רשת-חיילים, צינורות, ביקורת-מנעולים, הוכחת-ביצועים.
+
+Work Log:
+- MEASURED FIRST: claims 10/10-active (ראש 934e4d2e5885); כל-12-האיברים-חיים; dex USDS-שווקים-קיימים-אך-pools-ריקים-ו-asks-חד-צדדיים; grid-5-ידיים-91-מחזורים-0-שגיאות; FF-עורק-מת (keyFound:false — מנתח-לא-מזהה-פורמט-הכספת-החדש).
+- §141-a (עורק-FF, orchestrator): שורש-כפול-נמדד — (1) מנתח-הכספת-חיפש-שורה-בדיוק "api key" + אסימון-עירום; פורמט-הבעלים-החדש-הוא-כותרת-עם-תחילית-הודעה-ואסימון-בשורה-הבאה; (2) החתימה-הייתה-HMAC(Payload,ApiKey) — לפי-API-v2 החתימה-HMAC(Payload,ApiSecret) והסוד-מעולם-לא-נפרס. TDD: ff.test.ts 12-בדיקות (מנתחים-טהורים-לשני-הפורמטים + ffSign-וקטור-חוץ-מחושב-אמיתי b82fcb79…). חוק-כספות-שודרג: /home/z/.saos-secrets/ff.env-0600-מחוץ-לעץ (ffCreds: סדר-קריאה-.saos-secrets→upload). חי: keyFound:true, authorized:false — FF משיב-401/501-"Not have permission" בכל-4-הווריאנטים (getCurrencies/price/info-×-2-סוגי-חתימה, קוד-40/40-תווים-נכון) → אבחנה-כנה: דחייה-ברמת-המפתח-בצד-FF (הפעלה/IP-allowlist); כתובת-היציאה-שלנו-לרשום-אצל-הבעלים: 8.212.10.159. authorized:false-על-הלוח — אין-ירוק-מזויף.
+- §141-b (dex AMM, worker): שתי-בריכות-חיות-נזרעו (WSTEEM/USDS: reserveBaseMu-913K, SAOS/USDS: 901K; feeBps-30, risk-gate-חי); quotes-דו-צדדיים-מאומתים-בשני-הכיוונים (baseToQuote/quoteToBase — outMu-אמיתי+מיסוי); מנוע-הפרשים-חי: fills-0→8; dex-סוויט 97/0 (24-בדיקות-חדשות). ה-worker-השלים-מימוש-מלא; ה-die-בדיווח-נרשם — האימות-וההשלמה-בידי-ה-orchestrator.
+- §141-c (רשת-חיילים, worker + orchestrator): קציר-מסובב-על-כל-5-החיילים (rotation-headcorner→saos-0001..0004, claims-לכולם-נמדדו-כנה dust-or-empty, curation-vp-gate-כנה: saos-0002-VP-0<2000-מינ → אין-שידור-זבל); /rc-rebalance-חי (4-מחזורים, no-op-כנה "no-deficit-above-floor", snapshot-RC-מדוד-ל-5-חשבונות מהשרשרת); /content-צינור-עם-שער-custody-חי (headcorner-custody-ok, חוק: אין-פרסום-אוטומטי-לפי-הדירקטיבה; ניסיון-פרסום-ריק-נדחה-בשמו permlink-invalid). grid-סוויטה 119/0. ה-worker-השלים-מימוש; אומת-בידי-ה-orchestrator.
+- §141-e (ביקורת-מנעולים §2, worker + orchestrator): אודיט-מלא — הרקמה-כבר-עברה-טיהור-היסטורי (risk.ts-אדפטיבי, arb-מרים-עצירות-עצמן, appGuard-מכויל-מדיד). 19-ממצאים-KEEP-חוקיים (כל-אחד-עם-סעיף-מדיד-בקוד); 2-STRIP-מומשו-כאן: (1) engine.ts-shadowPnl — היה-5-מקודד-בניגוד-להערה "מהתצורה" → CONFIG.orderSizeSbd (צל-שמזויף-מדידה); (2) buysSbd-שדה-מת-נמחק (3-אתרים); +1-הקשחה: cycleGateDecision-שער-single-flight-טהור (3-בדיקות) מחובר-לטיק-ול-/cycle — אומת-חי: 2-POST-מקבילים → 409-busy-כנה + 200-מחזור-אמיתי (bug-אמיתי-נתפס-בחי: cors-לא-מוגדר-בתחום-grid — תוקן-מיד).
+- §141-d (צינורות §5, worker — נרשם-בפני-עצמו למעלה): press-bake-עבר-ל-Domain — dispatch-204-→-run-#82-הצלחה-75שנ' (bake-commit-4f1e10f787, steemUsd-0.05023, fillsTotal-255,721); fleet-activity.json-טרי (15:01:49Z); giant-identity-guard-עדיין-נכשל-מרשות-חוץ (Z-User-×6-מתוך-20 — מחוץ-לסנדבוקס); FleetHQ-status.json-מוזנח-22שע'-ב-runner-חוץ; quality/report.json-לא-קיים-בשום-מקום-נמדד — מתועד-כנה-ללא-המצאה. נרטיב-מלא: sovereign/site/2026-10-26T15-12-16-pipeline-sync.md.
+- §7-הוכחה: grid 122/0 (119+3-שער), dex 97/0, heartbeat-20/20, wallet-11/0, architect-19/0, arb-29/0; lint-exit-0; כל-שינוי-מדינה-חתום-בקוד-המאמת-שלו; אפס-TODO/mock.
+
+Stage Summary:
+- §4-הופעל-בפועל: בריכות-AMM-חיות-עם-USDS, עורק-FF-משורשר-ומוכן-להיפתח-ברגע-הרשאת-FF (הבעלים: להפעיל-את-המפתח/לרשום-IP-8.212.10.159).
+- §3-הופעל: כל-5-החיילים-ברשת-אחת (מסחר-גריד-חי + קציר-מסובב + RC-איזון + צינור-תוכן-עם-שער-כנות).
+- §2-הופעל-ביושר: הטיהור-מדויק (2-שרידים-נמחקו, צל-PnL-מתוקן) בלי-לפגוע-בסנטינלים-הכנים (appGuard/custody/organ-auth/רצפות-אוצר — 19-KEEP-מתועדים).
+- §5-נמדד-ותוקן-מה שניתן-מכאן; שלושה-חסמים-חוץ-סנדבוקס-מתועדים-בשמם.
+- פתוח-כנה-יחיד: FF-501 (הרשאת-מפתח-בצד-FF — החלטת-בעלים).

@@ -369,6 +369,14 @@ type Plan = {
   origin?: 'ladder' | 'counter' | 'requote'
 }
 
+/** Task-141-e (audit hardening): שער-single-flight למחזור — טהור-לבדיקות.
+ * הגריד-רץ-בטיק-45שנ' וגם-מקבל-POST-/cycle-חיצוני; מיזוג-שני-מחזורים-במקביל
+ * עלול-להציב-פקודות-כפולות. השער-מכניס-לב (הסיבה-מדווחת-בשמה, אין-השתקה). */
+export function cycleGateDecision(running: boolean): { allow: boolean; reason: string } {
+  if (running) return { allow: false, reason: 'busy — מחזור-כבר-רץ (single-flight)' }
+  return { allow: true, reason: 'ok' }
+}
+
 export async function cycle(): Promise<{ placed: number; canceled: number; filledShadow: number; filledLive: number; decisions: string[] }> {
   const t0 = Date.now()
   const decisions: string[] = []
@@ -458,14 +466,14 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
     // 4.5) מנהל-חשיפה (Task-107 + Task-113): מלאי-אמתי = נזיל + נעול-בפקודות.
     // הלקח-החי: נעילות-הפקודות של-הרץ-היומי היו-בלתי-נראות-למנהל → מדידה-משובשת.
     const found = bals.data.filter((b) => b.found)
-    const locked = new Map<string, { steem: number; sbd: number; sells: number; buysSbd: number }>()
+    // Task-141-e (audit): buysSbd-מת-נמחק (מאותחל-ולעולם-לא-נקרא — שריד-Task-113)
+    const locked = new Map<string, { steem: number; sbd: number; sells: number }>()
     for (const n of names) {
       const oo = chainOrders.get(n) ?? []
       locked.set(n, {
         steem: oo.filter((o) => o.side === 'sell').reduce((s, o) => s + o.amountSteem, 0),
         sbd: oo.filter((o) => o.side === 'buy').reduce((s, o) => s + o.amountSbd, 0),
         sells: oo.filter((o) => o.side === 'sell').length,
-        buysSbd: 0,
       })
     }
     const totalSteem = found.reduce((s2, b) => s2 + b.steem + (locked.get(b.account)?.steem ?? 0), 0)
@@ -701,7 +709,7 @@ export async function cycle(): Promise<{ placed: number; canceled: number; fille
         decisions.push(`${acct}: מכירה-דחויה-בידי-מנהל-החשיפה`)
       } else {
         // Task-113: תקרת-מחויבות — נעול-במכירות-+מתוכנן ≤ 90% מהנזיל-+הנעול
-        const lk = locked.get(acct) ?? { steem: 0, sbd: 0, sells: 0, buysSbd: 0 }
+        const lk = locked.get(acct) ?? { steem: 0, sbd: 0, sells: 0 }
         const commitCap = Math.max(0, (bal.steem + lk.steem) * COMMIT_PCT - lk.steem - (plannedSellByAcct.get(acct) ?? 0))
         const sellFloor = floor ?? m.bestAsk ?? m.mid!
         let sellPrice2 = Math.max(sellPrice, sellFloor) // מדיניות: לעולם-לא-מתחת-לרצפה
@@ -937,7 +945,8 @@ export function summary() {
     if (p.side === 'sell' && !e.sell) e.sell = p.price
     byKey.set(k, e)
     if (e.buy && e.sell) {
-      const steemQty = 5 / e.buy // גודל-שמור-מהתצורה
+      // Task-141-e (audit): היה-5-מקודד — הגודל-האמיתי-מהתצורה (אחרת-הצל-משקר-בשמו)
+      const steemQty = CONFIG.orderSizeSbd / e.buy
       pnlSbd += (e.sell - e.buy) * steemQty
       byKey.delete(k)
     }

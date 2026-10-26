@@ -13,10 +13,12 @@ import {
   applySwap,
   quoteSwap,
   seedPool,
+  seedQuoteAtFairMu,
   withdrawLiquidityShares,
   type Pool,
 } from './amm'
 import { ensureSchema, ensureWalletRow, poolRow, seedWallets, createSqliteStore, insertPoolRow, updatePoolRow } from './store'
+import { captureStep } from './spread'
 
 const FEE = 30 // 30bps = 0.30% — הקבוע-החתום של-הריבונות
 
@@ -197,3 +199,81 @@ function insertPoolViaStore(db: Database, base: string, quote: string, rb: numbe
   const p = seedPool(base, quote, rb, rq, fee)
   return insertPoolRow(db, { ...p, walletName })
 }
+
+// ── Task-141-b (הפעלת-הבריכות): חישוב-צד-ה-quote לזריעה-על-ה-fair ────────────
+// חוזה-הזריעה-הכן: הבריכה נזרעת-בדיוק-על מחיר-ה-fair של הספר (µ-quote ליחידת-בסיס-
+// שלמה) — אפס-רווח-פיקטיבי-מול-הספר ברגע-היוולדה. הרצפה-תמיד-לטובת-הבריכה:
+// אם המנה-אינה-מתחלקת, העיגול-למטה מציב-את-המחיר מעט-מתחת-ל-fair (לעולם לא מעליו).
+describe('AMM — seedQuoteAtFairMu (Task-141-b: זריעה-על-מחיר-ה-fair)', () => {
+  const pxOf = (rb: number, rq: number): number => Math.floor((rq * 1_000_000) / rb)
+
+  test('מדויק: rb=1_000_000 על fair=120_000 → rq=120_000 ומחיר-הבריכה = ה-fair בדיוק', () => {
+    const rb = 1_000_000
+    const rq = seedQuoteAtFairMu(rb, 120_000)
+    expect(rq).toBe(120_000)
+    expect(pxOf(rb, rq)).toBe(120_000)
+  })
+
+  test('תרחיש-החי (Task-141-b): WSTEEM 900_000µ על fair 120_000 → 108_000µ; SAOS 900_000µ על fair 100_400 → 90_360µ', () => {
+    expect(seedQuoteAtFairMu(900_000, 120_000)).toBe(108_000)
+    expect(seedQuoteAtFairMu(900_000, 100_400)).toBe(90_360)
+    expect(pxOf(900_000, 108_000)).toBe(120_000)
+    expect(pxOf(900_000, 90_360)).toBe(100_400)
+  })
+
+  test('חוק-הרצפה: לכל (rb,fair) — מחיר-הבריכה לעולם לא מעל-ה-fair, ואובדן-העיגול ≤ ceil(1e6/rb)+1', () => {
+    const cases: Array<[number, number]> = [
+      [1, 120_000], [7, 100_400], [999_983, 123_457], [1_000_000, 1], [333_333, 999_999], [2_000_000, 10_040],
+    ]
+    for (const [rb, fair] of cases) {
+      const rq = seedQuoteAtFairMu(rb, fair)
+      const px = pxOf(rb, rq)
+      expect(px).toBeLessThanOrEqual(fair)
+      expect(fair - px).toBeLessThanOrEqual(Math.ceil(1_000_000 / rb) + 1)
+    }
+  })
+
+  test('דטרמיניזם: אותם-קלטים → אותו-פלט; דחייה-כנה לקלט-פסול (A5/A6-רוח)', () => {
+    expect(seedQuoteAtFairMu(900_000, 120_000)).toBe(seedQuoteAtFairMu(900_000, 120_000))
+    expect(() => seedQuoteAtFairMu(0, 120_000)).toThrow()
+    expect(() => seedQuoteAtFairMu(-5, 120_000)).toThrow()
+    expect(() => seedQuoteAtFairMu(100.5, 120_000)).toThrow() // µ-שלמים-בלבד
+    expect(() => seedQuoteAtFairMu(900_000, 0)).toThrow()
+    expect(() => seedQuoteAtFairMu(900_000, -1)).toThrow()
+    expect(() => seedQuoteAtFairMu(900_000, 10.5)).toThrow()
+  })
+})
+
+// ── Task-141-b: תרחיש-ההפעלה-המלא בטהור — זריעה-על-ה-fair → סטייה-מדודה → לכידת-
+// מיקרו-פרשים יורה → המכפלה-צומחת. זהו-מראת-ההרצה-החיה (ערכי-הזריעה זהים לחי). ──
+describe('AMM — תרחיש-הפעלה (Task-141-b): זריעה→סטייה→לכידה→צמיחת-מכפלה', () => {
+  test('זריעה על fair 120_000; סוחר-פרובוקטור מוכר 12_000µ לבריכה; הלכידה קונה-חזרה ברווח-אחרי-עמלה', () => {
+    // זריעה בדיוק-כמו-בחיים: rb=900_000, rq=108_000 → px = 120_000 = fair
+    const seedRq = seedQuoteAtFairMu(900_000, 120_000)
+    let pool = seedPool('WSTEEM', 'USDS', 900_000, seedRq, 30)
+    expect(Math.floor((pool.reserveQuoteMu * 1_000_000) / pool.reserveBaseMu)).toBe(120_000)
+    const k0 = BigInt(pool.reserveBaseMu) * BigInt(pool.reserveQuoteMu)
+
+    // פרובוקטור (כמו-הפרובה-החיה): baseToQuote 12_000µ — מוריד את מחיר-הבריכה מתחת-ל-fair
+    const probe = applySwap(pool, 'baseToQuote', 12_000, 0)
+    expect(probe.feeMu).toBe(36) // 12_000×30/10_000
+    pool = probe.pool
+    const pxAfterProbe = Math.floor((pool.reserveQuoteMu * 1_000_000) / pool.reserveBaseMu)
+    expect(pxAfterProbe).toBeLessThan(120_000)
+    expect(pxAfterProbe).toBeGreaterThan(114_000) // מתחת-לתקרת-השלמות (5_000bps מהעוגן)
+
+    // לכידת-המיקרו-פרשים: היד מחזיקה USDS בלבד → quoteToBase, רווח-אמת-אחרי-עמלה
+    const hand = { freeQuoteMu: 130_000, freeBaseMu: 0 }
+    const dec = captureStep(pool, 120_000, hand)
+    expect(dec.action).toBe('quoteToBase')
+    expect(dec.expectedFeeMu).toBeGreaterThanOrEqual(1) // S1: עמלה-אמת
+    expect(dec.expectedProfitMu).toBeGreaterThanOrEqual(1) // S2: רווח-אמת
+
+    // ביצוע-הלכידה: minOut מוגן, והמכפלה-צומחת-מעל-הזריעה (A1 — העמלות-נשארות-בבריכה)
+    const r = applySwap(pool, dec.action, dec.amountInMu, dec.expectedOutMu)
+    const k1 = BigInt(r.pool.reserveBaseMu) * BigInt(r.pool.reserveQuoteMu)
+    expect(k1).toBeGreaterThan(k0)
+    const pxAfterCapture = Math.floor((r.pool.reserveQuoteMu * 1_000_000) / r.pool.reserveBaseMu)
+    expect(pxAfterCapture).toBeGreaterThan(pxAfterProbe) // הבריכה נמשכה-חזרה אל-ה-fair
+  })
+})

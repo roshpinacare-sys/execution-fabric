@@ -9,13 +9,23 @@ import './lib/install-secp-shim.cjs'
 
 import * as engine from './engine'
 import * as ff from './ff'
-import { broadcast, buildHeader, harvestPulse, harvestState } from './harvest-engine'
-import { executeGrowthPulse, type FleetGrowthState } from './fleet-growth'
+import { broadcast, buildHeader, harvestPulse, harvestState, parseVaultAccounts } from './harvest-engine'
+import { executeGrowthPulse, parseVestsRaw, type FleetGrowthState } from './fleet-growth'
 import { dripPlan, type DripTransfer } from './soldier-drip'
 import { hiveCustodyCheck, hiveMeshFromEnv } from './hive-tx'
+import { buildContentOp, postingCustodyDecision, type CustodyDecision, type PostingAuthorityShape } from './content'
+import { rcRebalancePlan, type RcAccountState, type RcRebalanceResult } from './rc-rebalance'
 import * as market from './market'
 import { steemMesh } from './market'
-import { OP_TRANSFER, buildTxBytes, serializeOperation, signTxBytes } from './steem-tx'
+import {
+  OP_COMMENT,
+  OP_DELEGATE_VESTING_SHARES,
+  OP_TRANSFER,
+  buildTxBytes,
+  serializeOperation,
+  signTxBytes,
+  wifToPubkey,
+} from './steem-tx'
 import { organAuth } from '../organ-auth'
 
 const PORT = Number(process.env.PORT ?? 3070)
@@ -156,6 +166,246 @@ async function hiveProbe(): Promise<void> {
     hiveState.lastError = e instanceof Error ? e.message : String(e)
   }
 }
+
+// ══ דירקטיבת-141 §2: איזון-RC-דינמי-בין-חשבונות-הצי ═══════════════════════════
+// ה-RC נגזר-מה-vests-האפקטיביים (נמדד-חי 26/10: max_rc = creation-adj + vests×1.0).
+// האיזון = הקצאת-vests-תוספתית (ADDITIVE — קוראים-את-ההקצאה-הקיימת-מהשרשרת ומחברים;
+// אף-פעם-לא-מחליפים/מגרעים) מעודף-האוצר-מעל-רצפתו-הקודשת אל-חיילים-מתחת-לרצפת-הלידה.
+// כל-פעימה: מדידה-ראשון (get_accounts + rc_api.find_rc_accounts) → ליבה-טהורה →
+// שידור-אבסולוטי-מאומת-קריאה-חוזרת, או no-op-מתועד-עם-סיבה (אפס-פעולות-סמליות).
+interface RcRebalanceState {
+  cycles: number
+  lastPulseAt: string | null
+  lastResult: Record<string, unknown> | null
+  delegationsBroadcast: number
+  lastError: string | null
+  snapshot: Array<{ name: string; effectiveVestsRaw: number; rcMana: number; rcMax: number }> | null
+  law: string
+}
+const rcRebalance: RcRebalanceState = {
+  cycles: 0,
+  lastPulseAt: null,
+  lastResult: null,
+  delegationsBroadcast: 0,
+  lastError: null,
+  snapshot: null,
+  law: 'דירקטיבת-141 §2 — איזון-חד-כיווני (עודף→גרעון); רצפת-אוצר-קודשת; הקצאות-תוספתיות-מאומתות-קריאה-חוזרת',
+}
+const RC_REBALANCE_KEEP_PCT = Number(process.env.SAOS_RC_REBALANCE_KEEP_PCT ?? 90)
+const RC_REBALANCE_FLOOR_VESTS_RAW = Number(process.env.SAOS_RC_REBALANCE_FLOOR_VESTS_RAW ?? 2_000_000_000) // רצפת-הלידה (fleet-growth)
+const RC_REBALANCE_MAX_PER_SOLDIER_RAW = Number(process.env.SAOS_RC_REBALANCE_MAX_PER_SOLDIER_RAW ?? 2_000_000_000)
+const RC_REBALANCE_MAX_PER_PULSE = Number(process.env.SAOS_RC_REBALANCE_MAX_PER_PULSE ?? 2)
+let rcRebalanceRunning = false // נעילת-בודד — כמו-הטפטוף
+
+interface DelegationRow {
+  delegator: string
+  delegatee: string
+  vesting_shares: string
+}
+
+interface AccountVestsRow {
+  name: string
+  vesting_shares: string
+  delegated_vesting_shares: string
+  received_vesting_shares: string
+}
+
+/** מדידת-RC/VESTS-חיה לכל-החשבונות. כל-קריאה-נכשלת = fail-closed (אין-איזון-על-מדידה-חסרה). */
+async function rcSnapshot(names: string[]): Promise<{ accounts: RcAccountState[] } | { error: string }> {
+  const acc = await steemMesh.call<AccountVestsRow[]>('condenser_api.get_accounts', [names])
+  if (!acc.ok) return { error: `get_accounts: ${acc.error}` }
+  const rc = await steemMesh.call<{ rc_accounts: Array<{ account: string; max_rc: string; rc_manabar: { current_mana: string } }> }>(
+    'rc_api.find_rc_accounts',
+    { accounts: names },
+  )
+  if (!rc.ok) return { error: `rc_api.find_rc_accounts: ${rc.error}` }
+  const byName = new Map(acc.data?.map((a) => [a.name, a]) ?? [])
+  const out: RcAccountState[] = []
+  for (const name of names) {
+    const row = byName.get(name)
+    if (!row) return { error: `account-missing: ${name}` }
+    let vests = 0n
+    try {
+      vests =
+        BigInt(parseVestsRaw(row.vesting_shares)) +
+        BigInt(parseVestsRaw(row.received_vesting_shares)) -
+        BigInt(parseVestsRaw(row.delegated_vesting_shares))
+    } catch (e) {
+      return { error: `vests-parse(${name}): ${e instanceof Error ? e.message : String(e)}` }
+    }
+    if (vests < 0n) vests = 0n
+    if (!Number.isSafeInteger(Number(vests))) return { error: `vests-overflow: ${name} (${vests})` }
+    const rca = rc.data?.rc_accounts?.find((x) => x.account === name)
+    if (!rca) return { error: `rc-account-missing: ${name}` }
+    out.push({
+      name,
+      effectiveVestsRaw: Number(vests),
+      rcMana: parseInt(rca.rc_manabar.current_mana, 10) || 0,
+      rcMax: parseInt(rca.max_rc, 10) || 0,
+    })
+  }
+  return { accounts: out }
+}
+
+/** ההקצאה-הקיימת-של-האוצר→חייל (מהשרשרת — תמיד-קוראים-לפני-שכתוב; ההקצאה-היא-ערך-מוחלט). */
+async function currentDelegationRaw(delegator: string, delegatee: string): Promise<number | { error: string }> {
+  const r = await steemMesh.call<DelegationRow[]>('condenser_api.get_vesting_delegations', [delegator, '', 1000])
+  if (!r.ok) return { error: `get_vesting_delegations: ${r.error}` }
+  const hit = (r.data ?? []).find((d) => d.delegatee === delegatee && d.delegator === delegator)
+  if (!hit) return 0
+  try {
+    return parseVestsRaw(hit.vesting_shares)
+  } catch (e) {
+    return { error: `delegation-parse(${delegatee}): ${e instanceof Error ? e.message : String(e)}` }
+  }
+}
+
+async function executeRcRebalancePulse(): Promise<void> {
+  if (rcRebalanceRunning) {
+    rcRebalance.lastResult = { status: 'skipped — פעימה-קודמת-עוד-בריצה (נעילת-בודד)' }
+    return
+  }
+  rcRebalanceRunning = true
+  try {
+    await executeRcRebalancePulseInner()
+  } finally {
+    rcRebalanceRunning = false
+  }
+}
+
+async function executeRcRebalancePulseInner(): Promise<void> {
+  rcRebalance.cycles++
+  rcRebalance.lastPulseAt = new Date().toISOString()
+  try {
+    const vaultAccounts = parseVaultAccounts()
+    const names = vaultAccounts.map((a) => a.name)
+    if (names.length < 2) {
+      rcRebalance.lastResult = { status: 'no-soldiers (חיילים-נולדים-דרך-צמיחת-הצי-קודם)' }
+      return
+    }
+    const snap = await rcSnapshot(names)
+    if ('error' in snap) {
+      rcRebalance.lastError = snap.error
+      rcRebalance.lastResult = { status: 'snapshot-error (fail-closed — אין-איזון-על-מדידה-חסרה)' }
+      return
+    }
+    rcRebalance.snapshot = snap.accounts
+    const treasury = names[0]!
+    const plan: RcRebalanceResult = rcRebalancePlan({
+      accounts: snap.accounts,
+      treasury,
+      soldierFloorVestsRaw: RC_REBALANCE_FLOOR_VESTS_RAW,
+      treasuryKeepPct: RC_REBALANCE_KEEP_PCT,
+      maxDelegatePerSoldierRaw: RC_REBALANCE_MAX_PER_SOLDIER_RAW,
+      maxDelegationsPerPulse: RC_REBALANCE_MAX_PER_PULSE,
+    })
+    if (plan.noOpReason) {
+      // השער-הכנה: אין-גרעון-מעל-הסף (או אין-עודף-אמת) — אפס-שידורים, מתועד-במלואו
+      rcRebalance.lastResult = { status: 'no-op', reason: plan.noOpReason, skipped: plan.skipped, snapshot: snap.accounts }
+      rcRebalance.lastError = null
+      return
+    }
+    const activeWif = vaultAccounts[0]!.activeWif
+    if (!activeWif) {
+      rcRebalance.lastError = 'custody-gated: אין-ACTIVE-WIF-לאוצר (הקצאה-מחייבת-חתימה-active)'
+      rcRebalance.lastResult = { status: 'custody-gated', plan }
+      return
+    }
+    const executed: Record<string, unknown>[] = []
+    for (const d of plan.delegations) {
+      // תוספתיות-מוכחת: קוראים-את-ההקצאה-הקיימת-מהשרשרת ומחברים — אף-הקצאה-לא-מצטמצמת
+      const current = await currentDelegationRaw(treasury, d.to)
+      if (typeof current === 'object') {
+        executed.push({ to: d.to, status: 'delegation-read-error', error: current.error })
+        rcRebalance.lastError = current.error
+        continue
+      }
+      const target = current + d.vestsRaw
+      const header = await buildHeader()
+      if ('error' in header) {
+        rcRebalance.lastError = header.error
+        break
+      }
+      const targetStr = `${(target / 1e6).toFixed(6)} VESTS`
+      const tx = buildTxBytes(header, [serializeOperation(OP_DELEGATE_VESTING_SHARES, { delegator: treasury, delegatee: d.to, vestingSharesRaw: target })])
+      const signed = signTxBytes(tx, activeWif)
+      const b = await broadcast(signed, header, [['delegate_vesting_shares', { delegator: treasury, delegatee: d.to, vesting_shares: targetStr, extensions: [] }]])
+      if (!b.ok) {
+        executed.push({ to: d.to, currentDelegationRaw: current, grantVestsRaw: d.vestsRaw, status: 'rejected', error: b.error })
+        rcRebalance.lastError = `delegate-broadcast(${d.to}): ${b.error}`
+        continue
+      }
+      // קריאה-חוזרת: ההקצאה-בשרשרת חייבת-להיות בדיוק היעד (אבסולוטית-ומדידה)
+      const after = await currentDelegationRaw(treasury, d.to)
+      const verified = typeof after === 'number' && after === target
+      if (verified) rcRebalance.delegationsBroadcast++
+      executed.push({
+        to: d.to,
+        currentDelegationRaw: current,
+        grantVestsRaw: d.vestsRaw,
+        targetDelegationRaw: target,
+        trxId: b.trxId ?? null,
+        blockNum: b.blockNum ?? null,
+        status: verified ? 'broadcast+verified' : 'broadcast-טרם-נמדד-בקריאה-חוזרת (כנות)',
+        readBackRaw: typeof after === 'number' ? after : null,
+      })
+      console.log(`[rc-rebalance] הקצאה-תוספתית: ${d.vestsRaw / 1e6} VESTS → ${d.to} (סה"כ-הקצאה ${(target / 1e6).toFixed(6)}) — ${verified ? 'נקרא-חזרה-מהשרשרת' : 'שודר'}`)
+    }
+    rcRebalance.lastResult = { status: 'pulse-done', planSkipped: plan.skipped, executed }
+    rcRebalance.lastError = executed.some((e) => e.status === 'rejected' || e.status === 'delegation-read-error') ? rcRebalance.lastError : null
+  } catch (e) {
+    rcRebalance.lastError = e instanceof Error ? e.message : String(e)
+  }
+}
+
+// ══ דירקטיבת-141 §4: מסילת-תוכן-פר-חייל — בונה-טהור + שער-כספת-כנה (אפס-ספאם) ══
+// אין-פעימה-אוטומטית-ואין-לולאת-פרסום: שידור-תוכן רק-בבקשה-ידנית-מאומתת (organAuth)
+// אחת-בכל-קריאה, ורק-כשהשער-הקריפטוגרפי-פתוח (מפתח-הכספת-מוכח-בסמכות-ה-posting-על-השרשרת).
+interface ContentState {
+  custody: { account: string; ok: boolean; reason: string; pubkey: string | null; checkedAt: string | null } | null
+  lastResult: Record<string, unknown> | null
+  published: number
+  lastError: string | null
+  law: string
+}
+const content: ContentState = {
+  custody: null,
+  lastResult: null,
+  published: 0,
+  lastError: null,
+  law: 'דירקטיבת-141 §4 — אין-פרסום-אוטומטי; שער-כספת-posting (precedent-רכבת-HIVE); כל-פרסום-נקרא-חזרה-מהשרשרת',
+}
+
+async function contentCustodyProbe(account: string): Promise<{ decision: CustodyDecision; pubkey: string | null; error: string | null }> {
+  const entry = parseVaultAccounts().find((a) => a.name === account)
+  if (!entry) return { decision: { ok: false, reason: 'no-vault-key' }, pubkey: null, error: `account-not-in-vault: ${account}` }
+  if (!entry.postingWif) return { decision: { ok: false, reason: 'no-vault-key' }, pubkey: null, error: 'אין-POSTING-WIF-בכספת' }
+  let pubkey: string
+  try {
+    pubkey = wifToPubkey(entry.postingWif)
+  } catch (e) {
+    return { decision: { ok: false, reason: 'no-vault-key' }, pubkey: null, error: `vault-key-invalid: ${e instanceof Error ? e.message : String(e)}` }
+  }
+  const r = await steemMesh.call<Array<{ posting: { weight_threshold: number; key_auths: Array<[string, number]> } }>>('condenser_api.get_accounts', [[account]])
+  if (!r.ok || !r.data?.[0]?.posting) {
+    return { decision: { ok: false, reason: 'authority-unreadable' }, pubkey, error: `get_accounts: ${r.error ?? 'no-data'}` }
+  }
+  const authority: PostingAuthorityShape = { threshold: r.data[0]!.posting.weight_threshold, key_auths: r.data[0]!.posting.key_auths }
+  const decision = postingCustodyDecision(pubkey, authority)
+  return { decision, pubkey, error: null }
+}
+
+async function probeContentCustody(account: string): Promise<void> {
+  const probe = await contentCustodyProbe(account)
+  content.custody = {
+    account,
+    ok: probe.decision.ok,
+    reason: probe.error ? `${probe.decision.reason} (${probe.error})` : probe.decision.reason,
+    pubkey: probe.pubkey, // מפתח-פומבי-בלבד — אף-סוד-לא-יוצא-מהדלת
+    checkedAt: new Date().toISOString(),
+  }
+}
+
 async function growthPulse(): Promise<void> {
   try {
     await executeGrowthPulse(
@@ -176,7 +426,13 @@ async function growthPulse(): Promise<void> {
   }
 }
 
+// Task-141-e (audit hardening): single-flight-למחזור — הטיק-וה-/cycle-החיצוני-חולקים-שער-אחד
+let cycleRunning = false
+
 async function tickCycle(): Promise<void> {
+  const gate = engine.cycleGateDecision(cycleRunning)
+  if (!gate.allow) return
+  cycleRunning = true
   try {
     const r = await engine.cycle()
     if (r.placed || r.canceled || r.filledShadow || r.filledLive || r.decisions.length) {
@@ -186,6 +442,8 @@ async function tickCycle(): Promise<void> {
     }
   } catch (e) {
     console.log(`[saos-grid] כשל-מחזור: ${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    cycleRunning = false
   }
 }
 
@@ -225,6 +483,22 @@ try {
           rpcMesh: market.meshHealth(),
           // Task-136 §1 — מנוע-הקציר-העצמי (קיורציה+פרסים — מדידה-חיה)
           harvest: harvestState,
+          // דירקטיבת-141 §2 — איזון-RC-דינמי (מדידה-חיה; אף-מפתח-לא-נחשף)
+          rcRebalance: {
+            cycles: rcRebalance.cycles,
+            lastPulseAt: rcRebalance.lastPulseAt,
+            lastResult: rcRebalance.lastResult,
+            delegationsBroadcast: rcRebalance.delegationsBroadcast,
+            lastError: rcRebalance.lastError,
+            policy: {
+              treasuryKeepPct: RC_REBALANCE_KEEP_PCT,
+              soldierFloorVestsRaw: RC_REBALANCE_FLOOR_VESTS_RAW,
+              maxPerSoldierRaw: RC_REBALANCE_MAX_PER_SOLDIER_RAW,
+              maxPerPulse: RC_REBALANCE_MAX_PER_PULSE,
+            },
+          },
+          // דירקטיבת-141 §4 — מסילת-תוכן (שער-כספת-כנה; אף-סוד-לא-נחשף)
+          contentRail: { custody: content.custody, published: content.published, lastError: content.lastError, law: content.law },
           // Task-137 §2 — מנוע-צמיחת-הצי (חיילים-חדשים-מבפנים — מדידה-חיה; אף-מפתח-לא-נחשף)
           fleetGrowth: {
             soldiers: fleetGrowth.soldiers.map((s) => ({ name: s.name, createdAt: s.createdAt, delegatedVestsRaw: s.delegatedVestsRaw })),
@@ -246,6 +520,116 @@ try {
       }
       if (p === '/fleet-drip') {
         return Response.json({ ok: true, drip: dripState })
+      }
+      // דירקטיבת-141 §2 — איזון-RC: מצב-חי + הצתה-ידנית-מאומתת
+      if (p === '/rc-rebalance') {
+        return Response.json({ ok: true, rcRebalance })
+      }
+      if (p === '/rc-rebalance/run' && req.method === 'POST') {
+        const deny = organAuth(req)
+        if (deny) return deny
+        await executeRcRebalancePulse()
+        return Response.json({ ok: true, rcRebalance })
+      }
+      // דירקטיבת-141 §4 — מסילת-תוכן: מצב-שער-כנה + פרסום-ידני-מאומת-יחיד (אפס-ספאם)
+      if (p === '/content/state') {
+        return Response.json({ ok: true, content })
+      }
+      if (p === '/content/custody' && req.method === 'POST') {
+        const deny = organAuth(req)
+        if (deny) return deny
+        const body = (await req.json().catch(() => ({}))) as { account?: string }
+        const account = String(body.account ?? parseVaultAccounts()[0]?.name ?? '')
+        await probeContentCustody(account)
+        return Response.json({ ok: true, content })
+      }
+      if (p === '/content/publish' && req.method === 'POST') {
+        const deny = organAuth(req)
+        if (deny) return deny
+        const body = (await req.json().catch(() => ({}))) as {
+          account?: string
+          title?: string
+          body?: string
+          permlink?: string
+          parentAuthor?: string
+          parentPermlink?: string
+          jsonMetadata?: string
+        }
+        const account = String(body.account ?? parseVaultAccounts()[0]?.name ?? '')
+        const probe = await contentCustodyProbe(account)
+        content.custody = {
+          account,
+          ok: probe.decision.ok,
+          reason: probe.error ? `${probe.decision.reason} (${probe.error})` : probe.decision.reason,
+          pubkey: probe.pubkey,
+          checkedAt: new Date().toISOString(),
+        }
+        if (!probe.decision.ok) {
+          // חוק-הכספת (precedent-רכבת-HIVE): שער-נעול = אף-חתימה-על-אוויר, כנות-מלאה
+          content.lastError = `custody-locked: ${content.custody?.reason}`
+          content.lastResult = { status: 'custody-locked', reason: content.custody?.reason }
+          return Response.json({ ok: false, error: content.lastError, content }, { status: 403 })
+        }
+        const built = buildContentOp({
+          author: account,
+          permlink: String(body.permlink ?? ''),
+          title: String(body.title ?? ''),
+          body: String(body.body ?? ''),
+          parentAuthor: body.parentAuthor === undefined ? undefined : String(body.parentAuthor),
+          parentPermlink: body.parentPermlink === undefined ? undefined : String(body.parentPermlink),
+          jsonMetadata: body.jsonMetadata === undefined ? undefined : String(body.jsonMetadata),
+        })
+        if (!built.ok) {
+          content.lastError = `content-invalid: ${built.error}`
+          content.lastResult = { status: 'invalid', error: built.error }
+          return Response.json({ ok: false, error: built.error, content }, { status: 400 })
+        }
+        const entry = parseVaultAccounts().find((a) => a.name === account)
+        if (!entry?.postingWif) {
+          content.lastError = 'custody-gated: אין-POSTING-WIF-בכספת'
+          content.lastResult = { status: 'custody-gated' }
+          return Response.json({ ok: false, error: content.lastError, content }, { status: 403 })
+        }
+        const header = await buildHeader()
+        if ('error' in header) {
+          content.lastError = header.error
+          return Response.json({ ok: false, error: header.error, content }, { status: 502 })
+        }
+        const c = built.comment
+        const tx = buildTxBytes(header, [serializeOperation(OP_COMMENT, c)])
+        const signed = signTxBytes(tx, entry.postingWif)
+        const b = await broadcast(signed, header, [[
+          'comment',
+          {
+            parent_author: c.parentAuthor,
+            parent_permlink: c.parentPermlink,
+            author: c.author,
+            permlink: c.permlink,
+            title: c.title,
+            body: c.body,
+            json_metadata: c.jsonMetadata,
+          },
+        ]])
+        if (!b.ok) {
+          content.lastError = `comment-broadcast: ${b.error}`
+          content.lastResult = { status: 'rejected', error: b.error }
+          return Response.json({ ok: false, error: b.error, content }, { status: 502 })
+        }
+        // קריאה-חוזרת: התוכן-חייב-להיות-קריא-מהשרשרת בטרם-נספר
+        const readBack = await steemMesh.call<{ author?: string; permlink?: string }>('condenser_api.get_content', [c.author, c.permlink])
+        const verified = readBack.ok && readBack.data?.author === c.author && readBack.data?.permlink === c.permlink
+        if (verified) content.published++
+        content.lastResult = {
+          status: verified ? 'broadcast+verified' : 'broadcast-טרם-נמדד-בקריאה-חוזרת (כנות)',
+          author: c.author,
+          permlink: c.permlink,
+          parentAuthor: c.parentAuthor,
+          blockNum: b.blockNum ?? null,
+          trxId: b.trxId ?? null,
+        }
+        content.lastError = verified ? null : 'פורסם-אך-הקריאה-החוזרת-טרם-מדדה (כנות)'
+        console.log(`[content] פרסום (${c.author}): @${c.author}/${c.permlink.slice(0, 40)} — ${verified ? 'נקרא-חזרה-מהשרשרת' : 'שודר'}`)
+        return Response.json({ ok: true, content })
       }
       if (p === '/fleet-drip/run' && req.method === 'POST') {
         const deny = organAuth(req)
@@ -292,8 +676,17 @@ try {
       if (p === '/cycle' && req.method === 'POST') {
         const deny = organAuth(req)
         if (deny) return deny
-        const r = await engine.cycle()
-        return Response.json({ ok: true, ...r })
+        const gate = engine.cycleGateDecision(cycleRunning)
+        if (!gate.allow) {
+          return Response.json({ ok: false, busy: true, reason: gate.reason }, { status: 409 })
+        }
+        cycleRunning = true
+        try {
+          const r = await engine.cycle()
+          return Response.json({ ok: true, ...r })
+        } finally {
+          cycleRunning = false
+        }
       }
       if (p === '/backtest') {
         // Task-107 — backtest-מדיד (דפוס-AutoHedge backtest_market_maker, הותאם):
@@ -405,6 +798,25 @@ setInterval(() => {
 setTimeout(() => {
   void executeDripPulse()
 }, 70_000) // אחרי-המחזור-הראשון-של-הגריד — שהידיים-כבר-טעונות
+
+// ── דירקטיבת-141 §4: סקר-שער-התוכן — השער-נפתח-אוטומטית-כשהמפתח-מוכח-בשרשרת ──
+// (סקר-בלבד — לא-פרסום; הפרסום-עצמו ידני-מאומת-בלבד, אפס-ספאם)
+const CONTENT_CUSTODY_MS = Number(process.env.SAOS_CONTENT_CUSTODY_MS ?? 15 * 60_000)
+setInterval(() => {
+  void probeContentCustody(parseVaultAccounts()[0]?.name ?? 'headcorner')
+}, CONTENT_CUSTODY_MS)
+setTimeout(() => {
+  void probeContentCustody(parseVaultAccounts()[0]?.name ?? 'headcorner')
+}, 60_000)
+
+// ── דירקטיבת-141 §2: פעימת-איזון-RC — כל-30 דק' (מדידה-ראשון; no-op-כנה-כברירת-מחדל) ──
+const RC_REBALANCE_MS = Number(process.env.SAOS_RC_REBALANCE_MS ?? 30 * 60_000)
+setInterval(() => {
+  void executeRcRebalancePulse()
+}, RC_REBALANCE_MS)
+setTimeout(() => {
+  void executeRcRebalancePulse()
+}, 100_000)
 
 // ── Task-137 §2: סקר-כספת-דבורה כל-15 דק' — השער-נפתח-אוטומטית-כשמפתח-תקף-מופיע ──
 const HIVE_PROBE_MS = Number(process.env.SAOS_HIVE_PROBE_MS ?? 15 * 60_000)

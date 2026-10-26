@@ -23,6 +23,7 @@ import { ripemd160 } from '@noble/hashes/ripemd160.js'
 // (condenser_api.get_transaction_hex, צליבה-3-צמתים) — שיטת-המערכת-על-3-וקטורים
 // פתרה-את-הפריסה: ל-claim יש extensions, ל-delegate אין — המדידה-הכריעה.
 export const OP_VOTE = 0
+export const OP_COMMENT = 1 // דירקטיבת-141 §4: וקטור-השרשרת trx 9be6db47… (בלוק 110585258) — steem-tx.test.ts
 export const OP_TRANSFER = 2
 export const OP_LIMIT_ORDER_CREATE = 5
 export const OP_CLAIM_REWARD_BALANCE = 39
@@ -122,6 +123,17 @@ export interface VoteOp {
   /** bps-שליטה: -10000 (הצבעת-דגל) עד 10000; 0=אסור (אפס-פעולה) */
   weight: number
 }
+export interface CommentOp {
+  /** '' = פוסט-שורש; אחרת — permlink-ההורה-לתגובה */
+  parentAuthor: string
+  /** לשורש: תג-האב; לתגובה: permlink-ההורה */
+  parentPermlink: string
+  author: string
+  permlink: string
+  title: string
+  body: string
+  jsonMetadata: string
+}
 export interface TransferOp {
   from: string
   to: string
@@ -219,7 +231,7 @@ export function serializeAuthority(a: AccountAuthority): Uint8Array {
 
 export function serializeOperation(
   opId: number,
-  data: VoteOp | TransferOp | LimitOrderCreateOp | ClaimRewardBalanceOp | ClaimAccountOp | CreateClaimedAccountOp | DelegateVestingSharesOp | AccountCreateOp,
+  data: VoteOp | CommentOp | TransferOp | LimitOrderCreateOp | ClaimRewardBalanceOp | ClaimAccountOp | CreateClaimedAccountOp | DelegateVestingSharesOp | AccountCreateOp,
 ): Uint8Array {
   const body: number[] = []
   if (opId === OP_VOTE) {
@@ -230,6 +242,17 @@ export function serializeOperation(
     pushString(body, d.author)
     pushString(body, d.permlink)
     pushU16(body, d.weight & 0xffff)
+  } else if (opId === OP_COMMENT) {
+    // וקטור-דירקטיבת-141: 7 מחרוזות-בסדר-קנון — parent_author, parent_permlink,
+    // author, permlink, title, body, json_metadata — אין-op-extensions (המדידה-הכריעה)
+    const d = data as CommentOp
+    pushString(body, d.parentAuthor)
+    pushString(body, d.parentPermlink)
+    pushString(body, d.author)
+    pushString(body, d.permlink)
+    pushString(body, d.title)
+    pushString(body, d.body)
+    pushString(body, d.jsonMetadata)
   } else if (opId === OP_TRANSFER) {
     const d = data as TransferOp
     pushString(body, d.from)

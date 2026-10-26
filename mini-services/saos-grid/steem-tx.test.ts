@@ -12,6 +12,7 @@ import {
   assetAmount,
   buildTxBytes,
   OP_CLAIM_REWARD_BALANCE,
+  OP_COMMENT,
   OP_LIMIT_ORDER_CREATE,
   OP_TRANSFER,
   OP_VOTE,
@@ -302,5 +303,44 @@ describe('תאימות-dhive: generateWif גרפני-טהור + wifToGrapheneWif
 
   test('wifToGrapheneWif: WIF-פגום → זורק (fail-closed)', () => {
     expect(() => wifToGrapheneWif('not-a-real-wif')).toThrow()
+  })
+})
+
+// ═════════════════════════════════════════════════════════════════════════════
+// דירקטיבת-141 §4 — וקטור-השרשרת ל-op-comment (id=1):
+// trx 9be6db47b9ad7a67c976438eaa1dec6239ad9bf9 (בלוק 110585258, steemit),
+// condenser_api.get_transaction_hex 26/10 — ההוקס-הקנוני כולו נעול-כאן.
+// ל-comment אין op-extensions (המדידה-הכריעה — כמו-transfer/delegate).
+// ═════════════════════════════════════════════════════════════════════════════
+describe('OP_COMMENT — וקטור-השרשרת-בייט-בייט (trx 9be6db47…, בלוק 110585258)', () => {
+  const CHAIN_HEX =
+    '9765d6c7d166cba7d66a010108626c616b656d616706746e35316270066c757065676106746e3668316300' +
+    '2f5468616e6b20796f752076657279206d7563683b207468652073756e736574206973206d61676e69666963656e742e' +
+    '157b22617070223a22737465656d69742f302e32227d0000' // הזנב: 00=tx-ext, 00=ספירת-חתימות (לא-חלק-מ-buildTxBytes)
+
+  const op = {
+    parentAuthor: 'blakemag',
+    parentPermlink: 'tn51bp',
+    author: 'lupega',
+    permlink: 'tn6h1c',
+    title: '',
+    body: 'Thank you very much; the sunset is magnificent.',
+    jsonMetadata: '{"app":"steemit/0.2"}',
+  }
+
+  test('serializeOperation(OP_COMMENT) == פעולת-השרשרת בייט-בייט', () => {
+    // מבנה-ההוקס: header-10-בייטים + varint(1)-פעולות + גוף-הפעולה + 00-ext + 00-sigs
+    const expectedOpHex = CHAIN_HEX.slice(22, -4)
+    expect(Buffer.from(serializeOperation(OP_COMMENT, op)).toString('hex')).toBe(expectedOpHex)
+  })
+
+  test('buildTxBytes על-ה-header-האמיתי == ההוקס-הקנוני (בלי-ספירת-חתימות)', () => {
+    const header = { refBlockNum: 26007, refBlockPrefix: 1725024214, expirationEpoch: 1792452555 }
+    const tx = buildTxBytes(header, [serializeOperation(OP_COMMENT, op)])
+    expect(Buffer.from(tx).toString('hex')).toBe(CHAIN_HEX.slice(0, -2))
+  })
+
+  test('id-הפעולה = 1 (comment) — מוכח-מההוקס-עצמו', () => {
+    expect(OP_COMMENT).toBe(1)
   })
 })

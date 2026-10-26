@@ -5,6 +5,8 @@ import { describe, expect, test } from 'bun:test'
 import {
   claimDecision,
   curationCandidates,
+  rotationAccount,
+  rcVoteGate,
   voteWeightBps,
   type Discussion,
   type PendingRewards,
@@ -120,5 +122,42 @@ describe('curationCandidates — בחירה דטרמיניסטית מרשימו�
     const picked = curationCandidates(all, { nowEpochMs: now, minAgeMin: 5, maxAgeMin: 240, minRep: 50, minPendingMicros: 1, limit: 3 })
     expect(picked).toHaveLength(3)
     expect(picked[0].pendingPayout).toBe(10_000_000) // הגדול-ראשון
+  })
+})
+
+// ═════════════════════════════════════════════════════════════════════════════
+// דירקטיבת-141 §2 — סבב-קיורציה-פר-חייל + שער-RC-מדיד (ליבה-טהורה)
+// ═════════════════════════════════════════════════════════════════════════════
+describe('rotationAccount — סבב-הקיורציה-על-כל-חיילי-הכספת', () => {
+  test('סבב-מדויק: פעימה-k → החשבון-ה-k', () => {
+    const order = ['headcorner', 'saos-0001', 'saos-0002', 'saos-0003', 'saos-0004']
+    expect(rotationAccount(order, 0)).toBe('headcorner')
+    expect(rotationAccount(order, 1)).toBe('saos-0001')
+    expect(rotationAccount(order, 4)).toBe('saos-0004')
+    expect(rotationAccount(order, 5)).toBe('headcorner') // חוזר-לראש
+    expect(rotationAccount(order, 12)).toBe('saos-0002')
+  })
+
+  test('קלט-פגום → null (רשימה-ריקה / אינדקס-לא-שלם-שלילי-מתדרדר-ל-0)', () => {
+    expect(rotationAccount([], 3)).toBeNull()
+    expect(rotationAccount(['a'], -7)).toBe('a') // שלילי → דורד ל-0 (כנה, לא-קריסה)
+    expect(rotationAccount(['a', 'b'], Number.NaN)).toBe('a')
+  })
+})
+
+describe('rcVoteGate — שער-RC-מדיד-בטרם-הצבעה (אפס-סערת-שידורים-נכשלים)', () => {
+  test('mana-מדוד-מעל-המינימום → ההצבעה-מותרת', () => {
+    expect(rcVoteGate(6_832_919_319, 2_000_000_000)).toBe(true) // חייל-מלא-חי (נמדד-חי 26/10)
+    expect(rcVoteGate(2_000_000_000, 2_000_000_000)).toBe(true) // על-הגבול = מותר
+  })
+
+  test('mana-מתחת-למינימום → חסום (שימור-הרשת — לא-שולחים-שידור-שיכשל)', () => {
+    expect(rcVoteGate(1_999_999_999, 2_000_000_000)).toBe(false)
+    expect(rcVoteGate(0, 2_000_000_000)).toBe(false)
+  })
+
+  test('לא-נמדד → fail-closed (מצב-לא-מאומת = עצירה-כנה, לא-המצאה)', () => {
+    expect(rcVoteGate(null, 2_000_000_000)).toBe(false)
+    expect(rcVoteGate(Number.NaN, 2_000_000_000)).toBe(false)
   })
 })

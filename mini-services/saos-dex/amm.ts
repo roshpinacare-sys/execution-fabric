@@ -67,11 +67,31 @@ export function seedPool(base: string, quote: string, reserveBaseMu: number, res
   return { base, quote, reserveBaseMu: rb, reserveQuoteMu: rq, feeBps, lpSharesMu: shares }
 }
 
+// ── זריעה-על-מחיר-ה-fair (Task-141-b — הפעלת-הבריכות) ────────────────────────
+// חוזה-הזריעה-הכן: צד-ה-quote מחושב-כך-שמחיר-הבריכה ברגע-היוולדה יהיה-בדיוק
+// מחיר-ה-fair של הספר (µ-quote ליחידת-בסיס-שלמה — סקאלת-refSeedMu/book):
+//   rq = floor(rb × fairMu / 1_000_000)  ⟹  px = floor(rq×1e6/rb) ≤ fairMu
+// הרצפה-תמיד-לטובת-הבריכה: אם המנה-אינה-מתחלקת, העיגול-למטה מציב-את-המחיר
+// מעט-מתחת-ל-fair (בריכה-זולה-ב-µ-בודדים אינה-מציעה-רווח-פיקטיבי-מול-הספר;
+// אובדן-העיגול ≤ ceil(1e6/rb)+1 µ — מוכח-בamm.test.ts). אפס-צפים, דטרמיניזם.
+export function seedQuoteAtFairMu(reserveBaseMu: number, fairMu: number): number {
+  assertMu(reserveBaseMu, 'reserveBaseMu')
+  if (!Number.isSafeInteger(fairMu) || fairMu <= 0)
+    throw new Error(`AMM: fairMu חייב-µ-שלם-חיובי (קיבל ${fairMu})`)
+  return Math.floor((reserveBaseMu * fairMu) / 1_000_000)
+}
+
 // ── ציטוט-טהור (מסילת-ה-arb: GET /amm/quote) ────────────────────────────────
+// Task-141-b (הכנות-מסוג-התקשרות): quoteSwap מחזיר-את-תוצאת-applySwap המלאה —
+// כולל `pool`: הבריכה-המדומה-אחרי-ההחלפה (תצוגה-מקדימה-טהורה; אפס-כתיבה-למסד,
+// נמדד-ואומת-חי 26/10: ה-pools-ב-db נשארים-בדיוק-על-עתודות-הזריעה). ה-HTTP מפיץ
+// את-התצוגה-לצרכן (שדה pool בתשובת-/amm/quote) — עתה-הוא-חתום-בטיפוס.
 export interface SwapQuote {
   outMu: number
   feeMu: number
   priceAfterMu: number // µ-quote ל-µ-base אחרי-ההחלפה
+  /** הבריכה-אחרי-ההחלפה-המדומה (תצוגה-מקדימה-טהורה — אפס-שינוי-מצב-אמת) */
+  pool: Pool
 }
 export function quoteSwap(pool: Pool, direction: 'baseToQuote' | 'quoteToBase', amountInMu: number): SwapQuote {
   return applySwap(pool, direction, amountInMu, 0)

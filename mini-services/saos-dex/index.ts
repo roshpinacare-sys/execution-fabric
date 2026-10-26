@@ -28,6 +28,12 @@
 //  POST /saos-dex/api/dex/htlc/claim      → { id, secret } — פדיון ב-preimage-נכון לפני-הפקיעה
 //  POST /saos-dex/api/dex/htlc/refund     → { id } — החזרה-לשולח אחרי-הפקיעה-בלבד
 //  GET  /saos-dex | /health              → חיות-כנה
+//  Task-141-b (§2/§4 — הפעלת-בריכות-USDS + לכידת-מיקרו-פרשים):
+//  לולאת-לכידה פנימית (כל SAOS_DEX_CAPTURE_MS, ברירת-מחדל 15ש׳) משווה מחיר-בריכה
+//  מול-fair-הספר ויורה רק-על-רווח-אמת-אחרי-עמלה (feeMu≥1µ ורווח≥1µ — captureStep,
+//  מוכח-בspread.test.ts) דרך runAmmSwap — שער-הסיכונים נאכף-גם-על-היד. סטטוס-
+//  הלולאה חי-ב-/health (capture). מחיר-מילוי-AMM בפנקס המילויים מתוקן-לשני-הכיוונים
+//  (swapFillPriceMu — הישן רשם מחיר-הפוך-פי-מיליון על quoteToBase).
 // אימות-POST: x-saos-operator מול upload/dex-operator.env (נקרא-בזמן-ריצה; אפס-חשיפה).
 // אריתמטיקה: µ-שלמים בלבד בכל-נתיבי-הכסף (mu = 1e-6); אפס-צפים-בפנקס.
 // התמדה: bun:sqlite (state/dex.db) — פקודות/מילויים/ארנקות שורדים-הפעלה-מחדש.
@@ -37,6 +43,7 @@ import { join, resolve } from 'path'
 import { existsSync, readFileSync, mkdirSync } from 'fs'
 import { free, finalizeTaker, matchOrderCore, type Order, type WalletRec } from './engine'
 import { addLiquidityShares, applySwap, quoteSwap, seedPool, type Pool } from './amm'
+import { captureDueMs, captureStep, swapFillPriceMu } from './spread'
 import { DEFAULT_RISK, depthSingleCapMu, driftBps, preTradeGate, type RiskConfig, type RiskWindow } from './risk'
 import {
   canClaim,
@@ -288,14 +295,196 @@ function riskHalted(poolId: string): string | null {
   return v && v.length > 0 ? v : null
 }
 
+// ── ליבת-ההחלפה (Task-141-b): חולצה-מהמטפל — משותפת ל-HTTP וללולאת-הלכידה ────
+// הסמנטיקה זהה-מילה-במילה למטפל-של-Task-135/136: סדר-הבדיקות לא-שונה
+// (בריכה → כיוון → סוחר → halt → שער-סיכונים → יתרה → applySwap), fail-closed
+// על minOut, עמלה+מחיק-נשארים-בבריכה (A1), קבלה-hash-linked best-effort.
+type OpOk = { ok: true; payload: Record<string, unknown> }
+type OpErr = { ok: false; error: string; status: number; extra?: Record<string, unknown> }
+function runAmmSwap(a: {
+  trader: string
+  base: string
+  quote: string
+  direction: string
+  amountInMu: number
+  minOutMu: number
+}): OpOk | OpErr {
+  const pool = poolByPairRow(db, a.base, a.quote)
+  if (!pool) return { ok: false, error: 'pool-not-found', status: 404 }
+  if (a.direction !== 'baseToQuote' && a.direction !== 'quoteToBase')
+    return { ok: false, error: 'bad-direction', status: 400 }
+  const direction = a.direction
+  const w = wallet(a.trader)
+  if (!w) return { ok: false, error: 'unknown-trader', status: 400 }
+  if (existsSync(HALT_PATH)) return { ok: false, error: 'halted', status: 423 }
+  // ── ארון-הסיכונים האדפטיבי (Task-136 §1): השער-קודם-לחיוב; סטייה-רכה=עיגון-עצמי-חתום; אפס-קפיאות ──
+  const rh = riskHalted(pool.id)
+  if (rh) return { ok: false, error: `risk-halt: ${rh}`, status: 423, extra: { poolId: pool.id } }
+  const curPx = poolPriceMu(pool.reserveBaseMu, pool.reserveQuoteMu)
+  const anchor = anchorPriceMu(pool.id, curPx)
+  const drift = curPx !== null && anchor !== null ? driftBps(curPx, anchor) : null
+  const reserveInMu = direction === 'baseToQuote' ? pool.reserveBaseMu : pool.reserveQuoteMu
+  const win0 = riskWindows.get(pool.id) ?? { lastMs: Date.now(), availMu: RISK.windowCapMu }
+  const verdict = preTradeGate(
+    { amountInMu: a.amountInMu, driftBps: drift, reserveInMu, halted: false, nowMs: Date.now() },
+    RISK,
+    win0,
+  )
+  if (!verdict.allow) {
+    if (verdict.reason.startsWith('integrity-drift')) {
+      // סטיית-שלמות-אמת (>50% בחלון) — העצירה-היחידה-שנותרת; שורדת-הפעלה-מחדש (meta)
+      setMeta(db, `amm:risk-halt:${pool.id}`, verdict.reason)
+      log(`🛑 ארון-הסיכונים: סטיית-שלמות — ${verdict.reason} (בריכה ${pool.id}; מחיר ${curPx}µ מול-עוגן ${anchor}µ)`)
+    } else {
+      log(`ארון-הסיכונים: נדחה (${verdict.reason}) — ${a.amountInMu}µ על-בריכה ${pool.id}; אפס-שינוי-מצב`)
+    }
+    return {
+      ok: false,
+      error: verdict.reason,
+      status: verdict.httpStatus,
+      extra: { poolId: pool.id, risk: { driftBps: drift, anchorPriceMu: anchor, bucketAvailMu: verdict.window.availMu, windowCapMu: RISK.windowCapMu } },
+    }
+  }
+  riskWindows.set(pool.id, verdict.window) // אימוץ-הדלי רק-אחרי-ההיתר
+  if (verdict.reAnchor && curPx !== null) {
+    // עיגון-עצמי-חתום (Task-136 §1/§6): העוגן-עוקב-אחרי-מחיר-האמת; המסחר-מעולם-לא-נעצר
+    setMeta(db, `amm:seedpx:${pool.id}`, String(curPx))
+    reportReceipt('dex-desk-reanchor', 'anchored', 'saos-dex:desk', sha256Hex(JSON.stringify({ poolId: pool.id, prevAnchorPriceMu: anchor, newAnchorPriceMu: curPx, driftBps: verdict.driftBps })), 0)
+    log(`⚖️ ארון-הסיכונים: עיגון-עצמי ${anchor}µ→${curPx}µ (סטייה נמדדה ${verdict.driftBps}bps) — המסחר-המשיך, קבלה-חתומה`)
+  }
+  const inAsset = direction === 'baseToQuote' ? a.base : a.quote
+  const outAsset = direction === 'baseToQuote' ? a.quote : a.base
+  if (free(w, inAsset) < a.amountInMu)
+    return { ok: false, error: 'insufficient-free-funds', status: 400 }
+  let r: ReturnType<typeof applySwap>
+  try {
+    r = applySwap(pool, direction, a.amountInMu, a.minOutMu)
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e), status: 400 }
+  }
+  // העברת-כספים: סוחר ← in, בריכה → out; עמלה+מחיק נשארים-בעתודות (A1)
+  w.balances[inAsset] = (w.balances[inAsset] ?? 0) - a.amountInMu
+  w.balances[outAsset] = (w.balances[outAsset] ?? 0) + r.outMu
+  saveWallet(w)
+  const pw = wallet(pool.walletName)
+  if (!pw) return { ok: false, error: 'pool-wallet-missing', status: 500 }
+  pw.balances[inAsset] = (pw.balances[inAsset] ?? 0) + a.amountInMu
+  pw.balances[outAsset] = (pw.balances[outAsset] ?? 0) - r.outMu
+  saveWallet(pw)
+  updatePoolRow(db, r.pool)
+  // Task-141-b: מחיר-מילוי-אמת בשני-הכיוונים (swapFillPriceMu; הישן רשם out/in גם-בקנייה)
+  insertFillRow(db, { base: a.base, quote: a.quote, side: `amm-${direction}`, priceMu: swapFillPriceMu(direction, a.amountInMu, r.outMu), amountMu: r.outMu, buyer: a.trader, seller: pool.walletName })
+  // סליקה-ל-fleet-economy (§2/§5): קבלה-hash-linked-על-השרשרת — best-effort
+  reportReceipt('dex-amm-swap', 'filled', `saos-dex:${a.trader}`, sha256Hex(JSON.stringify({ trader: a.trader, base: a.base, quote: a.quote, direction, amountInMu: a.amountInMu, outMu: r.outMu, height })), 0)
+  return { ok: true, payload: { trader: a.trader, base: a.base, quote: a.quote, direction, amountInMu: a.amountInMu, outMu: r.outMu, feeMu: r.feeMu, priceAfterMu: r.priceAfterMu, height: bump() } }
+}
+
+// ── לולאת-לכידת-מיקרו-פרשים (Task-141-b — הנחיה §2/§4) ─────────────────────────
+// נמדד-תחילה: אין-שום-לולאת-סחר-קיימת באיבר (אפס-setInterval ב-saos-dex) — נוסף
+// שלב-מזערי-דטרמיניסטי: כל-CAPTURE_MS נמדדת סטיית מחיר-בריכה מול-fair-הספר, וירי
+// רק-על-רווח-אמת-אחרי-עמלה (captureStep — S1–S6, מוכח-בspread.test.ts). הביצוע
+// דרך runAmmSwap עצמו — שער-הסיכונים וה-fail-closed נאכפים-גם-על-היד. כל-החלטה
+// נחתמת-כן כאן וב-/health — אפס-ירי-מזויף, אפס-תרומת-עמלות-נסתרת.
+const CAPTURE_MS = envNum('SAOS_DEX_CAPTURE_MS', 15_000)
+interface CaptureStats {
+  armed: boolean
+  everyMs: number
+  ticks: number
+  decisions: number
+  fires: number
+  rejected: number
+  lastAt: string | null
+  lastReason: string | null
+  lastFire: string | null
+}
+// חסין-הפעלה-חמה (--hot): הסטטיסטיקה והטיימר חיים-על globalThis; הפונקציה נקשרת-
+// מחדש בכל-טעינה — הסגר הישן לא מצטבר, המונים שורדים-טעינה (מדוד ומתועד).
+const G_HOT = globalThis as unknown as {
+  __saosDexCaptureStats?: CaptureStats
+  __saosDexCaptureTick?: () => void
+  __saosDexCaptureTimer?: ReturnType<typeof setInterval>
+  __saosDexCaptureLastTickMs?: number
+}
+const captureStats: CaptureStats = G_HOT.__saosDexCaptureStats ?? {
+  armed: false,
+  everyMs: CAPTURE_MS,
+  ticks: 0,
+  decisions: 0,
+  fires: 0,
+  rejected: 0,
+  lastAt: null,
+  lastReason: null,
+  lastFire: null,
+}
+captureStats.everyMs = CAPTURE_MS
+G_HOT.__saosDexCaptureStats = captureStats
+
+function captureTick(): void {
+  captureStats.ticks++
+  if (existsSync(HALT_PATH)) {
+    captureStats.lastReason = 'halted'
+    return
+  }
+  for (const m of MARKETS) {
+    const pool = poolByPairRow(db, m.base, m.quote)
+    if (!pool) continue // בריכה-לא-נזרעה — אין-מה-ללכוד (נרשם-כן באימות-הזריעה)
+    const hand = wallet('amm-loop')
+    if (!hand) continue // אין-יד — אין-סוחר (כנות)
+    const fair = marketView(m.base, m.quote).fair
+    const dec = captureStep(pool, fair, { freeQuoteMu: free(hand, m.quote), freeBaseMu: free(hand, m.base) })
+    captureStats.decisions++
+    captureStats.lastAt = new Date().toISOString()
+    if (dec.action === 'idle') {
+      captureStats.lastReason = `${m.base}/${m.quote}: ${dec.reason}`
+      continue // המתנה-כנה — אין-עסקה-לא-רווחית
+    }
+    const r = runAmmSwap({ trader: 'amm-loop', base: m.base, quote: m.quote, direction: dec.action, amountInMu: dec.amountInMu, minOutMu: dec.expectedOutMu })
+    if (r.ok) {
+      captureStats.fires++
+      captureStats.lastFire = `${m.base}/${m.quote} ${dec.action} ${dec.amountInMu}µ→${String(r.payload.outMu)}µ (רווח-צף ${dec.expectedProfitMu}µ)`
+      captureStats.lastReason = null
+      log(`🕷️ לכידת-מיקרו-פרשים: ${captureStats.lastFire}`)
+    } else {
+      captureStats.rejected++
+      captureStats.lastReason = `${m.base}/${m.quote}: נדחה-כן — ${r.error}`
+      log(`🕷️ לכידה-נדחתה-כן (אפס-שינוי-מצב): ${captureStats.lastReason}`)
+    }
+  }
+}
+
+G_HOT.__saosDexCaptureTick = captureTick
+// Task-141-b (נמדד-חי 26/10 15:43–15:53: ticks=0 למשך-שעות): שני-שערים-מתים ב-bun --hot 1.3.14 —
+// (א) הידית-הישנה על-ה-global חסמה-יצירה-מחדש אחרי-ש-hot מנקה-טיימרים; (ב) גם-טיימר-חד-טרי
+// לא-נורה-כלל (בדיקה-מבוקרת: rev-marker נראה-אך-ticks=0 אחרי-מחזור-מלא). הפתרון-הכן:
+// פעימה-עצלה-מכל-בקשת-HTTP דרך-שער-captureDueMs (טהור, מוכח-בspread.test.ts) — הזקיפה/
+// הארב/הסקרים דוגמים-/health ו-/state תדיר → קצב-פעימה-אמת ללא-תלות-בטיימרים.
+// ה-setInterval נשאר-לייצור-ללא-hot (נזק-אפס; כיסוי-כפול). המונים חיים-על-ה-global —
+// שורדים-טעינה-חמה בלי-איפוס.
+function lazyCaptureTick(): void {
+  const nowMs = Date.now()
+  if (!captureDueMs(nowMs, G_HOT.__saosDexCaptureLastTickMs ?? 0, CAPTURE_MS)) return
+  G_HOT.__saosDexCaptureLastTickMs = nowMs
+  try {
+    captureTick()
+  } catch (e) {
+    // כנות: פעימה-כושלת לא מפילה-בקשה — חתום-וכן ב-/health
+    captureStats.lastReason = `tick-error: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
+if (G_HOT.__saosDexCaptureTimer) clearInterval(G_HOT.__saosDexCaptureTimer)
+G_HOT.__saosDexCaptureTimer = setInterval(() => G_HOT.__saosDexCaptureTick?.(), CAPTURE_MS)
+log(`🕷️ לולאת-לכידת-מיקרו-פרשים חמושה — כל ${CAPTURE_MS}ms (יד amm-loop; ירי-רק-על-רווח-אחרי-עמלה; פעימה-עצלה-מכל-בקשה)`)
+captureStats.armed = true
+
 // ── HTTP ─────────────────────────────────────────────────────────────────────
 async function handle(req: Request): Promise<Response> {
+  lazyCaptureTick() // Task-141-b: פעימת-הלכידה-העצלה — מנוהלת-על-ידי-שער-captureDueMs (≤פעימה-אחת ל-CAPTURE_MS)
   const url = new URL(req.url)
   const p = url.pathname
   const cors = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }
 
-  if (req.method === 'GET' && (p === '/health' || p === '/')) return new Response(JSON.stringify({ ok: true, service: 'saos-dex', port: PORT, height, at: new Date().toISOString() }), { headers: cors })
-  if (req.method === 'GET' && p === '/saos-dex') return new Response(JSON.stringify({ ok: true, organ: 'saos-dex', height }), { headers: cors })
+  if (req.method === 'GET' && (p === '/health' || p === '/')) return new Response(JSON.stringify({ ok: true, service: 'saos-dex', port: PORT, height, rev: '141-b', pools: allPoolRows(db).length, capture: captureStats, at: new Date().toISOString() }), { headers: cors })
+  if (req.method === 'GET' && p === '/saos-dex') return new Response(JSON.stringify({ ok: true, organ: 'saos-dex', rev: '141-b', height }), { headers: cors })
 
   if (p === '/saos-dex/api/dex/state' && req.method === 'GET') {
     return new Response(JSON.stringify(fullState()), { headers: cors })
@@ -522,73 +711,17 @@ async function handle(req: Request): Promise<Response> {
     }
 
     if (op === 'amm-swap') {
-      // §7.1: החלפה-מיידית-פנימית — אפס-RPC-חיצוני, אפס-גז; fail-closed על minOut
-      const trader = String(body.trader ?? '')
-      const base = String(body.base ?? ''); const quote = String(body.quote ?? '')
-      const direction = String(body.direction ?? '')
-      const amountInMu = Math.round(Number(body.amountInMu ?? 0))
-      const minOutMu = Math.round(Number(body.minOutMu ?? 0))
-      const pool = poolByPairRow(db, base, quote)
-      if (!pool) return new Response(JSON.stringify({ ok: false, error: 'pool-not-found' }), { status: 404, headers: cors })
-      if (direction !== 'baseToQuote' && direction !== 'quoteToBase')
-        return new Response(JSON.stringify({ ok: false, error: 'bad-direction' }), { status: 400, headers: cors })
-      const w = wallet(trader)
-      if (!w) return new Response(JSON.stringify({ ok: false, error: 'unknown-trader' }), { status: 400, headers: cors })
-      if (existsSync(HALT_PATH)) return new Response(JSON.stringify({ ok: false, error: 'halted' }), { status: 423, headers: cors })
-      // ── ארון-הסיכונים האדפטיבי (Task-136 §1): השער-קודם-לחיוב; סטייה-רכה=עיגון-עצמי-חתום; אפס-קפיאות ──
-      const rh = riskHalted(pool.id)
-      if (rh) return new Response(JSON.stringify({ ok: false, error: `risk-halt: ${rh}`, poolId: pool.id }), { status: 423, headers: cors })
-      const curPx = poolPriceMu(pool.reserveBaseMu, pool.reserveQuoteMu)
-      const anchor = anchorPriceMu(pool.id, curPx)
-      const drift = curPx !== null && anchor !== null ? driftBps(curPx, anchor) : null
-      const reserveInMu = direction === 'baseToQuote' ? pool.reserveBaseMu : pool.reserveQuoteMu
-      const win0 = riskWindows.get(pool.id) ?? { lastMs: Date.now(), availMu: RISK.windowCapMu }
-      const verdict = preTradeGate(
-        { amountInMu, driftBps: drift, reserveInMu, halted: false, nowMs: Date.now() },
-        RISK, win0,
-      )
-      if (!verdict.allow) {
-        if (verdict.reason.startsWith('integrity-drift')) {
-          // סטיית-שלמות-אמת (>50% בחלון) — העצירה-היחידה-שנותרה; שורדת-הפעלה-מחדש (meta)
-          setMeta(db, `amm:risk-halt:${pool.id}`, verdict.reason)
-          log(`🛑 ארון-הסיכונים: סטיית-שלמות — ${verdict.reason} (בריכה ${pool.id}; מחיר ${curPx}µ מול-עוגן ${anchor}µ)`)
-        } else {
-          log(`ארון-הסיכונים: נדחה (${verdict.reason}) — ${amountInMu}µ על-בריכה ${pool.id}; אפס-שינוי-מצב`)
-        }
-        return new Response(JSON.stringify({ ok: false, error: verdict.reason, poolId: pool.id, risk: { driftBps: drift, anchorPriceMu: anchor, bucketAvailMu: verdict.window.availMu, windowCapMu: RISK.windowCapMu } }), { status: verdict.httpStatus, headers: cors })
-      }
-      riskWindows.set(pool.id, verdict.window) // אימוץ-הדלי רק-אחרי-ההיתר
-      if (verdict.reAnchor && curPx !== null) {
-        // עיגון-עצמי-חתום (Task-136 §1/§6): העוגן-עוקב-אחרי-מחיר-האמת; המסחר-מעולם-לא-נעצר;
-        // ההחלטה-חתומה-על-שרשרת-האמת — קבלת-שולחן-hash-linked.
-        setMeta(db, `amm:seedpx:${pool.id}`, String(curPx))
-        reportReceipt('dex-desk-reanchor', 'anchored', 'saos-dex:desk', sha256Hex(JSON.stringify({ poolId: pool.id, prevAnchorPriceMu: anchor, newAnchorPriceMu: curPx, driftBps: verdict.driftBps })), 0)
-        log(`⚖️ ארון-הסיכונים: עיגון-עצמי ${anchor}µ→${curPx}µ (סטייה נמדדה ${verdict.driftBps}bps) — המסחר-המשיך, קבלה-חתומה`)
-      }
-      const inAsset = direction === 'baseToQuote' ? base : quote
-      const outAsset = direction === 'baseToQuote' ? quote : base
-      if (free(w, inAsset) < amountInMu)
-        return new Response(JSON.stringify({ ok: false, error: 'insufficient-free-funds' }), { status: 400, headers: cors })
-      let r: ReturnType<typeof applySwap>
-      try {
-        r = applySwap(pool, direction, amountInMu, minOutMu)
-      } catch (e) {
-        return new Response(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }), { status: 400, headers: cors })
-      }
-      // העברת-כספים: סוחר ← in, בריכה → out; עמלה+מחיק נשארים-בעתודות (A1)
-      w.balances[inAsset] = (w.balances[inAsset] ?? 0) - amountInMu
-      w.balances[outAsset] = (w.balances[outAsset] ?? 0) + r.outMu
-      saveWallet(w)
-      const pw = wallet(pool.walletName)
-      if (!pw) return new Response(JSON.stringify({ ok: false, error: 'pool-wallet-missing' }), { status: 500, headers: cors })
-      pw.balances[inAsset] = (pw.balances[inAsset] ?? 0) + amountInMu
-      pw.balances[outAsset] = (pw.balances[outAsset] ?? 0) - r.outMu
-      saveWallet(pw)
-      updatePoolRow(db, r.pool)
-      insertFillRow(db, { base, quote, side: `amm-${direction}`, priceMu: amountInMu > 0 ? Math.floor((r.outMu * 1_000_000) / amountInMu) : 0, amountMu: r.outMu, buyer: trader, seller: pool.walletName })
-      // סליקה-ל-fleet-economy (§2/§5): קבלה-hash-linked-על-השרשרת — best-effort
-      reportReceipt('dex-amm-swap', 'filled', `saos-dex:${trader}`, sha256Hex(JSON.stringify({ trader, base, quote, direction, amountInMu, outMu: r.outMu, height })), 0)
-      return new Response(JSON.stringify({ ok: true, trader, base, quote, direction, amountInMu, outMu: r.outMu, feeMu: r.feeMu, priceAfterMu: r.priceAfterMu, height: bump() }), { headers: cors })
+      // §7.1: החלפה-מיידית-פנימית — הליבה חיה ב-runAmmSwap (Task-141-b: משותפת-ללולאת-הלכידה)
+      const r = runAmmSwap({
+        trader: String(body.trader ?? ''),
+        base: String(body.base ?? ''),
+        quote: String(body.quote ?? ''),
+        direction: String(body.direction ?? ''),
+        amountInMu: Math.round(Number(body.amountInMu ?? 0)),
+        minOutMu: Math.round(Number(body.minOutMu ?? 0)),
+      })
+      if (!r.ok) return new Response(JSON.stringify({ ok: false, error: r.error, ...(r.extra ?? {}) }), { status: r.status, headers: cors })
+      return new Response(JSON.stringify({ ok: true, ...r.payload }), { headers: cors })
     }
 
     if (op === 'amm-add-lp') {

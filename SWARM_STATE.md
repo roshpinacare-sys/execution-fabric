@@ -26,3 +26,12 @@ execution-fabric (עץ-זה, 3000-אורגנים-10) · saos-dex · saos-desk ·
 2. כספות: חומר-מפתח-מעולם-לא-נכנס-לעץ/לוג/תשובת-API. טביעות-אצבע-בלבד.
 3. fail-closed: מצב-לא-מאומת = עצירה-כנה, לעולם-לא-המצאה.
 4. כל-הכשלים-נרשמים-על-הלוח — איסור-ירוק-מזויף (אנטי-greenwash).
+
+## תביעת-תחום — פעימת Task-141 (2026-10-26, ULTIMATE SWARM DIRECTIVE §1–§7)
+| תחום | נתיב | עובד | מצב-מדוד |
+|---|---|---|---|
+| עורק-FF (§4 שער-חוץ-חוץ) | mini-services/saos-grid/ff.ts + ff.test.ts + /home/z/.saos-secrets/ff.env (0600) | orchestrator (141-a) | root-fixed (מנתח-פורמט-הבעלים + HMAC-בסוד); FF משיב-501-ברמת-מפתח — כנה-על-הלוח |
+| saos-dex AMM (§4 בריכות-USDS) | mini-services/saos-dex/** | 141-b | 2 בריכות-חיות (WSTEEM/USDS, SAOS/USDS) + quotes-דו-צדדיים + fills 0→8 |
+| רשת-החיילים (§2/§3) | mini-services/saos-grid/** (למעט ff.ts) | 141-c + orchestrator | קציר-מסובב-5-חיילים + /rc-rebalance (no-op-כנה) + /content custody-gate |
+| צינורות (§5 FleetHQ/status) | sovereign/site/** + API-בעלים-רחוק | 141-d | press-bake #82-הצלחה; quality/report.json-לא-קיים-בשום-מקום (מתועד, לא-מומצא) |
+| ביקורת-מנעולים (§2 purge) | read-only + strips ב-engine.ts | 141-e + orchestrator | 19-KEEP-חוקיים / 2-STRIP-מומשו / שער-single-flight-חי (409-כנה) |
