@@ -11,6 +11,7 @@ import {
   MIN_LIQUIDITY,
   addLiquidityShares,
   applySwap,
+  poolMidMu,
   quoteSwap,
   seedPool,
   seedQuoteAtFairMu,
@@ -275,5 +276,36 @@ describe('AMM — תרחיש-הפעלה (Task-141-b): זריעה→סטייה→
     expect(k1).toBeGreaterThan(k0)
     const pxAfterCapture = Math.floor((r.pool.reserveQuoteMu * 1_000_000) / r.pool.reserveBaseMu)
     expect(pxAfterCapture).toBeGreaterThan(pxAfterProbe) // הבריכה נמשכה-חזרה אל-ה-fair
+  })
+})
+
+describe('poolMidMu — Task-142: מחיר-אמצע-הבריכה-כנזילות-דו-צדדית', () => {
+  test('סקאלת-הספר: floor(rq×1e6/rb)', () => {
+    // 100_000µ quote על 1_000_000µ בסיס → 100µ? לא: 100_000×1e6/1_000_000 = 100_000
+    expect(poolMidMu(1_000_000, 100_000)).toBe(100_000)
+    // זריעה-על-fair: seedQuoteAtFairMu(1_000_000, 120_000) → rq → px ≤ 120_000
+    const rq = seedQuoteAtFairMu(1_000_000, 120_000)
+    expect(poolMidMu(1_000_000, rq)).toBeLessThanOrEqual(120_000)
+    expect(poolMidMu(1_000_000, rq)).toBeGreaterThanOrEqual(119_999) // אובדן-עיגול ≤ 1µ ליחידת-בסיס-שלמה
+  })
+  test('רצפת-עיגול: px ≤ fairMu תמיד (לטובת-הבריכה, אין-רווח-פיקטיבי)', () => {
+    for (const fair of [10040, 100400, 1004000]) {
+      const rq = seedQuoteAtFairMu(903_533, fair)
+      const px = poolMidMu(903_533, rq)
+      expect(px).not.toBeNull()
+      expect(px!).toBeLessThanOrEqual(fair)
+    }
+  })
+  test('קצה-היסט: fair-זעיר עד-כדי-ריקון-rq→0 → אמצע-null-כנה (fail-closed, לא-0)', () => {
+    const rq = seedQuoteAtFairMu(903_533, 1) // floor(903533µ×1/1e6)=0 — אין-בריכה-אפשרית
+    expect(rq).toBe(0)
+    expect(poolMidMu(903_533, rq)).toBe(null)
+  })
+  test('fail-closed: קלט-פסול/אפס → null (לא-0-מזויף)', () => {
+    expect(poolMidMu(0, 100)).toBe(null)
+    expect(poolMidMu(100, 0)).toBe(null)
+    expect(poolMidMu(-5, 100)).toBe(null)
+    expect(poolMidMu(1.5, 100)).toBe(null)
+    expect(poolMidMu(NaN, 100)).toBe(null)
   })
 })

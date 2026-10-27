@@ -1,0 +1,69 @@
+{
+  "schema": "saos-execution-state/1",
+  "at": "2026-10-27T12:35:24.224Z",
+  "cycle": 1,
+  "totals": {
+    "pass": 306,
+    "fail": 0,
+    "suites": 6
+  },
+  "suites": [
+    {
+      "name": "saos-dex",
+      "ok": true,
+      "pass": 101,
+      "fail": 0
+    },
+    {
+      "name": "saos-wallet",
+      "ok": true,
+      "pass": 11,
+      "fail": 0
+    },
+    {
+      "name": "saos-grid",
+      "ok": true,
+      "pass": 122,
+      "fail": 0
+    },
+    {
+      "name": "saos-arb",
+      "ok": true,
+      "pass": 29,
+      "fail": 0
+    },
+    {
+      "name": "saos-architect",
+      "ok": true,
+      "pass": 23,
+      "fail": 0
+    },
+    {
+      "name": "fabric-heartbeat",
+      "ok": true,
+      "pass": 20,
+      "fail": 0
+    }
+  ],
+  "lintOk": true,
+  "allGreen": true,
+  "chain": {
+    "ok": true,
+    "verified": 251,
+    "head": "61a151b49088ad4db67732ade9e2ac60"
+  },
+  "git": {
+    "head": "1966baf",
+    "originSynced": true
+  },
+  "issues": {
+    "open": 7,
+    "filed": 0
+  },
+  "build": {
+    "attempts": 0,
+    "merged": 0,
+    "reverted": 0,
+    "lastVerdict": "no-buildable-issue (תור-ריק — כנות)"
+  }
+}

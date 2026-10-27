@@ -42,7 +42,7 @@ import { Database } from 'bun:sqlite'
 import { join, resolve } from 'path'
 import { existsSync, readFileSync, mkdirSync } from 'fs'
 import { free, finalizeTaker, matchOrderCore, type Order, type WalletRec } from './engine'
-import { addLiquidityShares, applySwap, quoteSwap, seedPool, type Pool } from './amm'
+import { addLiquidityShares, applySwap, poolMidMu, quoteSwap, seedPool, type Pool } from './amm'
 import { captureDueMs, captureStep, swapFillPriceMu } from './spread'
 import { DEFAULT_RISK, depthSingleCapMu, driftBps, preTradeGate, type RiskConfig, type RiskWindow } from './risk'
 import {
@@ -144,20 +144,24 @@ async function externalSteemUsd(): Promise<{ steemUsd: number | null; feedOk: bo
   return { steemUsd: ffCache.steemUsd, feedOk: ffCache.steemUsd !== null, feedStale: stale }
 }
 
-// ── פארים-חיים: fair = מחצי-הספר אם-יש-פקודות, אחרת-זרע-מתועד ────────────────
+// ── פארים-חיים: fair = מחצי-הספר → אמצע-הבריכה → זרע-מתועד (Task-142) ─────────
+// הבריכה היא נזילות-דו-צדדית אמת: כשהספר רזה, אמצע-הבריכה (poolMidMu) הוא ה-fair
+// החי — קודם-לכן poolMid-היה-מקודד-null-וה-fair-נפל-לזרע-סטטי (נמדד-ותוקן).
 function marketView(base: string, quote: string) {
   const { bids, asks } = bookOf(base, quote)
   const bestBid = bids[0]?.priceMu ?? null
   const bestAsk = asks[0]?.priceMu ?? null
   const spec = MARKETS.find((m) => m.base === base && m.quote === quote)!
   const mid = bestBid !== null && bestAsk !== null ? Math.round((bestBid + bestAsk) / 2) : bestBid ?? bestAsk ?? null
-  const fair = mid ?? spec.refSeedMu
+  const pool = poolByPairRow(db, base, quote)
+  const poolMid = pool ? poolMidMu(pool.reserveBaseMu, pool.reserveQuoteMu) : null
+  const fair = mid ?? poolMid ?? spec.refSeedMu
   return {
     base, quote, key: `${base}/${quote}`, fair,
     bestBid, bestAsk,
     spreadBps: bestBid !== null && bestAsk !== null ? Math.round(((bestAsk - bestBid) / ((bestAsk + bestBid) / 2)) * 10_000) : 0,
-    poolMid: null,
-    refSource: mid !== null ? 'book' : spec.refSource,
+    poolMid,
+    refSource: mid !== null ? 'book' : poolMid !== null ? 'pool' : spec.refSource,
   }
 }
 
@@ -385,7 +389,7 @@ function runAmmSwap(a: {
 // רק-על-רווח-אמת-אחרי-עמלה (captureStep — S1–S6, מוכח-בspread.test.ts). הביצוע
 // דרך runAmmSwap עצמו — שער-הסיכונים וה-fail-closed נאכפים-גם-על-היד. כל-החלטה
 // נחתמת-כן כאן וב-/health — אפס-ירי-מזויף, אפס-תרומת-עמלות-נסתרת.
-const CAPTURE_MS = envNum('SAOS_DEX_CAPTURE_MS', 15_000)
+const CAPTURE_MS = envNum('SAOS_DEX_CAPTURE_MS', 1_500) // Task-142: 15s→1.5s — תגובת-שער-לסטיית-בריכה (הירי-עדיין-רק-על-רווח-אמת)
 interface CaptureStats {
   armed: boolean
   everyMs: number

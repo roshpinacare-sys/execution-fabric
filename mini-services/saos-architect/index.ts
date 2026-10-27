@@ -18,12 +18,15 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { join, resolve } from 'node:path'
 import ZAI from 'z-ai-web-dev-sdk'
 import { buildVerdict, parseBuildContract, patchGuard, type BuildContract, type ProposedFile } from './build-lane'
-import { GENESIS, parseBunTestOutput, receiptHash, verifyChain, type ChainLine, type SuiteRow } from './core'
+import { GENESIS, buildExecutionState, buildQualityReport, parseBunTestOutput, receiptHash, verifyChain, type ChainLine, type SuiteRow } from './core'
 
 const PORT = 3086 // קבוע — חוזה-האיברים
 const ROOT = resolve(import.meta.dir, '..', '..')
 const STATE_DIR = join(import.meta.dir, 'state')
 const CHAIN_PATH = join(STATE_DIR, 'architect-chain.jsonl')
+// Task-142 (הדירקטיבה-המוחלטת §3): ארטיפקטי-מדינה-אמיתיים — נכתבים-בכל-מחזור-ממדידה-חיה
+const EXECUTION_STATE_PATH = join(STATE_DIR, 'execution-state.json')
+const QUALITY_REPORT_PATH = join(STATE_DIR, 'quality-report.json')
 const HEALS_LOG = join(ROOT, 'upload', 'architect-heals.jsonl')
 const CYCLE_MS = Number(process.env.SAOS_ARCHITECT_CYCLE_MS ?? 5 * 60_000)
 const FIRST_MS = Number(process.env.SAOS_ARCHITECT_FIRST_MS ?? 45_000)
@@ -443,6 +446,24 @@ async function architectCycle(): Promise<void> {
     state.lastIssues = issues
     state.lastChain = chainRes
     state.lastError = null
+    // 3.5 PUBLISH (Task-142 §3): execution-state.json + quality/report.json —
+    // ארטיפקטים-אמיתיים-מהמדידה-החיה-של-המחזור-הזה (לא-דור-אחד-מוקדם, אין-המצאה).
+    try {
+      const stateInput = {
+        at: rec.at,
+        cycle: rec.cycle,
+        chain: { ok: chainRes.ok, verified: chainRes.verified, head: chainRes.head },
+        git: { head, originSynced: synced },
+        suites,
+        lintOk: lint.ok,
+        issues: { open: issues.open, filed },
+        build: { attempts: buildState.attempts, merged: buildState.merged, reverted: buildState.reverted, lastVerdict: buildState.lastVerdict },
+      }
+      writeFileSync(EXECUTION_STATE_PATH, JSON.stringify(buildExecutionState(stateInput), null, 2) + '\n')
+      writeFileSync(QUALITY_REPORT_PATH, JSON.stringify(buildQualityReport(stateInput), null, 2) + '\n')
+    } catch (e) {
+      log(`הפצת-ארטיפקטי-מדינה-נכשלה-כן: ${e instanceof Error ? e.message : String(e)}`)
+    }
     const red = suites.filter((s) => !s.ok).map((s) => s.name)
     log(
       `מחזור-${state.cycles} (${Date.now() - t0}ms): סוללות ${suites.filter((s) => s.ok).length}/${suites.length} ירוקות` +
@@ -465,6 +486,17 @@ const cors = { 'content-type': 'application/json; charset=utf-8', 'cache-control
 
 async function handle(req: Request): Promise<Response> {
   const p = new URL(req.url).pathname
+  // Task-142 (§3): ארטיפקטי-המדינה-נגישים-מיד — קריאה-טהורה מהקובץ-האחרון-שנכתב.
+  // fail-closed: אין-קובץ (המחזור-הראשון-טרם-רץ) → 404-כן, אף-ירוק-מזויף.
+  if (p === '/execution-state' || p === '/quality-report') {
+    const path = p === '/execution-state' ? EXECUTION_STATE_PATH : QUALITY_REPORT_PATH
+    try {
+      if (!existsSync(path)) return new Response(JSON.stringify({ ok: false, error: 'not-yet-baked (first cycle pending)' }), { status: 404, headers: cors })
+      return new Response(readFileSync(path, 'utf-8'), { headers: cors })
+    } catch (e) {
+      return new Response(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }), { status: 500, headers: cors })
+    }
+  }
   if (p === '/health' || p === '/') {
     return new Response(JSON.stringify({
       ok: true,

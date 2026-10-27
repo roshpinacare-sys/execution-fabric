@@ -67,6 +67,16 @@ export function seedPool(base: string, quote: string, reserveBaseMu: number, res
   return { base, quote, reserveBaseMu: rb, reserveQuoteMu: rq, feeBps, lpSharesMu: shares }
 }
 
+// ── צינור-צינור-חי (Task-142 — הדירקטיבה-המוחלטת §1: הבריכה היא נזילות-דו-צדדית)
+// מחיר-אמצע-הבריכה בסקאלת-הספר (µ-quote ליחידת-בסיס-שלמה) — floor(rq×1e6/rb),
+// אותה-סקאלה-של-refSeedMu/book/spread. אפס-עתודה/קלט-פסול → null (fail-closed,
+// לא-0-מזויף). טהור-ודטרמיניסטי.
+export function poolMidMu(reserveBaseMu: number, reserveQuoteMu: number): number | null {
+  if (!Number.isSafeInteger(reserveBaseMu) || !Number.isSafeInteger(reserveQuoteMu)) return null
+  if (reserveBaseMu <= 0 || reserveQuoteMu <= 0) return null
+  return Math.floor((reserveQuoteMu * 1_000_000) / reserveBaseMu)
+}
+
 // ── זריעה-על-מחיר-ה-fair (Task-141-b — הפעלת-הבריכות) ────────────────────────
 // חוזה-הזריעה-הכן: צד-ה-quote מחושב-כך-שמחיר-הבריכה ברגע-היוולדה יהיה-בדיוק
 // מחיר-ה-fair של הספר (µ-quote ליחידת-בסיס-שלמה — סקאלת-refSeedMu/book):

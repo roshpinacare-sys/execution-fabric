@@ -96,3 +96,54 @@ describe('parseBunTestOutput — ניתוח-פלט-bun-test', () => {
     expect(parseBunTestOutput('segmentation fault')).toEqual({ pass: 0, fail: 0 })
   })
 })
+
+// ═══ Task-142: ארטיפקטי-מדינה (execution-state / quality-report) ═══
+import { buildExecutionState, buildQualityReport, type ExecutionStateInput } from './core'
+
+const INPUT: ExecutionStateInput = {
+  at: '2026-10-27T12:00:00.000Z',
+  cycle: 15,
+  chain: { ok: true, verified: 14, head: 'abc123' },
+  git: { head: 'deadbee', originSynced: true },
+  suites: [
+    { name: 'saos-dex', ok: true, pass: 101, fail: 0 },
+    { name: 'saos-grid', ok: true, pass: 122, fail: 0 },
+    { name: 'saos-arb', ok: false, pass: 27, fail: 2 },
+  ],
+  lintOk: true,
+  issues: { open: 1, filed: 0 },
+  build: { attempts: 3, merged: 1, reverted: 0, lastVerdict: 'honest-empty' },
+}
+
+describe('buildQualityReport — Task-142', () => {
+  test('סכומים-מדויקים-מהסוללות (אין-המצאה)', () => {
+    const r = buildQualityReport(INPUT)
+    expect(r.schema).toBe('saos-quality-report/1')
+    expect(r.totals).toEqual({ pass: 250, fail: 2, suites: 3 })
+    expect(r.allGreen).toBe(false) // יש-2-כשלונות — כנה-אדום
+    expect(r.lintOk).toBe(true)
+  })
+  test('allGreen-ירוק רק-כשיש-בדיקות-ואפס-כשלונות', () => {
+    const green = buildQualityReport({ ...INPUT, suites: [{ name: 'x', ok: true, pass: 5, fail: 0 }] })
+    expect(green.allGreen).toBe(true)
+    const empty = buildQualityReport({ ...INPUT, suites: [] })
+    expect(empty.allGreen).toBe(false) // אפס-בדיקות ≠ ירוק
+  })
+})
+
+describe('buildExecutionState — Task-142', () => {
+  test('מרחיב-את-הדוח-בשרשרת/git/issues/build — כל-השדות-מהמדידה', () => {
+    const s = buildExecutionState(INPUT)
+    expect(s.schema).toBe('saos-execution-state/1')
+    expect(s.chain).toEqual({ ok: true, verified: 14, head: 'abc123' })
+    expect(s.git).toEqual({ head: 'deadbee', originSynced: true })
+    expect(s.issues).toEqual({ open: 1, filed: 0 })
+    expect(s.build.lastVerdict).toBe('honest-empty')
+    expect(s.totals.pass).toBe(250)
+  })
+  test('null-כנה-נשמר (originSynced-לא-נמדד → null, לא-false-מזויף)', () => {
+    const s = buildExecutionState({ ...INPUT, git: { head: 'x', originSynced: null }, lintOk: null })
+    expect(s.git.originSynced).toBe(null)
+    expect(s.lintOk).toBe(null)
+  })
+})

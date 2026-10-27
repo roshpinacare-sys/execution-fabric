@@ -84,3 +84,61 @@ export function parseBunTestOutput(out: string): { pass: number; fail: number } 
     fail: fail ? Number(fail[1]) : 0,
   }
 }
+
+// ═══ Task-142 (הדירקטיבה-המוחלטת §3): ארטיפקטי-מדינה-אמיתיים ═══
+// execution-state.json + quality/report.json — נולדו-ממחזור-אמת-של-הארכיטקט.
+// לפני-כן-לא-היו-קיימים-בשום-מקום (נמדד-26/10-Task-141-d — לא-הומצאו-שם).
+// כל-שדה-מדידה-חיה-של-המחזור; אין-ברירת-מחדל-מזויפת; null-כנה-נשמר-כ-null.
+export interface ExecutionStateInput {
+  at: string
+  cycle: number
+  chain: { ok: boolean; verified: number; head: string }
+  git: { head: string; originSynced: boolean | null }
+  suites: SuiteRow[]
+  lintOk: boolean | null
+  issues: { open: number; filed: number }
+  build: { attempts: number; merged: number; reverted: number; lastVerdict: string | null }
+}
+
+export interface QualityReportDoc {
+  schema: 'saos-quality-report/1'
+  at: string
+  cycle: number
+  totals: { pass: number; fail: number; suites: number }
+  suites: SuiteRow[]
+  lintOk: boolean | null
+  allGreen: boolean
+}
+
+export interface ExecutionStateDoc extends QualityReportDoc {
+  schema: 'saos-execution-state/1'
+  chain: { ok: boolean; verified: number; head: string }
+  git: { head: string; originSynced: boolean | null }
+  issues: { open: number; filed: number }
+  build: { attempts: number; merged: number; reverted: number; lastVerdict: string | null }
+}
+
+export function buildQualityReport(input: ExecutionStateInput): QualityReportDoc {
+  const pass = input.suites.reduce((s, x) => s + x.pass, 0)
+  const fail = input.suites.reduce((s, x) => s + x.fail, 0)
+  return {
+    schema: 'saos-quality-report/1',
+    at: input.at,
+    cycle: input.cycle,
+    totals: { pass, fail, suites: input.suites.length },
+    suites: input.suites.map((s) => ({ name: s.name, ok: s.ok, pass: s.pass, fail: s.fail })),
+    lintOk: input.lintOk,
+    allGreen: pass > 0 && fail === 0,
+  }
+}
+
+export function buildExecutionState(input: ExecutionStateInput): ExecutionStateDoc {
+  return {
+    ...buildQualityReport(input),
+    schema: 'saos-execution-state/1',
+    chain: { ok: input.chain.ok, verified: input.chain.verified, head: input.chain.head },
+    git: { head: input.git.head, originSynced: input.git.originSynced },
+    issues: { open: input.issues.open, filed: input.issues.filed },
+    build: { attempts: input.build.attempts, merged: input.build.merged, reverted: input.build.reverted, lastVerdict: input.build.lastVerdict },
+  }
+}
