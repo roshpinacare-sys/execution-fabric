@@ -3040,3 +3040,24 @@ Work Log:
 
 Stage Summary:
 - חסם-הדליפות-נשאר-fail-closed-ומלא-עוצמה — שום-פטור-לא-נרשם; הרפואה-הייתה-במקור-התוכן, לא-בשער.
+---
+Task ID: 143
+Agent: Z.ai Code (orchestrator)
+Task: הוראת-הבעלים "תראה-באתר-שלהם-ותפעיל-הכל" — הפעלת-מפתח-FF-לפי-ה-docs-החיים; עורק-FF-נפתח-מקצה-לקצה.
+
+Work Log:
+- MEASURED FIRST: grid-עורק-היה-401/501-כנה; ניגשתי-ל-docs-הרשמיים-מהאתר-שלהם (https://fixedfloat.com/api → שלוף-חי-186KB → חילוץ-טקסט).
+- **שורש-אמיתי-שלישי-של-ה-501** (הפעם-מהמקור-הרשמי-עצמו): FixedFloat העבירו-את-ה-API-ל-ff.io. ה-docs-החיים-קובעים: POST https://ff.io/api/v2/{ccies,price,create,order,qr} עם-כותרות X-API-KEY/X-API-SIGN (+Content-Type-charset). המארח-הישן fixedfloat.com/api/v2 עם-כותרות APIKey/Payload/Signature משיב-401/501-עד-היום — מדוד-חי-ב-5-וריאנטים. שמות-מתודות-השתנו: getCurrencies→ccies.
+- בדיקה-חיה-מול-השרת-עם-הכתובות-מהכספת: ff.io/ccies-X-API-** → HTTP-200-code:0, 71-מטבעות. **המפתח-היה-תקף-כל-הזמן** — לא-הייתה-בעיית-הפעלה/IP-כלל. ועוד-אומת-חי: price-BTC→ETH-ו-BTC→BTCLN-מחזירים-שערים-אמיתיים-עם-min/max/errors.
+- כנות-נמדדה: STEEM-אינו-נתמך-ב-FF (71-מטבעות, אפס-STEEM-like) — העורק-להמרת-קריפטו-חוץ (BTC/ETH/LN/USDT…), לא-STEEM-ישיר.
+- TDD-grid (ff.ts-שכתוב-לחוזה-הרשמי): FF_API=ff.io, כותרות-X-API-KEY/X-API-SIGN-בלי-Payload/APIKey/Signature, בלי-הזרקת-version, גוף-JSON-הפרמטרים-בדיוק; ffPrice-נולד (עורק-שערים-דו-צדדי-fixed/float); probe→ccies-עם-הצורה-החדשה. ff.test.ts: 21-בדיקות (מנתחים+חתימה+חוזה-fetch-מדומה+skipIf-אין-כספת).
+- כספות-שוחזרו-אחרי-שחזור-הסנדבוקס: /home/z/.saos-secrets/ff.env-0600 (עדיפות-1) + upload/ff.env-0600 (עדיפות-2) + **.env.local-0600-עם-FIXEDFLOAT_API_*** (לספריית-הקופה של-Task-101).
+- באג-אמיתי-שני-נתפס-חי-בספריית-הקופה (src/lib/fixedfloat.ts): אחרי-שחזור-.env.local השרת-עדיין-דיווח-POST-"מפתח-לא-מוגדר" בזמן-ש-GET-ראה-מפתח — Turbopack-מחליף-process.env-סטטית-לפי-snapshot-קומפילציה-ישן (ה-pitfall-המתועד-בספרייה). רפואה-שורשית: ffVaultParse-טהור (5-טסטים) + ffVaultRead-קריאת-דיסק-חיה-בזמן-ריצה (.env.local → .saos-secrets) — עמיד-לכל-החלפה-סטטית; ffCall-עבר-ל-ffCredsValue-ולחתימה-על-'{}'-כחוזה-docs (מדוד-חי).
+- הפעלה-חיה-מאומתת-קצה-לקצה: (1) grid /ff → source=.saos-secrets/ff.env, authorized:true, 71-מטבעות; (2) engine-ffRail-התהפך-אוטונומית-לירוק (ok:true, "currencies=71") במחזור-הדופק; (3) מסלול-הקופה-באפליקציה-הראשית: POST-ping → authVerified:true, 71-מטבעות-(65-recv/64-send)-294ms, חתום-בשרשרת-האמת-kind=TREASURY; POST-price-BTC→USDT-חי: 0.001-BTC→79.399-USDT-ב-455ms.
+- צי-נבדק-בעקבות-pkill-זהירות-שלי: 10/10-שירותים-חיים (dex-height-119, arb-27-מחזורים-0-שגיאות).
+
+Stage Summary:
+- עורק-FF-פתוח-מקצה-לקצה-בשני-המסלולים (grid-דופק-אוטונומי + קופה-באפליקציה) — הפתוח-הכנה-היחיד-מ-Task-141/142-נסגר.
+- השורש-היה-שלישי-ואחר: מארח-זז (fixedfloat.com→ff.io) + כותרות-שונו + מתודות-שונו. אף-הרשאה/IP-לא-היה-חסום.
+- סוויטות: grid-131, dex-101, arb-29, architect-23, heart-20, wallet-11, app-lib-5 = **320/0**; lint-0. אפס-TODO/mock.
+- כנות-פתוחה-יחידה: FF-לא-תומך-STEEM — המרת-STEEM-ישירה-לא-אפשרית-דרך-FF; העורק-משרת-קריפטו-חוץ-והזרמת-שערים. create-נשאר-נעול-בשער-הסיכון (חוק-KEEP).

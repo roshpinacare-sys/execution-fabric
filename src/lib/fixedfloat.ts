@@ -1,4 +1,6 @@
 import { createHmac } from 'crypto'
+import { readFileSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
 
 // ===== עורק-הקופה (Task 101) — לקוח FixedFloat, שרת-בלבד =====
 //
@@ -24,10 +26,56 @@ function envGet(name: string): string | undefined {
   return (process.env as Record<string, string | undefined>)[name]
 }
 
+// ─── Task-143: קריאת-כספת-מהדיסק-בזמן-ריצה ───
+// מדידה-חיה (27/10): אחרי-שחזור-סנדבוקס .env.local חזר, GET-ראה-מפתח-ועדיין
+// POST-דיווח "מפתח-הקופה לא-מוגדר" — גרף-הקומפילציה-של-POST-החזיק-snapshot-env-ישן.
+// הרפואה-העמידה: קריאת-קובץ-חיה-מהדיסק-בזמן-ריצה — עמידה-לכל-החלפה-סטטית.
+// סדר-קדימויות: process.env → .env.local (0600, מחוץ-לגיט) → /home/z/.saos-secrets/ff.env.
+
+/** מנתח-טהור-של-תוכן-כספת (FIXEDFLOAT_API_* או FF_API_*) — null-אם-חסר/קצר-מדי */
+export function ffVaultParse(text: string): { key: string; secret: string } | null {
+  let key: string | null = null
+  let secret: string | null = null
+  for (const line of text.split('\n')) {
+    const t = line.trim()
+    if (!t || t.startsWith('#')) continue
+    const eq = t.indexOf('=')
+    if (eq < 0) continue
+    const k = t.slice(0, eq).trim().toUpperCase()
+    const v = t.slice(eq + 1).trim()
+    if (!v) continue
+    if ((k === 'FIXEDFLOAT_API_KEY' || k === 'FF_API_KEY') && !key) key = v
+    if ((k === 'FIXEDFLOAT_API_SECRET' || k === 'FF_API_SECRET') && !secret) secret = v
+  }
+  if (key && secret && key.length >= 16 && secret.length >= 16) return { key, secret }
+  return null
+}
+
+function ffVaultRead(): { key: string; secret: string } | null {
+  const paths = [join(process.cwd(), '.env.local'), '/home/z/.saos-secrets/ff.env']
+  for (const p of paths) {
+    try {
+      if (!existsSync(p)) continue
+      const r = ffVaultParse(readFileSync(p, 'utf-8'))
+      if (r) return r
+    } catch {
+      // קריאה-כושלת-על-נתיב-אחד → ממשיכים-לנתיב-הבא; אין-לוג-של-תוכן
+    }
+  }
+  return null
+}
+
+/** הכתובות-בשמן: env-קודם, ואז-קריאת-דיסק-חיה. הערכים-לא-נודפים-מעולם. */
+function ffCredsValue(): { key: string; secret: string } | null {
+  const k = envGet('FIXEDFLOAT_API_KEY') ?? ''
+  const s = envGet('FIXEDFLOAT_API_SECRET') ?? ''
+  if (k.length >= 16 && s.length >= 16) return { key: k, secret: s }
+  return ffVaultRead()
+}
+
 export function ffConfigured(): { key: boolean; secret: boolean } {
-  const key = envGet('FIXEDFLOAT_API_KEY') ?? ''
-  const secret = envGet('FIXEDFLOAT_API_SECRET') ?? ''
-  return { key: key.length >= 16, secret: secret.length >= 16 }
+  const c = ffCredsValue()
+  return { key: !!c, secret: !!c }
 }
 
 // אבחון-זמני (Task 101): מה-המודול עצמו רואה מתוך-process.env — בוליאנים-בלבד
@@ -60,23 +108,25 @@ export interface FfResult<T = unknown> {
 // מקוצצת בלבד — לעולם לא את הכותרות, את הגוף החתום או את חומר-המפתח.
 async function ffCall<T>(method: string, params?: Record<string, unknown>): Promise<FfResult<T>> {
   const t0 = Date.now()
-  const cfg = ffConfigured()
-  if (!cfg.key || !cfg.secret) {
+  const creds = ffCredsValue()
+  if (!creds) {
     return { ok: false, http: 0, code: null, msg: 'מפתח-הקופה לא-מוגדר', data: null, errorClass: 'unconfigured', durationMs: 0 }
   }
-  // חוק-החתימה: הגוף המדויק שנחתם = הגוף שנשלח. בלי-פרמטרים = מחרוזת-ריקה.
-  const body = params && Object.keys(params).length > 0 ? JSON.stringify(params) : ''
-  const sign = createHmac('sha256', envGet('FIXEDFLOAT_API_SECRET') ?? '').update(body).digest('hex')
+  // חוק-החתימה: הגוף המדויק שנחתם = הגוף שנשלח.
+  // Task-143 (מדוד-חי-מול-השרת): הגוף-הוא-JSON-הפרמטרים-תמיד ('{}' כשאין-פרמטרים —
+  // כחוזה-ה-docs: json.dumps({})) — והחתימה-על-אותו-גוף-בדיוק.
+  const body = JSON.stringify(params ?? {})
+  const sign = createHmac('sha256', creds.secret).update(body).digest('hex')
   try {
     const res = await fetch(`${FF_ENDPOINT}/${method}`, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json; charset=UTF-8',
-        'X-API-KEY': envGet('FIXEDFLOAT_API_KEY') ?? '',
+        'X-API-KEY': creds.key,
         'X-API-SIGN': sign,
       },
-      ...(body ? { body } : {}),
+      body,
       signal: AbortSignal.timeout(FF_TIMEOUT_MS),
       cache: 'no-store',
     })
