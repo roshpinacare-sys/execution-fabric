@@ -1,12 +1,18 @@
 // ===== עורק-FF — FixedFloat: שער-ההמרה של התוצרת לכסף-אמיתי (BTC/ETH/SOL…) =====
-// Task-141-a: תיקון-שורש-כפול שנמדד-חי (26/10):
+// Task-141-a (26/10): תיקון-שורש-כפול שנמדד-חי:
 //   1) מנתח-הכספת-הישן-לא-מצא-את-פורמט-ההודעות-של-הבעלים ("[ts] Head Corner: Api key"
 //      ואחריו-שורת-אסימון-עם-תחילית-הודעה) → keyFound:false תמידי → העורק-לא-ניסה-אפילו.
 //   2) החתימה-הישנה-הייתה-HMAC(Payload, ApiKey) — לפי-FixedFloat-API-v2 החתימה-היא
 //      HMAC-SHA256(Payload, ApiSecret). הסוד-מעולם-לא-נפרס-כלל.
+// Task-143 (27/10): השורש-האמיתי-של-ה-501 — FixedFloat העבירו-את-ה-API-ל-ff.io.
+//   מדוד-חי-מול-השרת: המארח-הישן fixedfloat.com/api/v2 עם-כותרות APIKey/Payload/Signature
+//   משיב-401/501 "Not have permission"; המארח-הרשמי ff.io/api/v2 עם-כותרות
+//   X-API-KEY/X-API-SIGN מחזיר-code:0 עם-אותם-ממש-כתובות → המפתח-היה-תקף-כל-הזמן.
+//   שמות-המתודות-הרשמיים: ccies (היה-getCurrencies), price, create, order, qr.
 // חוק-כספות: מפתחות-מעולם-לא-יוצאים-מהמכונה/לעץ/לוגים. סדר-קריאה:
 //   /home/z/.saos-secrets/ff.env (מחוץ-לעץ, 0600) → upload/ff.env → upload/fffixedflot.txt.
 // כנות: כל-תשובה-כושלת-מדווחת-בשמה; אין-המצאת-זוגות-או-שערים; fail-closed-בלי-סוד.
+// STEEM-לא-נתמך-ב-FF (מדוד-חי 27/10: 71-מטבעות-ואין-STEEM) — העורק-להמרת-קריפטו-חוץ (BTC/ETH/LN…).
 
 import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -14,7 +20,8 @@ import { createHmac } from 'node:crypto'
 
 const ROOT = join(import.meta.dir, '..', '..')
 const SECRETS_DIR = process.env.FF_SECRETS_DIR || '/home/z/.saos-secrets'
-const FF_API = 'https://fixedfloat.com/api/v2'
+// Task-143: המארח-הרשמי-מה-docs-החיים (https://ff.io/api) — לא-המארח-הישן-שמחזיר-501
+const FF_API = 'https://ff.io/api/v2'
 
 export type FfCreds = { key: string; secret: string; source: string }
 export type FfCredsMissing = { key: null; secret: null; source: string }
@@ -93,29 +100,36 @@ export function ffCreds(): FfCreds | FfCredsMissing {
   return { key: null, secret: null, source: 'לא-נמצא-מפתח-בכספת' }
 }
 
-/** חתימת-FixedFloat-API-v2: Signature = HMAC-SHA256(Payload, ApiSecret) */
+/** חתימת-FixedFloat-API-v2: X-API-SIGN = HMAC-SHA256(bodyJson, ApiSecret) */
 export function ffSign(payload: string, secret: string): string {
   return createHmac('sha256', secret).update(payload).digest('hex')
 }
 
+/** שליחה-לחוזה-הרשמי: POST {FF_API}/{method} עם-כותרות X-API-KEY/X-API-SIGN.
+ * Task-143: אין-כותרות-ישנות (APIKey/Payload/Signature — מדוד: מחזירות-501),
+ * ואין-הזרקת-version — הגוף-הוא-JSON-הפרמטרים-בדיוק-כחוזה-ה-docs. */
 export async function ffPost<T>(
   method: string,
   body: Record<string, unknown>,
 ): Promise<{ ok: true; data: T } | { ok: false; error: string; unauthorized?: boolean }> {
   const c = ffCreds()
   if (!c.key || !c.secret) return { ok: false, error: `כספת-FF-חסרה (${c.source})` }
-  const payload = JSON.stringify({ ...body, version: 2 })
+  const payload = JSON.stringify(body)
   const sig = ffSign(payload, c.secret)
   try {
     const res = await fetch(`${FF_API}/${method}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', APIKey: c.key, Payload: payload, Signature: sig },
+      headers: {
+        'content-type': 'application/json; charset=UTF-8',
+        'X-API-KEY': c.key,
+        'X-API-SIGN': sig,
+      },
       body: payload,
       signal: AbortSignal.timeout(10_000),
     })
     const text = await res.text()
     if (!res.ok) {
-      // 401/FF-501 "Not have permission" = דחייה-ברמת-המפתח-בצד-FF (הפעלה/IP-allowlist)
+      // 401 = דחייה-ברמת-המפתח/כותרות — נרשם-בשמו, לא-מזויף-כהצלחה
       const unauthorized = res.status === 401
       return { ok: false, error: `HTTP ${res.status}: ${text.slice(0, 200)}`, unauthorized }
     }
@@ -129,10 +143,47 @@ export async function ffPost<T>(
   }
 }
 
+// ─── עורק-השערים (Task-143): price/create/order לפי-החוזה-הרשמי ───
+export type FfSide = {
+  code: string
+  network: string
+  coin: string
+  amount: number
+  rate: number
+  min: number
+  max: number
+  usd: number
+}
+export type FfQuote = { from: FfSide; to: FfSide; errors: string[] }
+
+export type FfPriceParams = {
+  fromCcy: string
+  toCcy: string
+  amount: string
+  type?: 'fixed' | 'float'
+  direction?: 'from' | 'to'
+}
+
+/** שער-חי-מ-FF — דו-צדדי (direction=from/to), float/fixed. כנות: שגיאות-FF-חוזרות-בשמן. */
+export async function ffPrice(
+  p: FfPriceParams,
+): Promise<{ ok: true; quote: FfQuote } | { ok: false; error: string }> {
+  const body: Record<string, unknown> = {
+    fromCcy: p.fromCcy,
+    toCcy: p.toCcy,
+    type: p.type ?? 'float',
+    direction: p.direction ?? 'from',
+    amount: p.amount,
+  }
+  const r = await ffPost<FfQuote>('price', body)
+  if (!r.ok) return { ok: false, error: r.error }
+  return { ok: true, quote: r.data }
+}
+
 export type FfStatus = {
   keyFound: boolean
   source: string
-  /** null = לא-נמדד; true = מאושר; false = נדחה-ברמת-המפתח-ב-FF (הפעלה/IP) */
+  /** null = לא-נמדד; true = מאושר; false = נדחה (HTTP-401/FF-501) */
   authorized: boolean | null
   currencies: number | null
   steemSupported: boolean
@@ -140,6 +191,15 @@ export type FfStatus = {
   samplePairs: string[]
   lastError: string | null
   checkedAt: string | null
+}
+
+export type FfCurrency = {
+  code: string
+  coin: string
+  network: string
+  name: string
+  recv: number
+  send: number
 }
 
 let cache: FfStatus | null = null
@@ -163,7 +223,8 @@ export async function probe(force = false): Promise<FfStatus> {
     cache = out
     return out
   }
-  const r = await ffPost<{ currencies: Array<{ network: string; code: string; name: string }> }>('getCurrencies', {})
+  // Task-143: המתודה-הרשמית-היא-ccies (הישנה-getCurrencies-מתה-עם-המארח-הישן)
+  const r = await ffPost<FfCurrency[]>('ccies', {})
   if (!r.ok) {
     out.authorized = r.unauthorized === true ? false : null
     out.lastError = r.error
@@ -171,10 +232,10 @@ export async function probe(force = false): Promise<FfStatus> {
     return out
   }
   out.authorized = true
-  const cur = r.data.currencies ?? []
+  const cur = Array.isArray(r.data) ? r.data : []
   out.currencies = cur.length
-  out.steemSupported = cur.some((x) => /steem/i.test(x.code) || /steem/i.test(x.network))
-  out.btcSupported = cur.some((x) => /btc/i.test(x.code))
+  out.steemSupported = cur.some((x) => /steem/i.test(x.coin) || /steem/i.test(x.network))
+  out.btcSupported = cur.some((x) => /^btc$/i.test(x.coin))
   out.samplePairs = cur.slice(0, 12).map((x) => x.code)
   cache = out
   return out
