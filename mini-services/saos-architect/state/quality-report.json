@@ -1,7 +1,7 @@
 {
   "schema": "saos-quality-report/1",
-  "at": "2026-10-27T15:25:37.341Z",
-  "cycle": 35,
+  "at": "2026-11-06T09:10:19.307Z",
+  "cycle": 1,
   "totals": {
     "pass": 315,
     "fail": 0,
